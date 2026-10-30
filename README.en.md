@@ -6,7 +6,8 @@
 
 - Host: DeepSeek Harness (DSH) `>=0.2.1-rc.5 <0.3.0` (Desktop / Web)
 - Package: `dsh-flowgate`, MIT licensed
-- Status: **v0.1 in development** (feature status table below; anything not done is marked as planned)
+- Repository: <https://github.com/ChthollyWn/dsh-flowgate>
+- Status: **v0.1 in development** (feature status table below; anything not done is marked as planned — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md) for actual status and known gaps)
 
 ---
 

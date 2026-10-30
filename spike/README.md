@@ -50,7 +50,7 @@ J
 cat > /tmp/fg-home/profiles/spike/cordis.patch.yml <<'Y'
 - insert:
     - id: flowgate-spike
-      name: /Users/chtholly/Developer/WorkSpace/dsh-flowgate/spike/lib/index.js
+      name: /path/to/dsh-flowgate/spike/lib/index.js
 Y
 
 export DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"

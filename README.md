@@ -6,7 +6,8 @@
 
 - 宿主：DeepSeek Harness（DSH）≥ `0.2.1-rc.5 < 0.3.0`（Desktop / Web）
 - 包名：`dsh-flowgate`，MIT 许可
-- 状态：**v0.1 开发中**（功能状态见下文表格，未完成的明确标为规划中）
+- 仓库：<https://github.com/ChthollyWn/dsh-flowgate>
+- 状态：**v0.1 开发中**（功能状态见下文表格，未完成的明确标为规划中；实现状态与已知缺口见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)）
 
 ---
 
@@ -247,6 +248,8 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 ## 开发
 
 ```bash
+git clone https://github.com/ChthollyWn/dsh-flowgate.git
+cd dsh-flowgate
 pnpm install
 pnpm lint        # 分层 lint + tsc --noEmit
 pnpm test        # vitest（含 core / host / client / 集成测试）

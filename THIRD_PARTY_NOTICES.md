@@ -63,3 +63,9 @@ FlowGate 是 DeepSeek Harness（DSH）的插件，运行时通过 DSH 的公开�
 - 上游方法论：署名来源、不复制内容；如上游作者认为某处引用不当，可提 issue 更正。
 - 示例仓库中的依赖：遵循各自许可；在示例仓库内运行、修改、分发时请遵守对应许可。
 - 本文件随方法来源表一起季度复查（见 `docs/method-sources.md` §4）。
+
+## 5. DSH 官方文档参考（docs/reference/）
+
+`docs/reference/dsh-0.2.1-rc.5/` 收录了从本机安装的 DeepSeek Harness **0.2.1-rc.5** 安装包导出的 28 份官方包 README，仅作开发期接口参考。这些文档的版权归 DeepSeek Harness 项目所有；其 npm 包元数据声明为 **MIT**。
+`docs/impl/dsh-plugin-api-cheatsheet.md` 中的类型签名与行号引用同理，来自对应 npm 包（`@deepseek-ai/*@0.2.1-rc.5`，MIT）的公开类型声明。
+本仓库不修改这些正文内容，也不把它们打包进发布物（`package.json` 的 `files` 不含 `docs/`）。

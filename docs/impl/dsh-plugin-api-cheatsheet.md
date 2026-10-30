@@ -603,7 +603,7 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 "$DSH_APP/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --from-default-profile web --help  # 触发 profile 初始化（--help 不启动服务）
 # 2) 把插件 link 进该 profile（两种等价）
 cd "$DSH_HOME/profiles/flowgate"
-pnpm add link:/Users/chtholly/Developer/WorkSpace/dsh-flowgate      # plugin-manager/CLI 推荐 spec
+pnpm add link:/path/to/dsh-flowgate      # plugin-manager/CLI 推荐 spec
 # 或者在 profile/package.json 的 dependencies 写 "dsh-flowgate": "link:/abs/path"，再 pnpm install
 # 3) 在 profile/cordis.patch.yml 插入自己的行（或让插件 bundle patch 生效：把包名加进 dsh.profile.bundles）
 # 4) 组合校验（不启动、不导入插件）
@@ -624,7 +624,7 @@ pnpm add link:/Users/chtholly/Developer/WorkSpace/dsh-flowgate      # plugin-man
 - **默认 `root: []` 只做配置热重载**。要模块热替换，在 profile patch 里给它配置（`dsh-hmr` README L27-36）：
   ```yaml
   - id: hmr
-    config: { root: ['/Users/chtholly/Developer/WorkSpace/dsh-flowgate'] }
+    config: { root: ['/path/to/dsh-flowgate'] }
   ```
 - 已安装包的 `lib/` 文件原地变化也会在下一次 recompose 时生效（含 link 包）。改 client bundle 后页面需要重新拉取（graph rev 由 mtime/ctime/size 决定，会换 URL；必要时刷新页面）。
 - HMR 只会替换经 Loader 导入的模块；纯运行时 `import()` 的代码不保证。
@@ -728,7 +728,7 @@ J
 cat > /tmp/fg-home/profiles/spike/cordis.patch.yml <<'Y'
 - insert:
     - id: flowgate-spike
-      name: /Users/chtholly/Developer/WorkSpace/dsh-flowgate/spike/lib/index.js
+      name: /path/to/dsh-flowgate/spike/lib/index.js
 Y
 
 export DSH=/Applications/DeepSeek\ Harness.app/Contents/Resources/runtime/cli/bin/dsh
@@ -741,7 +741,7 @@ DSH_HOME=/tmp/fg-home "$DSH" --profile spike --dump-config-schema
   ```yaml
   # == /tmp/fg-home/profiles/spike/cordis.patch.yml
   - id: flowgate-spike
-    name: file:///Users/chtholly/Developer/WorkSpace/dsh-flowgate/spike/lib/index.js
+    name: file:///path/to/dsh-flowgate/spike/lib/index.js
   ```
 - `--dump-config-schema` 退出码 0、stdout 10.5KB JSON，内容含 `flowgate` 5 处（该命令会**导入**每个组合模块读 Config schema → 证明真实 DSH 进程能 import 我们的 host 入口）。
 

@@ -8,7 +8,7 @@
 ## 0. 一键离线检查（不需要启动 DSH）
 
 ```bash
-cd /Users/chtholly/Developer/WorkSpace/dsh-flowgate
+cd /path/to/dsh-flowgate
 
 # 1) 类型检查（全仓）
 pnpm exec tsc --noEmit
@@ -36,7 +36,7 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 
 # 2) 以 link 方式装开发中的插件
 cd "$DSH_HOME/profiles/flowgate"
-pnpm add link:/Users/chtholly/Developer/WorkSpace/dsh-flowgate
+pnpm add link:/path/to/dsh-flowgate
 
 # 3) 确认组合树里有 FlowGate 的插件行与三个 preset 行
 "$DSH" --profile flowgate --dump-config | grep -i -A4 'flowgate'
