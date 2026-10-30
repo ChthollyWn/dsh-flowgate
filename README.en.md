@@ -282,6 +282,7 @@ During development use the isolated profile (see Quick start); do not install in
 - [04-执行方案](docs/04-执行方案.md): milestones, task cards, risks and mitigations
 - [docs/method-sources.md](docs/method-sources.md): per-skill upstream provenance, what we rewrote, review cycle
 - [docs/reference/](docs/reference/): official package references for DSH 0.2.1-rc.5
+- [docs/interview-notes.md](docs/interview-notes.md): interview / portfolio notes (capability → mechanism → metric → real story)
 
 ## License
 

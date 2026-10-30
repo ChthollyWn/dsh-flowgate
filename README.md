@@ -288,6 +288,7 @@ pnpm measure:startup  # 插件 host 入口加载耗时增量（T6.2，验收线 
 - [docs/impl/dsh-plugin-api-cheatsheet.md](docs/impl/dsh-plugin-api-cheatsheet.md)：DSH 扩展点速查表（含 d.ts 出处）
 - [docs/impl/host-integration.md](docs/impl/host-integration.md)：宿主集成与验证步骤
 - [docs/impl/implementation-status.md](docs/impl/implementation-status.md)：里程碑交付状态与已知缺口
+- [docs/interview-notes.md](docs/interview-notes.md)：面试/作品集材料（能力→机制→指标→真实故事）
 - [docs/compat/](docs/compat/)：DSH 版本兼容验证记录
 - [docs/reference/](docs/reference/)：本机 DSH 0.2.1-rc.5 的官方包参考
 
