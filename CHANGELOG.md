@@ -17,6 +17,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - **派发/worktree 真机缺陷修复**（C-003/C-004）：任务分支 `flowgate/<变更>/<任务>` 与变更分支 `flowgate/<变更>` 触发 git ref D/F 冲突，worktree 创建静默降级主工作区 → 改用 `flowgate-tasks/<变更>/<任务>` 兄弟命名空间；执行者在 worktree 内的绝对路径被按主仓库根归一，导致 `R-PROTECTED`/`R-SCOPE` 误伤 → 守卫改为按 caller.cwd（worktree）归一，补 2 个守卫回归测试与 1 个分支命名断言。真机已创建 `.flowgate/worktrees/C-004/T1|T2` 与对应分支，`data.dispatched.worktree` 回填生效；完整合并/集成检查点结算待 C-005 复验。
 - T6.2 加固：`test/fault-injection/host-resilience.test.ts`（4 例：账本篡改锁定、守卫抛错 fail-closed、宿主服务缺失降级、配置损坏报错）、`scripts/measure-startup.mjs`（启动增量 +14.2ms，验收线 200ms）与 `scripts/verify-uninstall.mjs`（隔离 profile 安装/卸载干净度），结果录入 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md) 与 [docs/compat/startup.md](docs/compat/startup.md)。
 - 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
+- 核心工具单测补齐：`test/core/util/util.test.ts` 覆盖 paths/glob/hash/time/markdown（11 例：路径归一、** glob 与重叠、哈希/HMAC/稳定 JSON/密钥脱敏、时间格式与过期、围栏/表格/章节/列表解析）；核心覆盖率升至语句 83.0% / 分支 68.4%。
 - 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
 
@@ -33,7 +34,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（本次提交实测）：**67 个测试文件 / 981 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例）。
+- 测试规模（本次提交实测）：**68 个测试文件 / 992 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例 + 11 个 util 测试用例）。
 
 ## [0.1.0] - 2026-10-30
 
@@ -93,7 +94,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **67 files / 981 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
+- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **68 files / 992 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
 - 真实 Web 宿主走查（隔离 `DSH_HOME`，DSH 0.2.1-rc.5 + Chrome）：插件组合与加载、浏览器 bundle、`/flow` 命令族、tools 模块 14/14 工具注册（含派发模块共 15 个 `flow_*` 工具）、状态条/面板、preset 菜单、自动接续、宿主能力检测。
 - 守卫真机证据：真实 headless 会话中 agent 对 `src/server.js` 的 `edit` 被 `R-STAGE-SRC` 拦截，文件未被修改，模型收到完整拒绝原因与解锁路径（debug trace + 账本可查；此前一次「放行」经查为上一轮遗留的单次放行 `OV-1`）。
 - 真实模型完整闭环：在 `ts-todo-api` 上以 C-002 从 `/flow new` 走到 S6 归档——G1 7/7、G2 真实 baseline 34/34、G3 9/9、G4 任务门、G5 全量测试/场景/运行证据、G6 批准；产出 116KB HTML 交付报告，主规格按 R1–R5 合并（账本 `spec.merged`）。API key 经环境变量注入隔离 home，未提交。
@@ -110,7 +111,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - 浏览器内人工交互流程（面板按钮的 Remote 兜底、低复杂度确认卡）未走查；状态条与面板渲染已在真实 Web 宿主验证。
 - 审查 / 派发 / 并行 worktree 的完整真机验证依赖提供 subagents 的宿主组合；当前精简 web 组合缺 subagents / sessionQuery / userQuestions / Remote，按降级处理。
 - `appendPluginRecord` 属实验性 API，DSH 升级可能失效；已保留降级路径，每个 RC 需跑 `verify:compat`。
-- 核心逻辑覆盖率（2026-10-31 重测）：语句 82.6% / 分支 67.9% / 函数 85.8% / 行 87.2%，分支覆盖率低于 80% 目标。
+- 核心逻辑覆盖率（2026-10-31 重测）：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%，分支覆盖率低于 80% 目标。
 - npm 首发与 GitHub Release 尚未执行；tag `v0.1.0` 落后 HEAD 4 个提交（发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
 
 [Unreleased]: https://github.com/ChthollyWn/dsh-flowgate/compare/v0.1.0...HEAD

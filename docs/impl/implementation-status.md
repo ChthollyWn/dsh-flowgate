@@ -30,7 +30,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/null
 ```
 
-最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入/检查点测试后 67 files / 981 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 848.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 82.6% / 分支 67.9% / 函数 85.8% / 行 87.2%（`pnpm coverage`）。
+最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入/检查点/util 测试后 68 files / 992 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 849.8KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%（`pnpm coverage`）。
 
 ## 3. 关键实现决策（与 03 方案的差异）
 
@@ -215,7 +215,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 | 4 | 审查子 agent 真机跑通（RV-1 verdict=pass + coverageOk）；派发/worktree 真机已验证创建、分支命名、子 agent 启动、data 回填、任务门/审查/task.done；**worktree 合并 + 集成检查点**已有 2 个 host 单测（合并成功/冲突 abort）覆盖逻辑，但真实宿主上的合并结算仍待交互式会话（headless 一次性运行提前退出）；scope 变更请求需负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式会话复验合并 + 集成检查点；scope 变更审批通知 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
-| 7 | 覆盖率分支 67.9% 低于 80% 目标（语句 82.6% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
+| 7 | 覆盖率分支 68.4% 低于 80% 目标（语句 83.0% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
 | 8 | npm 未发布、无 GitHub Release；tag `v0.1.0` 落后 HEAD 4 个提交 | 无法按 README 的 npm 安装路径使用 | 发布物料已备（CHANGELOG、release notes、release.yml），待配置 `NODE_AUTH_TOKEN` 后发布并刷新 tag |
 | 9 | Desktop 宿主未验证（T6.2 的启动耗时与卸载干净度已完成，见 §3.6） | 兼容矩阵只有 Web / headless 证据 | 桌面会话人工走查 |
 
