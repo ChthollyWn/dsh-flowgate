@@ -1,0 +1,106 @@
+# 更新日志
+
+FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+> **发布状态（2026-10-31）**：npm 上尚无此包（registry 404）、GitHub 尚无 Release；仓库 tag `v0.1.0` 仍指向 `f53d5f1`，比当前 HEAD `e1aef8d` 落后 4 个提交。
+> 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；正式发布时请按实际发布日期回填本文的时间与链接。
+
+## [Unreleased]
+
+### Added
+
+- 发布工程：本 `CHANGELOG.md`、发布说明草稿 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)、tag 推送触发的发布 workflow `.github/workflows/release.yml`（校验后发布 npm 并创建 GitHub Release；截至本文件提交时尚未触发执行）。
+  - 这些文件属于发布流程本身，不是插件功能变更。若发布时把 `v0.1.0` tag 前移到包含这些提交的 HEAD，请把本节并入 `[0.1.0]` 的「Documentation」一节。
+- host 层单测补齐：`test/host/dispatch.test.ts`（11 例：注册、engine 未就绪、无 subagents/provider 降级、顺序/并行派发、worktree 落点、创建失败降级、互斥、失败结算）与 `test/host/review.test.ts`（14 例：开关、provider 降级、findings 归一化与 diff 指纹、重试 1 次、sessionQuery 读取覆盖、调查任务）。
+- 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
+
+### Fixed
+
+- **审查子 agent 启动失败**（真机发现）：`cordis.patch.yml` 的 reviewer preset 中 `reviewer-tool-fs-search` 缺少 rc.5 必填配置 `sampleOverCapGlobResults`，导致审查子 agent 启动报 `invalid config`、审查重试后仍缺失；已补 `sampleOverCapGlobResults: false`。
+- **`flow_dispatch_next` 结构化返回的 worktree 为空**：并行批次回填了派发前的 envelope 快照，实际 worktree 由 `startExecutor` 创建；现在回填 `started.worktree` 并加单测断言。
+- 文档与注释同步：`appendPluginRecord` 不可用时的降级描述（不写 `session.append`）、归档规格合并注释、M5 现实状态、已知缺口与下一步；`ci.yml` 增加 `verify:client`。
+
+### Tests
+
+- 测试规模（本次提交实测）：**65 个测试文件 / 969 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 25 个 host 用例）。
+
+## [0.1.0] - 2026-10-30
+
+首个可用版本。FlowGate 把「先澄清与设计、再按执行图 TDD、用可核验证据验收、人工门放行」做成 DSH 宿主层的硬约束插件：阶段顺序、写操作范围、证据新鲜度都由代码判定，而不是提示词。
+
+### Added
+
+- **7 阶段硬约束流程内核**：S0 立项/路线图 → S1 需求澄清 → S2 上下文 → S3 设计拆解 → S4 执行 → S5 验证 → S6 交付；状态机与复杂度（低/中/高/超高）× 风险（普通/高）等级矩阵；迁移表数据驱动测试；`/flow` 命令族与阶段状态条。
+- **规则引擎与守卫**：数据驱动规则（`R-STAGE-SRC`、`R-SCOPE`、`R-PROTECTED`、`R-DEP` 等，可在 `.flowgate/config.yaml` 覆盖）；工具调用参数与 shell 命令分词；风险触发器（敏感路径、依赖变更、危险命令、疑似密钥、成本、范围膨胀、连续失败）；`tools/pre-execute` 异步判定 + `ctx.tools.guard` 同步缓存双保险；单次放行 `OV-n`、例外与误判反馈闭环。
+- **账本与跨会话状态**：`.flowgate/` 项目目录、状态与配置；账本哈希链 + HMAC（篡改可定位到行）；会话租约与接管、交接摘要、锁定模式与 `/flow repair` 从账本和产物重建。
+- **规格层**：变更目录产物（`clarify.md` / `proposal.md` / `specs/` / `context.md` / `design.md` / `risk.md` / `tasks.md`）、GR/G0–G3/G5/G6 共 46 项门禁检查（每项正反例）、任务卡检查、技术栈探测、项目路线图、mermaid 执行图、可核验源码引用。
+- **执行纪律**：`flow_task_start` 领取任务卡并注入上下文；范围事前控制 + shell 事后检测；TDD RED/GREEN 证据回执与输入哈希过期判定；按执行图派发（inline / subagent / auto）、git worktree 并行、集成检查点；返工失效范围；审查子 agent（宿主提供 subagents 时）。
+- **交付闭环**：S5/S6 验证证据汇总、单文件离线 HTML 交付报告、跨会话 HTML 看板、M-1～M-18 指标自动计算与 CSV 导出、规则沉淀、只读分析任务与 `flow_submit_analysis`。
+- **模型工具**：15 个 `flow_*` 工具（`/flow doctor` 的 `14/14` 是 tools 模块清单口径，`flow_dispatch_next` 由派发模块单独注册）；没有批准 / 放行 / 降低等级类工具——人工专属动作只能由负责人执行。
+- **界面**：输入框状态条（阶段、变更、等级、风险，≤120 字符，颜色分级，点击打开面板）；右侧栏 8 视图面板（阶段卡、七阶段流程、执行图、学习模式、术语表、变更信息等），client 产物为 `window.__ModuleLoader__.load({ id, factory })` 打包。
+- **内容**：15 个内置技能（每个含 `SKILL.md` + `learn.md` 教学卡，共 30 个文件，附上游方法来源追踪表）；3 个可独立构建与测试的基准仓库（`ts-todo-api` / `py-csv-cli` / `java-renewal`，含隐藏需求与越界诱饵）。
+- **宿主集成**：DSH 0.2.1-rc.5 的组合 patch 与三个 agent preset（FlowGate 工程模式 / FlowGate 执行者 / FlowGate 只读取证）；`--dump-config` 可导出插件行。
+- **工程与发布基线**：GitHub Actions CI（lint / test / build / verify:package）；`verify:package`（npm 包内容）、`verify:client`（浏览器 bundle 加载协议与插槽注册）、`verify:compat`（隔离 `DSH_HOME` 真实组合/导入）三个验证脚本；NFR-3 零宿主核心依赖。
+- **仓库**：MIT 许可、第三方声明（含 DSH 0.2.1-rc.5 参考文档的归属）、中文/英文 README、需求/技术/执行方案、实现契约、spike 报告、真实宿主截图。
+
+### Changed
+
+- **入口形态**：host 走 `main`（`lib/host.js`），浏览器半边走 `exports["./client"]`（`lib/client.js`）；client 产物是 `window.__ModuleLoader__.load(...)` 包装，模块 id 与包名一致。
+- **不静态依赖宿主核心包**：`@deepseek-ai/*` 只作可选 `peerDependencies`；`appendPluginRecord` 运行时探测，缺失时投影退回 host 内存快照（NFR-3，npm 包内不含 `@deepseek-ai` 文件）。
+- **注入消息来源**：所有注入给模型的 user 消息改用 DSH 已登记的 `{ kind: 'runtime-context', form: 'relay' }`，不再自造 source kind。
+- **工具 schema 子集**：`output.schema` 用 `oneOf` 单类型集合表达原类型数组，`parameters` 根对象去掉 `additionalProperties` 等扩展关键字；工具返回值先做 JSON 无损往返再交给宿主。
+- **会话写入**：只写 `appendPluginRecord('plugin:dsh-flowgate/state')`；删除 `session.append('plugin:…')` 降级路径，避免 rc.5 会话日志出现无语义事件而损坏；投影在记录不可用时从最新内存快照刷新。
+- **委派与能力检测**：`restrict` / `presentAs` 按 agent scope 应用；受管控会话关闭原生 `subagent_fork` / `workflow` / `send_message`；真实宿主上能力标志修正为 ✓，确实缺失的能力（subagents / sessionQuery / userQuestions / Remote）在 `/flow doctor` 说明并按降级处理。
+- **覆盖自检**：`ctx.tools.schemas(scope)` 的 scope key 使用 agent 对象（不是 `agent.ctx`）；真实宿主可扫描 46 个可见工具，可写工具未覆盖数为 0。
+- **S6 归档规格合并**：新增纯函数模块 `src/core/archive/merge.ts`，交付时把增量规格按 ADDED / MODIFIED / REMOVED 合并进 `.flowgate/specs/<能力>/spec.md`；写入账本 `spec.merged` 事件，语义不一致警告（如 ADDED 的条目已存在、MODIFIED 的条目不存在）进入通知与账本。
+- **`/flow new <描述>`**：只带标题时 summary 回退为标题，G0 通过后直接进入 S1（此前会卡在 S0）。
+- **人工门与审查配置**：G5/G6 终审项尊重 `review.enabled`；关闭审查的精简宿主不再死锁，开启时仍强制要求审查记录。
+- **受保护路径**：`R-PROTECTED` 不再拦截当前阶段可写的变更产物（`.flowgate/changes/<id>/**`）；插件自有状态（status / ledger / config）仍受保护。
+- **baseline 解析**：新增 `node --test` 解析器（默认/规范 reporter、TAP 风格、失败用例名），Node 项目可正确建立 G2 基线。
+- **仓库工程化**：`.gitignore` 的 `coverage/` 锚定为 `/coverage/`（避免误忽略 `src/host/coverage`）；移除 pnpm 11 已不读的 `pnpm.onlyBuiltDependencies`，构建白名单改到 `pnpm-workspace.yaml` 的 `allowBuilds`；账本时间戳断言改为时区无关。
+
+### Fixed
+
+- client 插件在真实 Web 宿主激活失败（`web boot: 1 entry did not activate`）：不再读取未 `inject` 的 Cordis 服务，侧栏标签注册只走 `ctx.inject`。
+- 输入框状态条不渲染：改为 `ctx.slots.inject('conversation.input.dock', …)` 延迟注册（该 slot 由对话 entry 的 children 表声明）。
+- tools 模块的 14 个模型工具在真实宿主全部注册失败：`output.schema` 的 `type: [...]` 改为 `oneOf` 单类型集合；`parameters` 根级 `additionalProperties` 移除。
+- 会话日志损坏风险：`appendPluginRecord` 不可用时不再降级 `session.append('plugin:…')`（rc.5 会将其持久化为语义不完整事件，下次加载报 `session event at seq N lacks an identified message`）。
+- 模型请求全部 `TRANSPORT` 失败：注入消息的 source kind 改为官方 `runtime-context`（provider 在 fetch 前拒绝未知 kind，表现为 `DeepSeek Messages transport failed`）。
+- 工具结果被宿主拒绝（`returned invalid output: value is not lossless JSON`）：所有工具返回值先 JSON round-trip。
+- 真实模型 E2E 发现的 3 个阻断：`R-PROTECTED` 误伤阶段产物导致 S2 死锁、缺 `node --test` baseline 解析导致 G2 无法通过、`review.enabled=false` 时 G5/G6 终审死锁。
+- 账本时间戳测试时区依赖（CI 用 UTC，开发机可能 UTC+8）。
+- 公开仓库准备：README 补仓库链接、参考文档归属补充到第三方声明、开发文档中的本地绝对路径匿名化。
+
+### Documentation
+
+- 中文/英文 README：定位、7 阶段与人工门、命令表、模型工具表、规则参考、15 个技能、FAQ、真实宿主界面截图，以及 CI / license / DSH-compat badges。
+- [docs/impl/implementation-status.md](docs/impl/implementation-status.md)：里程碑状态、可复现验证、§3.1 真实 Web 宿主走查、§3.2 模型链路走查、§3.3 能力补齐与无模型走查、§3.4 真模型完整闭环 S0→S6、§4 已知缺口。
+- [docs/impl/host-integration.md](docs/impl/host-integration.md)：隔离 profile 集成步骤、headless 真机 E2E 剧本、真实宿主踩坑记录与调试开关（`FLOWGATE_DEBUG_FETCH` / `FLOWGATE_DISABLE` / `FLOWGATE_CONTEXT_MODE` / `FLOWGATE_DEBUG_GUARD`）。
+- [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)：7 项 DSH 0.2.1-rc.5 兼容验证记录。
+- [docs/screenshots/](docs/screenshots/README.md)：真实 Web 宿主 11 张实拍（状态条、命令、面板、模型工具调用、doctor、单次放行、交付报告）。
+- 需求规格、技术方案、执行方案、方法来源追踪表、第三方声明（DSH rc.5 参考文档 MIT 归属）、spike 报告。
+
+### Tests
+
+- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **65 files / 969 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
+- 真实 Web 宿主走查（隔离 `DSH_HOME`，DSH 0.2.1-rc.5 + Chrome）：插件组合与加载、浏览器 bundle、`/flow` 命令族、tools 模块 14/14 工具注册（含派发模块共 15 个 `flow_*` 工具）、状态条/面板、preset 菜单、自动接续、宿主能力检测。
+- 守卫真机证据：真实 headless 会话中 agent 对 `src/server.js` 的 `edit` 被 `R-STAGE-SRC` 拦截，文件未被修改，模型收到完整拒绝原因与解锁路径（debug trace + 账本可查；此前一次「放行」经查为上一轮遗留的单次放行 `OV-1`）。
+- 真实模型完整闭环：在 `ts-todo-api` 上以 C-002 从 `/flow new` 走到 S6 归档——G1 7/7、G2 真实 baseline 34/34、G3 9/9、G4 任务门、G5 全量测试/场景/运行证据、G6 批准；产出 116KB HTML 交付报告，主规格按 R1–R5 合并（账本 `spec.merged`）。API key 经环境变量注入隔离 home，未提交。
+- `verify:package`（HEAD 实测）：npm 包 39 个文件 / 845.0KB，含 `lib/host.js`、`lib/client.js`、`skills/**/*.md` 与 `cordis.patch.yml`，不含 `@deepseek-ai` 或开发文件；`verify:client` 离线验证 loader 协议与两段式侧栏注册；`verify:compat` 7/7 通过。
+- CI：`.github/workflows/ci.yml` 在 push/PR 上跑 lint / test / build / verify:package；HEAD `e1aef8d` 的 `build` check 为 success。
+- 回归测试覆盖真实宿主发现的问题：严格 Cordis 上下文、不得调用 `session.append` 的不变量、`appendPluginRecord` 路径、工具 schema 与无损 JSON、`node --test` baseline、归档规格合并、时区无关断言、G5/G6 审查配置。
+
+### Known gaps
+
+完整清单、影响与后续动作见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md) §4（以下为截至 HEAD `e1aef8d` 的摘要，**不虚构成已完成**）：
+
+- 有/无插件对照评测（M6 / T6.1）未执行，暂无 M-15 / M-18 实测数字；[docs/evaluation.md](docs/evaluation.md) 状态仍为「未执行」。
+- 三个 agent preset 在真实会话中的切换验证未完成；精简组合可能缺少 `@deepseek-ai/dsh-agent-preset` 而跳过 preset 行（不影响 `/flow`、工具与守卫）。
+- 浏览器内人工交互流程（面板按钮的 Remote 兜底、低复杂度确认卡）未走查；状态条与面板渲染已在真实 Web 宿主验证。
+- 审查 / 派发 / 并行 worktree 的完整真机验证依赖提供 subagents 的宿主组合；当前精简 web 组合缺 subagents / sessionQuery / userQuestions / Remote，按降级处理。
+- `appendPluginRecord` 属实验性 API，DSH 升级可能失效；已保留降级路径，每个 RC 需跑 `verify:compat`。
+- 核心逻辑覆盖率（2026-10-31 重测）：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%，分支覆盖率低于 80% 目标。
+- npm 首发与 GitHub Release 尚未执行；tag `v0.1.0` 落后 HEAD 4 个提交（发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
+
+[Unreleased]: https://github.com/ChthollyWn/dsh-flowgate/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ChthollyWn/dsh-flowgate/releases/tag/v0.1.0

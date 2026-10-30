@@ -9,8 +9,9 @@
  * 为什么用「非字面量动态 import」而不是静态 import：
  * - 我们的包不把 @deepseek-ai/* 放进 dependencies，本地开发/单测环境没有该包；
  * - tsdown 输出 ESM，动态 import 保留到运行时，由真实宿主进程解析；
- * - 解析失败时自动降级为 `session.append('plugin:...')`（rc.5 运行时接受任意
- *   type；仅持久化层面风险更高，doctor 会报告降级），再不行则只更新内存投影。
+ * - 解析失败时**不**降级写 `session.append('plugin:...')`：rc.5 会把未声明类型持久化成
+ *   语义不完整的 SessionEvent，下次加载报 "lacks an identified message" 并损坏会话。
+ *   此时投影退回 host 内存快照（latest-snapshot 兜底），doctor 报告降级。
  */
 
 /** 我们写入会话日志的插件记录类型（投影 apply 用字符串比较折叠）。 */

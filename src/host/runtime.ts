@@ -709,7 +709,7 @@ export class HostRuntime {
         return true
       } catch (error) {
         this.capabilities.sessionAppendPluginRecord = false
-        this.log('debug', `appendPluginRecord 不可用，改用 session.append：${toAgentError(error).error}`)
+        this.log('debug', `appendPluginRecord 不可用（不降级 session.append，投影退回内存快照）：${toAgentError(error).error}`)
       }
     }
     // NOTE: do NOT fall back to session.append() with an undeclared event type.

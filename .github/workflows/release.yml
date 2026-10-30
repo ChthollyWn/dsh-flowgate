@@ -1,0 +1,192 @@
+# FlowGate 发布 workflow
+#
+# 触发：推送 tag `v*`（例如 `git push origin v0.1.0`）。
+# 顺序：前置校验 → pnpm install --frozen-lockfile → lint → test → build →
+#       verify:package → verify:client → npm publish → 创建 GitHub Release。
+#
+# 关键假设（详见 docs/release/v0.1.0.md 的「发布前检查清单」）：
+#   - repository secret `NODE_AUTH_TOKEN` 已配置：npm granular access token，
+#     有 publish 权限并允许 2FA bypass。workflow 只读取这个 secret，token 不写入
+#     任何命令参数、也不会打印到日志（setup-node 生成的 .npmrc 用环境变量占位符）。
+#   - `GITHUB_TOKEN` 由 Actions 自动提供，仅用于创建 GitHub Release。
+#   - tag 指向的提交必须已在 origin/main 上，且 package.json 的 version == tag
+#     去掉 `v` 前缀后的值；npm 上不能已存在同版本。
+#   - `docs/release/<tag>.md` 作为 Release 说明（本仓库当前为
+#     docs/release/v0.1.0.md）；缺失时降级为 GitHub 自动生成的说明。
+#   - 这里不跑 verify:compat：它需要本机安装真实 DSH 桌面端做隔离 profile 验证，
+#     GitHub 托管的 runner 上没有 DSH，兼容性证据见 docs/compat/。
+#
+# 失败恢复：若 npm publish 已成功但 Release 创建失败，不要重跑本 workflow
+# （npm 会因版本已存在而失败），手动执行：
+#   gh release create <tag> --verify-tag --notes-file docs/release/<tag>.md
+#
+# 可选人工审批：在仓库 Settings → Environments 创建 `npm-release`，并给下面
+# jobs.release 加 `environment: npm-release` 即可在发布前要求人工批准。
+
+name: Release
+
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 同一 tag 同时只允许一个发布任务；不取消，避免 npm 已发布但 Release 未创建。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # 创建 GitHub Release
+  id-token: write # npm provenance（OIDC 签名）
+
+jobs:
+  release:
+    name: Verify and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 完整历史：用于判断 tag 提交是否在 main 上
+          persist-credentials: false # 公开仓库；后续 git fetch 走匿名 HTTPS
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Validate release preconditions
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          pkg_name="$(node -p "require('./package.json').name")"
+          pkg_version="$(node -p "require('./package.json').version")"
+
+          # 1) 发布凭据：缺失时尽早失败，避免白跑一遍完整 CI 才在 publish 报错。
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error title=缺少发布凭据 NODE_AUTH_TOKEN::仓库 secret NODE_AUTH_TOKEN 未配置。请在 Settings → Secrets and variables → Actions 添加 npm granular access token（需要 publish 权限并允许 2FA bypass），然后重跑。本次未发布任何内容。"
+            exit 1
+          fi
+          echo "✓ NODE_AUTH_TOKEN 已配置（只检查是否为空；不打印其值）"
+
+          # 2) tag 与 package.json 版本必须一致。
+          case "${tag}" in
+            v*) tag_version="${tag#v}" ;;
+            *)
+              echo "::error::触发 ref '${tag}' 不是 v* tag，拒绝发布。"
+              exit 1
+              ;;
+          esac
+          if [ "${pkg_version}" != "${tag_version}" ]; then
+            echo "::error title=版本不一致::tag 为 ${tag}，但 package.json 的 version 是 ${pkg_version}。请先 bump package.json 并提交，再按该版本打 tag。"
+            exit 1
+          fi
+          echo "✓ tag ${tag} 与 ${pkg_name}@${pkg_version} 一致"
+
+          # 3) tag 必须打在已推送到 origin/main 的提交上。
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
+            echo "::error title=tag 不在 main 上::tag ${tag}（${GITHUB_SHA}）指向的提交不在 origin/main 上。请先把 main 推到远端，再打 tag。"
+            exit 1
+          fi
+          echo "✓ tag 提交位于 origin/main 上"
+
+          # 4) npm 上不能已存在同版本（否则 publish 步骤必然失败）。
+          if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
+            echo "::error title=版本已存在于 npm::npm 上已存在 ${pkg_name}@${pkg_version}。请提升版本号后重新打 tag；若只是 Release 创建失败，请手动补 Release，不要重跑本 workflow。"
+            exit 1
+          fi
+          echo "✓ npm 上尚无 ${pkg_name}@${pkg_version}"
+
+          # 5) 同名 GitHub Release 不能已存在。
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "::error title=Release 已存在::GitHub Release ${tag} 已存在，拒绝重复创建。"
+            exit 1
+          fi
+          echo "✓ GitHub 上尚无同名 Release"
+
+          if [ -f "docs/release/${tag}.md" ]; then
+            echo "✓ 发布说明文件 docs/release/${tag}.md 存在"
+          else
+            echo "::warning::未找到 docs/release/${tag}.md，创建 Release 时将降级为自动生成说明。"
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (layer rules + typecheck)
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify package contents
+        run: pnpm verify:package
+
+      - name: Verify client bundle
+        run: pnpm verify:client
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+        run: npm publish --provenance --access public
+
+      - name: Confirm npm publication
+        run: |
+          set -euo pipefail
+          pkg_name="$(node -p "require('./package.json').name")"
+          pkg_version="$(node -p "require('./package.json').version")"
+          for attempt in 1 2 3 4 5 6; do
+            if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
+              echo "✓ npm 上已可见 ${pkg_name}@${pkg_version}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::npm 暂时查不到 ${pkg_name}@${pkg_version}（registry 传播可能延迟），请在 npm 页面人工核对。"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          title="FlowGate ${tag}"
+          notes="docs/release/${tag}.md"
+          if [ -f "${notes}" ]; then
+            gh release create "${tag}" --verify-tag --title "${title}" --notes-file "${notes}"
+          else
+            echo "::warning::未找到 ${notes}，改用自动生成的 release notes。"
+            gh release create "${tag}" --verify-tag --title "${title}" --generate-notes
+          fi
+
+      - name: Summary
+        run: |
+          set -euo pipefail
+          pkg_version="$(node -p "require('./package.json').version")"
+          {
+            echo "## FlowGate ${GITHUB_REF_NAME} 已发布"
+            echo ""
+            echo "- npm: https://www.npmjs.com/package/dsh-flowgate/v/${pkg_version}"
+            echo "- GitHub Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+            echo "- 提交: ${GITHUB_SHA}"
+          } >> "${GITHUB_STEP_SUMMARY}"

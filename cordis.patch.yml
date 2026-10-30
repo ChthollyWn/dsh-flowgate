@@ -8,10 +8,12 @@
 # config 里给 id/name/description/order/plugins；子行与 patch 行同构。
 # 行 id 固定（preset-*），profile patch 可以按 id 覆盖 config。
 #
-# ⚠️ 待实测（M0 兼容矩阵）：preset 的 plugins 列表在不同 DSH 版本里可能要求额外的
-# model-selection / 压缩参数子行；若宿主组合缺少 `@deepseek-ai/dsh-agent-preset`
-# 或 `@deepseek-ai/dsh-tool-fs`，本层会整体被跳过（skippedBundles），
-# 不影响 host 插件行与 /flow 命令、守卫、工具等核心功能。
+# 已验证（2026-10-30）：三个 preset 行在真实 DSH 0.2.1-rc.5 Web 宿主的 preset 菜单中出现
+# （docs/screenshots/09-preset-menu.png）。仍未验证：在真实会话中**切换** preset 后的运行时行为；
+# 精简组合（如 headless）缺 `agentPresets` 服务时 preset 行会 pending，可在 profile patch 里补
+# `@deepseek-ai/dsh-agent-preset-registry`（config.default 指向已注册的 preset id）后用 `--patch` 启动。
+# 若宿主组合缺少 `@deepseek-ai/dsh-agent-preset` 或 `@deepseek-ai/dsh-tool-fs`，本层会整体被跳过
+# （skippedBundles），不影响 host 插件行与 /flow 命令、守卫、工具等核心功能。
 - insert:
     - id: dsh-flowgate
       name: dsh-flowgate
@@ -70,3 +72,7 @@
               edit: false
           - id: reviewer-tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              # rc.5 的 dsh-tool-fs-search 要求显式给出该字段（缺省会被 schema 拒绝，
+              # 导致整个审查子 agent 无法启动；2026-10-31 真机发现）。
+              sampleOverCapGlobResults: false

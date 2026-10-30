@@ -59,6 +59,15 @@ export function dispatchBusy(): boolean {
   return running.size > 0
 }
 
+/**
+ * 测试用：清空模块级运行表。
+ * `running` 是模块级状态，跨用例残留会让后续派发被误判为"上一批还在运行"；
+ * 单测在 beforeEach 调用它，保证用例隔离（真实运行时由子 agent 结算清理）。
+ */
+export function resetDispatchStateForTest(): void {
+  running.clear()
+}
+
 /** 安装 dispatch（register flow_dispatch_next）。 */
 export function installDispatch(runtime: HostRuntime): void {
   runtime.injectService('tools', (scoped: DshContext) => {
@@ -85,6 +94,9 @@ export function installDispatch(runtime: HostRuntime): void {
           return ok(outcome.message, { dispatched: [], batchId: outcome.batchId, mode: outcome.mode })
         }
         const lines = [outcome.message]
+        // 结构化 data 必须回填 startExecutor 实际创建的 worktree：envelope 是派发前的
+        // 快照，并行批次在 startExecutor 里才建 worktree，此时 envelope.worktree 为空。
+        const dispatchedData: Record<string, unknown>[] = []
         for (const envelope of outcome.dispatched) {
           const started = await startExecutor(runtime, engine, envelope, capability.provider)
           if (!started.ok) {
@@ -97,17 +109,18 @@ export function installDispatch(runtime: HostRuntime): void {
             continue
           }
           lines.push(`✓ ${envelope.taskId} ${envelope.task.title}（${envelope.mode}${started.worktree ? `，worktree=${started.worktree}` : ''}）`)
-        }
-        lines.push('任务结束后会收到完成通知（摘要、任务门、集成检查点结果）；收到后再调用 flow_dispatch_next。')
-        runtime.emit()
-        return ok(lines.join('\n'), {
-          dispatched: outcome.dispatched.map((envelope) => ({
+          dispatchedData.push({
             taskId: envelope.taskId,
             title: envelope.task.title,
             batch: envelope.batch,
             mode: envelope.mode,
-            worktree: envelope.worktree,
-          })),
+            ...(started.worktree ? { worktree: started.worktree } : {}),
+          })
+        }
+        lines.push('任务结束后会收到完成通知（摘要、任务门、集成检查点结果）；收到后再调用 flow_dispatch_next。')
+        runtime.emit()
+        return ok(lines.join('\n'), {
+          dispatched: dispatchedData,
           batchId: outcome.batchId,
           mode: outcome.mode,
         })

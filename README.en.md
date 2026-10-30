@@ -198,7 +198,7 @@ docs/              requirements, technical design, execution plan, implementatio
 
 Every skill ships a `SKILL.md` (when to use, executable steps, what code enforces, what is guidance only, anti-patterns, good/bad examples, artifact paths) and a `learn.md` learning card (what / why / acceptance criteria / upstream practice / anti-patterns / good / bad). Upstream versions and per-skill provenance are tracked in [docs/method-sources.md](docs/method-sources.md); third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Feature status (v0.1, checked 2026-10-30)
+## Feature status (v0.1, checked 2026-10-31)
 
 > Honest status: ✅ implemented with automated/offline verification; 🟡 implemented, pending real-host end-to-end confirmation; 🗓 planned. Evidence: [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
@@ -210,13 +210,13 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | Artifact parsers, 46 gate checks (GR/G0–G3/G5/G6), task cards, execution plan/graph | ✅ done (positive + negative per check) |
 | `.flowgate/`, change ledger, hash-chained + HMAC audit ledger, cross-session leases, locked mode and `/flow repair` | ✅ done (tamper located by line; strict rebuild round-trip) |
 | Verification receipts, input-hash freshness, risk engine, rework invalidation, verifiable citations | ✅ done |
-| Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 host side wired (degrades when provider/git absent); real-host web E2E pending |
-| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | 🟡 built and verified offline against the shipped bundle; in-browser interaction pending |
+| Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 host side wired + 25 dedicated unit tests (registration/degradation/worktree paths/retry/read coverage); real-subagent E2E in progress |
+| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ rendered in a real DSH web host (11 screenshots); remaining: panel button Remote fallback, low-complexity confirmation card |
 | HTML delivery report, cross-session dashboard | ✅ done (single-file, offline, samples in test/fixtures) |
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
-| With / without plugin evaluation report | 🗓 planned (M6, method in [docs/evaluation.md](docs/evaluation.md)) |
+| With / without plugin evaluation report | 🗓 planned (M6; evaluation script and greenfield repo ready, method in [docs/evaluation.md](docs/evaluation.md)) |
 
-**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green; a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); browser interaction and the controlled evaluation are not executed yet — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
+**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (65 files / 969 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation is not executed yet — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
 ## Screenshots
 

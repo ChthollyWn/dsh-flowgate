@@ -22,7 +22,7 @@ tail -n 1 lib/host.js          # 期望含 export { apply, inject, name }
 head -c 200 lib/client.js      # 期望 window.__ModuleLoader__.load({ id: "dsh-flowgate", ...
 ```
 
-预期：`test/host` 全绿（81 用例）；`lib/host.js` 无 `@deepseek-ai/` 值导入（仅可能保留
+预期：`test/host` 全绿（110 用例，含 dispatch/review 专项测试）；`lib/host.js` 无 `@deepseek-ai/` 值导入（仅可能保留
 `await import('@deepseek-ai/dsh-session')` 这类运行时探测，用于自定义会话事件）。
 
 ## 1. 隔离 profile（绝不使用 ~/.dsh/profiles/desktop）
@@ -165,7 +165,25 @@ node tools/admin.js /path/to/demo-repo status
 ```
 
 经验与坑：
-- headless 组合没有 `agentPresets` 服务时，三个 `preset-flowgate*` 行会 pending（不影响插件与守卫）；provider 需要 `DEEPSEEK_API_KEY` 环境变量（credentials 文件只对 web 组合生效）。
+- headless 组合没有 `agentPresets` 服务时，三个 `preset-flowgate*` 行会 pending（不影响插件与守卫），此时派发/审查子 agent 无法解析 preset。用 overlay patch 把 web 组合里的注册表插件补进来即可激活（2026-10-31 实测有效）：
+
+  ```yaml
+  # /tmp/fg-preset-registry.yml
+  - insert:
+      - id: agent-preset-registry
+        name: '@deepseek-ai/dsh-agent-preset-registry'
+        config:
+          default: flowgate
+  ```
+
+  ```bash
+  DSH_EXTRA="--patch /tmp/fg-preset-registry.yml"
+  DEEPSEEK_API_KEY="$(cat /tmp/flowgate-e2e.key)" DSH_HOME=/tmp/fg-demo-home \
+    "$DSH" --profile fg-headless $DSH_EXTRA "只做 S1 产物并 flow_submit G1"
+  ```
+  provider 需要 `DEEPSEEK_API_KEY` 环境变量（credentials 文件只对 web 组合生效）。
 - headless 的 `agent/created` 同样会触发自动接续；同一目录只能有一个活动变更，否则自动接续会拒绝（用 admin `pause-id`/`resume` 调整）。
-- 真实 `ts-todo-api` 目录不是 git 仓库：任务门自动提交、G3 cleanWorktree 会走降级分支；需要完整 git 语义时先 `git init` + 初始提交。
-- 无 subagents 的精简组合跑 S5 时，把 `.flowgate/config.yaml` 的 `review.enabled` 设为 `false`（G5/G6 会按配置放行，不再死锁）。
+- 真实 `ts-todo-api`、`java-renewal` 目录不是 git 仓库：任务门自动提交、G3 cleanWorktree 会走降级分支；需要完整 git 语义（派发/worktree）时先 `git init` + 初始提交。
+- 验证审查子 agent：保持 `review.enabled=true`，但把 `review.requireForTaskGate` 设为 `false`（审查失败不阻断任务门，便于观察真实结果）；到 G5 前把 `review.enabled` 改回 `false`——当前终审记录没有自动生产者（`g5.finalReview` 只读记录），真机 headless 里开着会死锁。
+- 验证派发/worktree：`config.dispatch` 用默认 `auto`，S4 让模型调用 `flow_dispatch_next`；`tasks.md` 的 `execution.batches[].mode` 决定顺序或并行（并行批次会为每个任务建 `.flowgate/worktrees/<变更>/<任务>/` 并合并回变更分支）。
+- `flow_dispatch_next` 的结构化 data 里 `worktree` 应为实际创建路径（2026-10-31 修复：此前回填的是派发前快照的空字段）。

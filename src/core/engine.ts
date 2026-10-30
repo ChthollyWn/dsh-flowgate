@@ -2416,8 +2416,9 @@ export class FlowEngine {
   /**
    * Archive a delivered change: generate the HTML report, move the change
    * directory to `.flowgate/archive/<date>-<id>/` and mark it archived.
-   * Incremental specs are copied under `.flowgate/specs/<id>/` as a minimal
-   * merge step (full main-spec merging is a v1.0 refinement, tracked in docs).
+   * Incremental specs are folded into `.flowgate/specs/<capability>/spec.md`
+   * with an OpenSpec-style ADDED / MODIFIED / REMOVED merge (T4.4); the result
+   * and warnings are recorded in the ledger as `spec.merged`.
    */
   private async archiveChange(change: ChangeStatus): Promise<void> {
     const now = isoNow(this.clock)
