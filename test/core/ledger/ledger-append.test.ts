@@ -20,7 +20,9 @@ describe('ledger append', () => {
     expect(event.prev).toBe(GENESIS_PREV)
     expect(event.type).toBe('flow.init')
     expect(event.data).toEqual({ plugin: '0.1.0' })
-    expect(event.at).toBe('2026-11-12T10:31:05+08:00')
+    // Instants are timezone-independent: the host timezone may differ (CI runs in UTC).
+    expect(Date.parse(event.at!)).toBe(Date.parse('2026-11-12T10:31:05+08:00'))
+    expect(event.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/)
     expect(event.mac).toMatch(/^[0-9a-f]{64}$/)
   })
 
@@ -42,7 +44,9 @@ describe('ledger append', () => {
     const ledger = createLedger({ fs, path: LEDGER_PATH, key: KEY, clock: fixedClock() })
     const event = await ledger.append({ type: 'flow.off' })
     expect(event.data).toEqual({})
-    expect(event.at).toBe('2026-11-12T10:31:05+08:00')
+    // Instants are timezone-independent: the host timezone may differ (CI runs in UTC).
+    expect(Date.parse(event.at!)).toBe(Date.parse('2026-11-12T10:31:05+08:00'))
+    expect(event.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/)
     await expect(ledger.readAll()).resolves.toHaveLength(1)
   })
 
