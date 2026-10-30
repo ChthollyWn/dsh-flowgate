@@ -43,11 +43,13 @@ export function toJsonSchema(specs: ParamSpecs): Record<string, unknown> {
     properties[name] = specToNode(spec)
     if (spec.required) required.push(name)
   }
+  // NOTE: keep the implicit parameter object schema minimal (type/properties/
+  // required). The DeepSeek provider adapter rejects some extra root keywords
+  // such as `additionalProperties` synchronously (surfaces as TRANSPORT).
   return {
     type: 'object',
     properties,
     ...(required.length > 0 ? { required } : {}),
-    additionalProperties: true,
   }
 }
 
@@ -58,7 +60,6 @@ function specToNode(spec: ParamSpec): Record<string, unknown> {
   if (spec.type === 'array') node.items = spec.items ? specToNode(spec.items) : { type: 'string' }
   if (spec.type === 'object') {
     node.properties = spec.properties ? toJsonSchema(spec.properties).properties : {}
-    node.additionalProperties = true
   }
   return node
 }
@@ -100,6 +101,21 @@ function matchesType(value: unknown, spec: ParamSpec): boolean {
       return typeof value === 'object' && !Array.isArray(value)
     default:
       return true
+  }
+}
+
+/**
+ * Tool result values must be *losslessly JSON* (DSH validates the runtime value
+ * before content rendering; `undefined` object properties/class instances make
+ * it fail with 'value is not lossless JSON'). Round-trip through JSON to drop
+ * everything JSON cannot represent exactly.
+ */
+export function toLosslessJson<T>(value: T): unknown {
+  if (value === undefined) return null
+  try {
+    return JSON.parse(JSON.stringify(value)) as unknown
+  } catch {
+    return null
   }
 }
 
@@ -173,17 +189,18 @@ export function defineHostTool(options: DefineHostToolOptions): DshToolDefinitio
         } satisfies HostToolValue
       }
       try {
-        return await options.execute(rawArgs as Record<string, unknown>, {
+        const value = await options.execute(rawArgs as Record<string, unknown>, {
           agentId: exec?.agent?.id !== undefined ? String(exec.agent.id) : undefined,
           toolCallId: exec?.callId !== undefined ? String(exec.callId) : undefined,
         })
+        return toLosslessJson(value) as HostToolValue
       } catch (error) {
         const info = toAgentError(error)
-        return {
+        return toLosslessJson({
           ok: false,
           summary: `${info.error}${info.hint ? `。提示：${info.hint}` : ''}`,
           data: { error: info.error, hint: info.hint, ...(info.code ? { code: info.code } : {}) },
-        } satisfies HostToolValue
+        }) as HostToolValue
       }
     },
   }

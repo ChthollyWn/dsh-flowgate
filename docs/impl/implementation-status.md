@@ -68,6 +68,27 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 
 复现脚本与截图见 [screenshots/](../screenshots/README.md)。走查用的 demo workspace 在 `~/Developer/WorkSpace/dsh-flowgate-demo/`（可删除）。
 
+## 3.2 模型链路走查（2026-10-30 晚，P0-2）
+
+用真实 DeepSeek API Key（只写入隔离 `DSH_HOME=/tmp/fg-demo-home` 的凭据存储，未进仓库、未提交；已删除）继续在真实 Web 宿主走查，发现并修复 3 个会阻断模型链路的真实问题：
+
+1. **模型请求全部 `TRANSPORT` 失败（根因：注入消息的 source kind）**：host 用 `source: { kind: 'flowgate' }` 注入 user 消息；DSH 的 MessageSource 是 merge-extensible 的封闭登记表，provider 在组装请求时对未知 kind 抛错（在 `fetch` 之前），被 provider 包装成 `DeepSeek Messages transport failed`。逐层定位方式：给插件加 `FLOWGATE_DEBUG_FETCH=1` 的 fetch 追踪（记录请求/响应），发现主请求根本没到网络、只有标题请求到达；再用 `FLOWGATE_DISABLE=session,context` 二分确认是注入消息。修复：所有注入消息改用官方 `runtime-context` kind（`{ kind: 'runtime-context', form: 'relay' }`）。
+2. **工具结果 `returned invalid output: value is not lossless JSON`**：`flow_status` 等工具把含 `undefined`/类实例的 snapshot 直接作为运行时值返回；DSH 在渲染 content 前校验 JSON 无损。修复：所有工具返回值先做 JSON round-trip（`toLosslessJson`），并加单测。
+3. **工具参数 schema 的根级扩展关键字**：`parameters` 根对象曾带 `additionalProperties: true`；官方 `ctx.tools.register` 只接受受支持子集，去掉扩展关键字、保留 `type/properties/required`。
+4. 顺带修复：`/flow new <描述>`（只带标题）此前 G0 因"一句话目标为空"卡在 S0；现在 summary 缺省回退为标题，立项即进入 S1。
+
+**本轮实测通过：**
+- 模型可正常调用（DeepSeek-V4.1-Flash，经 API Key provider），主请求带 46 个工具、HTTP 200、无 transport 错误；
+- `flow_status` 工具调用成功并把当前快照返回给模型（模型复述了 `initialized/stage/nextStep` 等字段）；
+- `/flow init`、`/flow new`（C-001 → S1）、`/flow allow-once R-STAGE-SRC`（OV-1）在真实会话执行并留痕；
+- `/flow doctor`：**工具 14/14 已注册**、守卫心跳 3 次调用/3 次判定、会话投影 ✓、`appendPluginRecord` ✓（devDependency 让隔离环境也能解析 peer）、会话租约与接管提示正常。
+
+**本轮未完成（下一步）**：
+- 真实宿主里"FlowGate 守卫拒绝 S1 写操作"的端到端演示：本次两次尝试都被 DSH 自身的"先读后写"文件策略或会话租约挡住（`/flow resume` 需 `--takeover`），没有真正走到 FlowGate 的 R-STAGE-SRC 判定；守卫规则本身由 host fake-ctx 与 core 单测覆盖。下一步：takeover 后先 read 再 edit，观察 `R-STAGE-SRC` 拒绝与 `allow-once` 放行。
+- `restrict`/`presentAs` 仍显示 ✗（scoped-only，应在 `agent/created` 的 agent ctx 上应用，H26 待补）；
+- `agent 生命周期事件` 能力标志 ✗（实际 `agent/created` 已在用于会话注入，属检测标志误报，待修）；
+- `subagent/sessionQuery/结构化提问/Remote` 在该精简 web 组合未启用（按降级处理）。
+
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |

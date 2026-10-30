@@ -318,3 +318,16 @@ describe('FlowEngine pipeline', () => {
     expect(decision.effect).toBe('deny')
   })
 })
+
+describe('立项（/flow new 只带标题）', () => {
+  it('标题即一句话目标：G0 自动通过并进入 S1', async () => {
+    const harness = await createHarness({ gateChecker: undefined })
+    await harness.engine.init()
+    const created = await harness.engine.newChange({ title: '给待办列表增加分享功能' })
+    const change = harness.engine.currentChange()
+    expect(change?.id).toBe(created.changeId)
+    expect(change?.summary).toBe('给待办列表增加分享功能')
+    expect(change?.gates.G0?.state).toBe('passed')
+    expect(change?.stage).toBe('S1')
+  })
+})

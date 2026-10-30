@@ -174,3 +174,13 @@ describe('工具执行与错误口径', () => {
     expect(engineState(harness.engine).calls.taskDone).toContain('T1')
   })
 })
+
+describe('tool results are lossless JSON', () => {
+  it('strips undefined/class values before returning to the runtime', async () => {
+    const { toLosslessJson } = await import('../../src/host/tools/schema.js')
+    const sanitized = toLosslessJson({ ok: true, summary: 'x', data: { a: undefined, b: new Date(0), c: [1, undefined] } }) as Record<string, unknown>
+    expect(JSON.parse(JSON.stringify(sanitized))).toEqual(sanitized)
+    expect((sanitized.data as Record<string, unknown>).a).toBeUndefined()
+    expect((sanitized.data as Record<string, unknown>).c).toEqual([1, null])
+  })
+})

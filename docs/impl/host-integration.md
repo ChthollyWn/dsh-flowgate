@@ -126,3 +126,13 @@ pnpm add link:/path/to/dsh-flowgate
 rm -rf /tmp/dsh-flowgate-dev /tmp/flowgate-schema.json
 # 不要删除日常 ~/.dsh/profiles/desktop 里的任何内容
 ```
+
+## 调试开关（仅诊断用，不影响正常行为）
+
+| 环境变量 | 作用 |
+|---|---|
+| `FLOWGATE_DEBUG_FETCH=1` | 给宿主进程的 `fetch` 装追踪器，把每个 LLM 请求/响应状态写到 `/tmp/flowgate-fetch.log`（用于定位 provider 层的 `TRANSPORT` 失败；生产不要开） |
+| `FLOWGATE_DISABLE=context,tools,guard,...` | 按模块名跳过安装（E2E 二分定位用；可选：session/guard/delegation/coverage/postcheck/compression/context/projection/gates/commands/tools/dispatch） |
+| `FLOWGATE_CONTEXT_MODE=pre-step` | 跳过 `systemPrompt.section`、强制走 `agent/pre-step` 注入（兼容性排查用） |
+
+已实测结论：注入给模型的 user 消息必须使用 DSH 已登记的 MessageSource kind（当前用官方 `runtime-context` + `form: 'relay'`）；自造 kind 会让 provider 在发请求前抛错，表现为 `DeepSeek Messages transport failed`。

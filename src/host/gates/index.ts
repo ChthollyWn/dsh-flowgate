@@ -26,7 +26,7 @@ export async function notifyAgent(runtime: HostRuntime, text: string, agent?: Ds
   try {
     await target.inject({
       content: [{ type: 'text', text: text.startsWith('[FlowGate]') ? text : `[FlowGate] ${text}` }],
-      source: { kind: 'flowgate' },
+      source: { kind: 'runtime-context', form: 'relay' },
     })
   } catch (error) {
     runtime.noteFeature('gates', `通知 agent 失败：${toAgentError(error).error}`)

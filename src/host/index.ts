@@ -15,6 +15,7 @@ import type { HostConfig, HostDeps } from './types.js'
 import { createHostDeps } from './deps.js'
 import { HostRuntime } from './runtime.js'
 import { toAgentError } from './errors.js'
+import { installFetchDebug } from './debug-fetch.js'
 
 // 各功能模块（按依赖顺序安装；全部内部降级）。
 import { installSession } from './session/index.js'
@@ -42,6 +43,12 @@ const moduleStatus: Record<string, 'ok' | 'failed'> = {}
 
 /** 插件入口。任何异常都不得冒泡到宿主启动流程。 */
 export function apply(ctx: DshContext, config: HostConfig = {}): void {
+  try {
+    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    if (env?.FLOWGATE_DEBUG_FETCH === '1') installFetchDebug()
+  } catch {
+    /* debug hook is best-effort */
+  }
   startHostPlugin(ctx, config)
 }
 
@@ -60,18 +67,30 @@ export function startHostPlugin(ctx: DshContext, config: HostConfig = {}, deps?:
   }
   activeRuntime = runtime
 
-  install('会话生命周期', () => installSession(runtime))
-  install('守卫', () => installGuard(runtime))
-  install('原生委派关闭', () => installDelegation(runtime))
-  install('覆盖自检', () => installCoverage(runtime))
-  install('事后检测', () => installPostcheck(runtime))
-  install('输出压缩', () => installEvidenceCompression(runtime))
-  install('上下文注入', () => installContext(runtime))
-  install('会话投影', () => installProjection(runtime))
-  install('人工门', () => installGates(runtime))
-  install('命令族', () => installCommands(runtime))
-  install('模型工具', () => installTools(runtime))
-  install('任务派发', () => installDispatch(runtime))
+  // Debug isolation flags (E2E bisect only; never required in normal use):
+  // FLOWGATE_DISABLE=context,tools,guard,projection,session,... skips those modules.
+  const disabled = new Set(
+    String((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.FLOWGATE_DISABLE ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  )
+  const installIf = (key: string, stage: string, fn: () => void): void => {
+    if (disabled.has(key)) return
+    install(stage, fn)
+  }
+  installIf('session', '会话生命周期', () => installSession(runtime))
+  installIf('guard', '守卫', () => installGuard(runtime))
+  installIf('delegation', '原生委派关闭', () => installDelegation(runtime))
+  installIf('coverage', '覆盖自检', () => installCoverage(runtime))
+  installIf('postcheck', '事后检测', () => installPostcheck(runtime))
+  installIf('compression', '输出压缩', () => installEvidenceCompression(runtime))
+  installIf('context', '上下文注入', () => installContext(runtime))
+  installIf('projection', '会话投影', () => installProjection(runtime))
+  installIf('gates', '人工门', () => installGates(runtime))
+  installIf('commands', '命令族', () => installCommands(runtime))
+  installIf('tools', '模型工具', () => installTools(runtime))
+  installIf('dispatch', '任务派发', () => installDispatch(runtime))
 
   logger('info', `FlowGate host 已激活（模块 ${Object.keys(moduleStatus).length} 个；插件版本 ${runtime.deps.pluginVersion}）`)
 

@@ -136,8 +136,14 @@ export function shouldInject(runtime: HostRuntime, agent: DshAgent | undefined):
 export function installContext(runtime: HostRuntime): void {
   let injectionMode: 'section' | 'pre-step' | 'none' = 'none'
 
+  // Debug isolation: FLOWGATE_CONTEXT_MODE=pre-step skips the systemPrompt section.
+  const envMode = String(
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.FLOWGATE_CONTEXT_MODE ?? '',
+  )
+  const skipSection = envMode === 'pre-step'
+
   // 1) 首选：systemPrompt 追加段。
-  runtime.injectService('systemPrompt', (scoped: DshContext) => {
+  if (!skipSection) runtime.injectService('systemPrompt', (scoped: DshContext) => {
     const prompt = scoped.get('systemPrompt') as {
       section?(section: unknown): () => void
       getSectionOrder?(name: string): number
@@ -187,7 +193,7 @@ export function installContext(runtime: HostRuntime): void {
       if (!shouldAppend) return result
       const message: DshUserMessage = {
         content: [{ type: 'text', text }],
-        source: { kind: 'flowgate' },
+        source: { kind: 'runtime-context', form: 'relay' },
       }
       return {
         ...result,
@@ -277,7 +283,7 @@ async function onTurnStopping(runtime: HostRuntime, payload: { agent?: DshAgent;
     '请立即运行对应验证命令（优先 `flow_verify`），用真实输出证明；如果还没做完，继续做完再宣布完成。' +
     '负责人可以看到回执与失败用例。'
   try {
-    agent.steer({ content: [{ type: 'text', text: steerText }], source: { kind: 'flowgate' } })
+    agent.steer({ content: [{ type: 'text', text: steerText }], source: { kind: 'runtime-context', form: 'relay' } })
     state.count += 1
     runtime.noteFeature('turn', `已 steer 继续（第 ${state.count}/${maxContinues} 次，turn=${turn}）`)
     void engine

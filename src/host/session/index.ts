@@ -70,7 +70,7 @@ export async function onEngineReady(runtime: HostRuntime, agent: DshAgent, engin
               text: `[FlowGate] 项目已启用，但没有自动接续到进行中的变更：${info.error}。下一步：${info.hint}；或 /flow new <描述> 立项。`,
             },
           ],
-          source: { kind: 'flowgate' },
+          source: { kind: 'runtime-context', form: 'relay' },
         })
       } catch {
         // agent 已不可用：忽略。
@@ -94,7 +94,7 @@ export async function onEngineReady(runtime: HostRuntime, agent: DshAgent, engin
     if (notices.length > 0) parts.push(`通知：${notices.join('；')}`)
     const text = parts.join('\n')
     try {
-      await agent.inject({ content: [{ type: 'text', text }], source: { kind: 'flowgate' } })
+      await agent.inject({ content: [{ type: 'text', text }], source: { kind: 'runtime-context', form: 'relay' } })
     } catch (error) {
       runtime.noteFeature('session', `交接摘要注入失败：${toAgentError(error).error}`)
     }

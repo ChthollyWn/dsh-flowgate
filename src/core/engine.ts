@@ -694,11 +694,14 @@ export class FlowEngine {
     }
 
     const changeId = store.nextChangeId(this.state.changes, input.kind ?? 'change')
+    // `/flow new <描述>` only carries a title; G0 requires a one-line goal. Default the
+    // summary to the title instead of failing G0 on a human-typed command.
+    const summary = input.summary?.trim() ? input.summary.trim() : title
     const change = initialStatus({
       id: changeId,
       kind: input.kind ?? 'change',
       title,
-      summary: input.summary,
+      summary,
       complexity,
       risk,
       stage: 'S0',
@@ -728,9 +731,13 @@ export class FlowEngine {
       await this.saveLeases()
     }
     await this.appendLedger('change.created', { changeId: change.id, kind: change.kind, title, complexity, risk })
-    await this.recordGateResult(change, 'G0', await this.evaluateGate(change, 'G0'), now)
+    const g0 = await this.evaluateGate(change, 'G0')
+    await this.recordGateResult(change, 'G0', g0, now)
     await this.saveChange(change)
-    if (input.kind === 'analysis') {
+    const g0Failed = g0.failures.length > 0
+    if (g0Failed) {
+      this.pushNotice(`G0 未通过：${g0.failures.map((failure) => failure.label).join('；')}。修正后重新提交 G0。`)
+    } else if (input.kind === 'analysis') {
       this.pushNotice(`已立分析任务 ${change.id}：只读排查，结论用 flow_submit_analysis 提交（必须带源码引用）。`)
     } else {
       this.pushNotice(`已立项 ${change.id}（${complexityLabel(complexity)} · ${riskLabel(risk)}）。当前 S1 需求澄清：先读相关代码与规格，再用 ask_user_question 澄清，写 clarify.md / proposal.md / 增量规格。`)
@@ -741,7 +748,9 @@ export class FlowEngine {
       message:
         input.kind === 'analysis'
           ? `分析任务 ${change.id} 已创建：只读，不改代码。`
-          : `变更 ${change.id} 已创建，建议复杂度 ${complexityLabel(complexity)}、风险 ${riskLabel(risk)}（负责人可在 G1 确认或调整）。`,
+          : g0Failed
+            ? `变更 ${change.id} 已创建，但 G0 未通过：${g0.failures.map((failure) => failure.label).join('；')}。修正后重新提交 G0。`
+            : `变更 ${change.id} 已创建并进入 S1 需求澄清（${complexityLabel(complexity)} · ${riskLabel(risk)}，建议等级，负责人可在 G1 确认或调整）。`,
     }
   }
 

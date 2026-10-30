@@ -317,7 +317,7 @@ async function finalizeTask(
   const target = runtime.mainAgent()
   if (target) {
     try {
-      await target.inject({ content: [{ type: 'text', text: lines.join('\n') }], source: { kind: 'flowgate' } })
+      await target.inject({ content: [{ type: 'text', text: lines.join('\n') }], source: { kind: 'runtime-context', form: 'relay' } })
     } catch {
       // 忽略通知失败。
     }
