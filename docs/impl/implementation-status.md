@@ -13,7 +13,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期、并发会话租约、`/flow repair` |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点在 host 侧接线并已有 host 单测（test/host/dispatch.test.ts）；缺 provider/git 时降级 |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 主体完成 | 真实 web 宿主走查 + 11 张截图（见 §3.1/§3.3）；剩余：面板按钮 Remote 兜底、低复杂度确认卡、误判反馈截图 |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 114 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 116 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -30,7 +30,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/null
 ```
 
-最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入测试后 67 files / 976 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 848.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%（`pnpm coverage`）。
+最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入/检查点测试后 67 files / 981 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 848.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%（`pnpm coverage`）。
 
 ## 3. 关键实现决策（与 03 方案的差异）
 
@@ -212,7 +212,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 | 1 | ~~浏览器端交互未在真实 DSH web/desktop 会话里跑过~~（已 2026-10-30 实测，见 §3.1） | 剩余：人工按钮点击流程（Remote 兜底）、低复杂度确认卡、误判反馈截图 | 用桌面会话补做 |
 | 2 | 三个 preset 已在真实 web 宿主的预设菜单出现（§3.3）；headless 用 overlay 补 `@deepseek-ai/dsh-agent-preset-registry` 后可激活（§3.5 实测），但**会话内切换**仍未验证 | 工程模式/执行者/只读 preset 的运行时行为仍需确认 | 桌面/Web 会话切换实测；overlay 写法已记入 host-integration |
 | 3 | 有 / 无插件对照评测未执行（M6 T6.1）；评测脚本 `scripts/run-evaluation.mjs` 与 greenfield 空仓库已就绪并通过 dry-run | 无法给出 M-15/M-18 实测数字 | 按 [evaluation.md](../evaluation.md) 跑 9 任务 × 2 条件 |
-| 4 | 审查子 agent 真机跑通（§3.5/§3.7，RV-1 verdict=pass + coverageOk）；派发/worktree 真机已验证创建、分支命名、子 agent 启动、data 回填、任务门/审查/task.done（C-006/C-007）；**worktree 合并 + 集成检查点**因 headless 一次性运行在后台 finalize 前退出而未完成，且无专门单测；scope 变更请求需负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式/常驻宿主会话复验合并+集成检查点；补 maybeCheckpoint 单测 |
+| 4 | 审查子 agent 真机跑通（RV-1 verdict=pass + coverageOk）；派发/worktree 真机已验证创建、分支命名、子 agent 启动、data 回填、任务门/审查/task.done；**worktree 合并 + 集成检查点**已有 2 个 host 单测（合并成功/冲突 abort）覆盖逻辑，但真实宿主上的合并结算仍待交互式会话（headless 一次性运行提前退出）；scope 变更请求需负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式会话复验合并 + 集成检查点；scope 变更审批通知 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
 | 7 | 覆盖率分支 67.8% 低于 80% 目标（语句 82.5% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |

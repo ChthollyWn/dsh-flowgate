@@ -11,7 +11,7 @@ import type { DshSubagentActivationSpec, DshSubagentResult } from '../../src/hos
 import type { ChangeStatus, DispatchOutcome, DispatchTaskEnvelope, FlowgateConfig, TaskCard, TaskState } from '../../src/core/types.js'
 import { flush, setupPlugin, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
-import { dispatchBusy, EXECUTOR_OUTPUT_SCHEMA, resetDispatchStateForTest, runningDispatches, taskWorktreeBranch } from '../../src/host/dispatch/index.js'
+import { dispatchBusy, EXECUTOR_OUTPUT_SCHEMA, resetDispatchStateForTest, runIntegrationCheckpoint, runningDispatches, taskWorktreeBranch } from '../../src/host/dispatch/index.js'
 import { createFakeEngine, createFakeSubagents, defaultFakeConfig, type FakeEngineState } from '../../src/host/testing/fake-ctx.js'
 import { FLOWGATE_PRESETS } from '../../src/host/guard/delegation.js'
 import * as fsp from 'node:fs/promises'
@@ -493,5 +493,68 @@ describe('dispatchBusy 互斥', () => {
     expect(engineState(engine).calls.taskFailed).toEqual([{ taskId: 'T1', reason: '子 agent 停止原因：cancelled' }])
     expect(engineState(engine).calls.taskDone).toEqual([])
     expect(lastNotice(h)).toContain('任务已标记失败')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 并行批次集成检查点（合并 worktree 分支 + integration 命令）
+// ---------------------------------------------------------------------------
+
+describe('并行批次集成检查点', () => {
+  function checkpointRuntime(run: (command: string, options: unknown) => Promise<unknown>) {
+    return {
+      root: () => '/fake/project',
+      ports: () => ({ commandRunner: { run } }),
+      noteFeature: vi.fn(),
+      emit: vi.fn(),
+      absolute: (relative: string) => nodePath.join('/fake/project', relative),
+    } as never
+  }
+
+  function checkpointEngine(tasks: Record<string, unknown>, completed: unknown[]) {
+    return {
+      snapshot: () => ({ batches: [{ id: 'B1', tasks: ['T1', 'T2'] }] }),
+      currentChange: () => ({ id: 'C-001', tasks, batches: [] }),
+      getConfig: () => ({ commands: { integration: 'pnpm test' } }),
+      completeCheckpoint: async (id: string, result: unknown) => {
+        completed.push({ id, result })
+      },
+    } as never
+  }
+
+  const doneTasks = {
+    T1: { status: 'done', worktree: '.flowgate/worktrees/C-001/T1' },
+    T2: { status: 'done', worktree: '.flowgate/worktrees/C-001/T2' },
+  }
+
+  it('合并各任务分支、执行 integration 命令、completeCheckpoint(ok) 并清理 worktree/branch', async () => {
+    gitMock.runGit.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 })
+    const completed: { id: string; result: { ok: boolean } }[] = []
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
+    await runIntegrationCheckpoint(checkpointRuntime(run), checkpointEngine(doneTasks, completed), 'B1')
+    const calls = gitMock.runGit.mock.calls.map((call) => (call[0] as string[]).join(' '))
+    expect(calls).toContain('merge --no-ff --no-edit flowgate-tasks/C-001/T1')
+    expect(calls).toContain('merge --no-ff --no-edit flowgate-tasks/C-001/T2')
+    expect(run).toHaveBeenCalledWith('pnpm test', expect.objectContaining({ cwd: '/fake/project' }))
+    expect(completed[0]?.id).toBe('B1')
+    expect(completed[0]?.result.ok).toBe(true)
+    expect(calls.some((line) => line.startsWith('worktree remove --force'))).toBe(true)
+    expect(calls).toContain('branch -D flowgate-tasks/C-001/T1')
+  })
+
+  it('合并冲突时 abort 并记录 checkpoint 失败（不删除 worktree）', async () => {
+    gitMock.runGit.mockImplementation(async (args: string[]) => {
+      const line = args.join(' ')
+      if (line.startsWith('merge --no-ff')) return { stdout: '', stderr: 'CONFLICT', exitCode: 1 }
+      return { stdout: '', stderr: '', exitCode: 0 }
+    })
+    const completed: { id: string; result: { ok: boolean; detail?: string } }[] = []
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '', timedOut: false }))
+    await runIntegrationCheckpoint(checkpointRuntime(run), checkpointEngine(doneTasks, completed), 'B1')
+    const calls = gitMock.runGit.mock.calls.map((call) => (call[0] as string[]).join(' '))
+    expect(calls).toContain('merge --abort')
+    expect(completed[0]?.result.ok).toBe(false)
+    expect(completed[0]?.result.detail).toContain('冲突')
+    expect(calls.some((line) => line.startsWith('worktree remove --force'))).toBe(false)
   })
 })

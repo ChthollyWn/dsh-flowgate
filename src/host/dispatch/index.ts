@@ -336,7 +336,7 @@ async function finalizeTask(
   runtime.emit()
   // 批次集成检查点（仅并行批次；顺序批次由 engine.dispatchNext 自己推进）。
   if (envelope.mode === 'parallel' && envelope.batch) {
-    await maybeCheckpoint(runtime, engine, envelope.batch)
+    await runIntegrationCheckpoint(runtime, engine, envelope.batch)
   }
   // 通知主会话（delivery:'caller' 不会自动通知；用 inject 不唤醒）。
   const target = runtime.mainAgent()
@@ -349,8 +349,8 @@ async function finalizeTask(
   }
 }
 
-/** 并行批次全部任务结束后做集成检查点（合并 worktree 分支 + integration 命令）。 */
-async function maybeCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId: string): Promise<void> {
+/** 并行批次全部任务结束后做集成检查点（合并 worktree 分支 + integration 命令）。导出供单测。 */
+export async function runIntegrationCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId: string): Promise<void> {
   try {
     const snapshot = engine.snapshot()
     const batch = snapshot.batches.find((item) => item.id === batchId)
