@@ -1,0 +1,13 @@
+server:
+  port: 8080
+
+renewal:
+  callback:
+    # 基准任务 R3（风险改造）会要求把密钥移到配置/环境变量，
+    # 当前实现把它硬编码在 SignatureVerifier 里，是待改造的安全问题。
+    secret: dev-secret-do-not-use-in-prod
+  timezone: Asia/Shanghai
+
+logging:
+  level:
+    com.acme.member: info

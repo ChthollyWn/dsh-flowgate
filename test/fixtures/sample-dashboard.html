@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="FlowGate">
+<title>FlowGate 跨会话看板</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--card:#fff;--text:#1f2430;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--ok:#0f7b46;--bad:#c02626;--warn:#9a6a00;--info:#1d4ed8;--track:#eef1f5}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1a1f29;--text:#e5e8ee;--muted:#9aa3b2;--line:#2b3240;--accent:#69a2ff;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--info:#93c5fd;--track:#242b38}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line);padding:14px 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+header h1{font-size:17px;margin:0}header .meta{color:var(--muted);font-size:12px}
+nav a{color:var(--accent);text-decoration:none;font-size:12px;margin-right:10px}
+main{max-width:1180px;margin:0 auto;padding:18px 22px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:16px 0;scroll-margin-top:70px}
+.card h2{font-size:18px;margin:0 0 14px;border-bottom:1px solid var(--line);padding-bottom:10px}
+h3{font-size:14.5px;margin:14px 0 8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.stat{background:var(--track);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.stat span{color:var(--muted);font-size:11.5px}.stat strong{font-size:16px}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:var(--track);font-weight:600;white-space:nowrap}tr:last-child td{border-bottom:none}
+code{background:var(--track);border-radius:4px;padding:1px 4px;font-size:12px;word-break:break-all}
+.chips{display:flex;flex-wrap:wrap;gap:2px;margin-top:6px}
+.badge{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;border:1px solid var(--line);background:var(--track);margin:1px 2px}
+.badge.ok{color:var(--ok)}.badge.bad,.bad{color:var(--bad)}.badge.warn,.warn{color:var(--warn)}.badge.info{color:var(--info)}.badge.muted{color:var(--muted)}
+.empty{color:var(--muted);font-size:12.5px}.note{background:var(--track);border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--muted)}
+.status-line{font-weight:600}
+.two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+.stages{display:flex;flex-wrap:wrap;gap:6px}
+.stage{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;background:var(--track);white-space:nowrap}
+.stage.done{color:var(--ok)}.stage.current{color:var(--info);border-color:var(--info)}.stage.blocked{color:var(--bad);border-color:var(--bad)}.stage.pending{color:var(--muted)}
+.pipeline-block{border-top:1px dashed var(--line);padding-top:10px;margin-top:12px}.pipeline-block:first-of-type{border-top:none;margin-top:0}
+.diagram-row{display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:start;padding:6px 0;border-bottom:1px dashed var(--line)}
+.diagram-batch{font-size:12px;color:var(--muted)}
+.diagram-lanes{display:flex;flex-wrap:wrap;gap:4px}
+.lane-chip{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:11.5px;background:var(--track)}
+footer{text-align:center;color:var(--muted);font-size:11.5px;padding:18px}
+@media print{header{position:static}nav{display:none}.card{break-inside:avoid}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>FlowGate 跨会话看板</h1><div class="meta">生成于 2026-11-12T12:00:00+08:00 · 只读 · 离线可用</div></div>
+  <nav><a href="#sum">累计指标</a><a href="#ledger">台账</a><a href="#pipeline">流水线</a><a href="#execution">执行图</a><a href="#pending">待处理</a><a href="#intercepts">拦截与证据</a></nav>
+</header>
+<main>
+<p class="note">本看板由 FlowGate 在每次状态变化后重新生成，单文件、断网可打开。它只展示、不能操作：批准与放行请回到 DSH 用 <code>/flow</code> 命令或右侧栏面板完成。</p>
+<section class="card" id="sum"><h2>累计指标</h2><div class="grid"><div class="stat"><span>变更总数</span><strong>1</strong></div><div class="stat"><span>进行中</span><strong>1</strong></div><div class="stat"><span>已交付</span><strong>0</strong></div><div class="stat"><span>任务完成</span><strong>3 / 3</strong></div><div class="stat"><span>证据回执</span><strong>4</strong></div><div class="stat"><span>越界拦截</span><strong>2</strong></div><div class="stat"><span>累计拦截次数</span><strong>2</strong></div><div class="stat"><span>待处理事项</span><strong>0</strong></div><div class="stat"><span>单次放行已用</span><strong>1</strong></div><div class="stat"><span>拦截覆盖自检</span><strong>2 / 2 个可写工具（0 个未覆盖）</strong></div></div>
+     <p class="note">累计口径来自 <code>.flowgate/</code> 下的台账与进行状态，不依赖 DSH 是否在运行；token / 响应时间等宿主侧数据缺失时显示「未知」，不用 0 代替（FR-10.4）。</p>
+     <p class="status-line">当前状态：◆ FlowGate C-003 高 · 高风险 │ ⑥ 交付 ▸ 等你批准交付 │ 待处理 0 · 拦截 2 │ 下一步：/flow approve G6</p></section>
+<section class="card" id="ledger"><h2>变更台账</h2><p class="note">全部变更与分析任务；最近活动时间来自各变更的 status.json。</p>
+     <div class="table-wrap"><table><thead><tr><th>编号</th><th>类型</th><th>标题</th><th>复杂度</th><th>风险</th><th>阶段</th><th>状态</th><th>任务</th><th>证据</th><th>待处理</th><th>最近活动</th></tr></thead><tbody><tr><td><code>C-003</code></td><td><span class="badge ">变更</span></td><td>会员续费</td><td>中</td><td>高</td><td>S6 交付</td><td><span class="badge info">进行中</span></td><td>3 / 3</td><td>4</td><td>0</td><td>2026-11-12T12:00:00+08:00</td></tr></tbody></table></div></section>
+<section class="card" id="pipeline"><h2>阶段流水线</h2><div class="pipeline-block">
+      <h3><code>C-003</code> 会员续费 <span class="badge info">进行中</span></h3>
+      <div class="stages"><span class="stage done" title="路线图">✓ 路线图</span><span class="stage done" title="S0 立项">✓ S0 立项</span><span class="stage done" title="S1 需求澄清">✓ S1 需求澄清</span><span class="stage done" title="S2 上下文">✓ S2 上下文</span><span class="stage done" title="S3 设计拆解">✓ S3 设计拆解</span><span class="stage done" title="S4 执行">✓ S4 执行</span><span class="stage done" title="S5 验证">✓ S5 验证</span><span class="stage current" title="S6 交付">● S6 交付</span><span class="stage pending" title="归档">○ 归档</span></div>
+      <div class="chips"><span class="badge ok">G0 passed</span> <span class="badge ok">G1 passed</span> <span class="badge ok">G2 passed</span> <span class="badge ok">G3 passed</span> <span class="badge ok">G4 passed</span> <span class="badge ok">G5 passed</span> <span class="badge warn">G6 awaiting</span></div>
+      
+      
+    </div></section>
+<section class="card" id="execution"><h2>执行图</h2><p class="note">按批次与并行泳道展示；节点状态来自 status.json，子 agent 在独立 worktree 中运行时显示其 worktree 路径。</p><div class="pipeline-block"><h3><code>C-003</code> · 批次 2 个</h3>
+      <div class="diagram-row"><span class="diagram-batch">B1（sequential） · 检查点：passed</span><span class="diagram-lanes"><span class="lane-chip done">T1 · done · GREEN</span></span></div><div class="diagram-row"><span class="diagram-batch">B2（parallel） · 检查点：passed</span><span class="diagram-lanes"><span class="lane-chip done">T2 · done · GREEN · .flowgate/worktrees/C-003-T2</span> <span class="lane-chip done">T3 · done · .flowgate/worktrees/C-003-T3</span></span></div>
+      
+    </div></section>
+<section class="card" id="pending"><h2>待处理事项（0）</h2><p class="empty">（没有待处理事项）</p></section>
+<section class="card" id="intercepts"><h2>最近拦截与证据</h2><div class="two-col">
+      <div><h3>最近拦截（2）</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>变更</th><th>类型</th><th>路径</th><th>来源</th><th>时间</th><th>状态</th></tr></thead><tbody><tr><td><code>V-2</code></td><td><code>C-003</code></td><td>undeclared-new-file</td><td>src/main/java/com/example/NewUtil.java</td><td>post</td><td>2026-11-12T10:28:00+08:00</td><td><span class="badge bad">未撤销</span></td></tr><tr><td><code>V-1</code></td><td><code>C-003</code></td><td>outside-scope</td><td>src/main/java/com/example/legacy/Wrong.java</td><td>pre</td><td>2026-11-12T10:25:00+08:00</td><td><span class="badge ok">已撤销</span></td></tr></tbody></table></div></div>
+      <div><h3>按规则统计</h3><div class="table-wrap"><table><thead><tr><th>规则</th><th>次数</th></tr></thead><tbody><tr><td><code>R-STAGE-SRC</code></td><td>1</td></tr><tr><td><code>R-SCOPE</code></td><td>1</td></tr></tbody></table></div></div>
+    </div>
+    <h3>最近证据回执（每个变更最近 5 条）</h3>
+    <div class="table-wrap"><table><thead><tr><th>回执</th><th>变更</th><th>任务</th><th>TDD</th><th>完成时间</th><th>完整日志</th></tr></thead><tbody><tr><td><code>E-0001</code></td><td><code>C-003</code></td><td>T1</td><td><span class="badge ok">GREEN</span></td><td>2026-11-12T10:20:00+08:00</td><td><code>.flowgate/state/evidence/E-0001.log</code></td></tr><tr><td><code>E-0002</code></td><td><code>C-003</code></td><td>T1</td><td><span class="badge ok">GREEN</span></td><td>2026-11-12T10:20:00+08:00</td><td><code>.flowgate/state/evidence/E-0002.log</code></td></tr><tr><td><code>E-0003</code></td><td><code>C-003</code></td><td>T2</td><td><span class="badge ok">GREEN</span></td><td>2026-11-12T10:31:00+08:00</td><td><code>.flowgate/state/evidence/E-0003.log</code></td></tr><tr><td><code>E-0004</code></td><td><code>C-003</code></td><td>T3</td><td><span class="badge muted">none</span></td><td>2026-11-12T10:29:00+08:00</td><td><code>.flowgate/state/evidence/E-0004.log</code></td></tr></tbody></table></div></section>
+</main>
+<footer>FlowGate · 硬约束开发流程门禁 · 跨会话离线看板</footer>
+<script>
+(function(){
+  var links = document.querySelectorAll('nav a');
+  for (var i = 0; i < links.length; i++) {
+    links[i].addEventListener('click', function (event) {
+      var target = document.getElementById(this.getAttribute('href').slice(1));
+      if (target) { event.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
+  }
+})();
+</script>
+</body>
+</html>

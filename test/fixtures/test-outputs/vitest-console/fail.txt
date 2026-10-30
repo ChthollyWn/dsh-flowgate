@@ -1,0 +1,9 @@
+ RUN  v2.1.0 /repo
+
+ ❯ tests/renewal.test.ts (3 tests | 1 failed) 18ms
+   × duplicate callback is ignored 3ms
+     → expected 2026-12-01 to be 2026-12-31
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  10:00:00

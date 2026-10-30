@@ -1,0 +1,10 @@
+# 依赖
+node_modules/
+
+# 测试与构建产物
+coverage/
+*.log
+
+# 本地环境
+.env
+.DS_Store

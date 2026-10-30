@@ -1,0 +1,7 @@
+> Task :test
+com.example.billing.InvoiceTest > invoiceIsCreated PASSED
+com.example.billing.InvoiceTest > invoiceTotals PASSED
+com.example.billing.InvoiceTest > refundPath PASSED
+
+4 tests completed, 1 skipped
+BUILD SUCCESSFUL in 2s

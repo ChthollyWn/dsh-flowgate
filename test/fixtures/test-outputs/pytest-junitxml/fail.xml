@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="tests.test_renewal" tests="2" failures="1" errors="0" skipped="0" time="0.03">
+    <testcase classname="tests.test_renewal" name="test_duplicate" file="tests/test_renewal.py" time="0.01">
+      <failure message="assert 2 == 1">tests/test_renewal.py:12: AssertionError</failure>
+    </testcase>
+    <testcase classname="tests.test_renewal" name="test_renewed" file="tests/test_renewal.py" time="0.02"/>
+  </testsuite>
+</testsuites>

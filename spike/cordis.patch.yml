@@ -1,0 +1,37 @@
+# FlowGate spike 的组合层（bundle patch）。
+#
+# 语义（dsh-app-boot 0.2.1-rc.5）：
+#   * 顶层是一个 YAML 数组：每项要么按 id 覆盖/禁用已有 row，要么是 `- insert: [...]`
+#   * `disabled: !!js <表达式>`、`config: <任意含 !!js 的值>` 在启动时求值，可用变量：
+#       ctx（宿主 ctx，例如 ctx.get('profileContext')）、process、baseUrl（本 patch 所在包的安装根）
+#   * 按 id 的 patch 会**整体替换**该 row 的 config（不深合并），所以覆盖时必须重述要保留的字段
+#   * 包名可以是 npm 包标识符、绝对路径或 file: URL；相对路径（./ ../）相对 patch 文件解析
+- insert:
+    - id: flowgate-spike
+      name: 'dsh-flowgate-spike'
+      config:
+        markerPath: .flowgate/config.yaml
+
+    # 随插件提供一个 FlowGate 工程模式 preset。
+    # 注意：rc.5 的 preset 不是特殊语法，就是一行 @deepseek-ai/dsh-agent-preset，
+    # config.id 是存在会话里的 preset 身份，config.plugins 是子插件 entry 列表。
+    - id: preset-flowgate
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: flowgate
+        name: FlowGate 工程模式
+        description: 硬约束开发流程：先澄清与设计，再 TDD 实现，证据驱动验收。
+        order: 50
+        plugins:
+          - name: 'dsh-flowgate-spike'
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are FlowGate, a process-gated coding agent. Ask before assuming;
+                never claim completion without fresh command evidence.
+          # 只读工具集示例：真实 preset 从这里删掉 write/edit/bash 之外的能力，或加 restrict 行
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'

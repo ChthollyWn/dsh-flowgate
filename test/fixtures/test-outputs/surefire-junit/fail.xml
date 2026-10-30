@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.RenewalCallbackTest" tests="3" failures="1" errors="0" skipped="0" time="0.51">
+  <testcase name="duplicateCallbackIsIgnored" classname="com.example.RenewalCallbackTest" time="0.05">
+    <failure message="expected: &lt;2026-12-01&gt; but was: &lt;2026-12-31&gt;">java.lang.AssertionError: expected: &lt;2026-12-01&gt; but was: &lt;2026-12-31&gt;
+	at com.example.RenewalServiceTest.duplicateCallbackIsIgnored(RenewalServiceTest.java:88)</failure>
+  </testcase>
+  <testcase name="renewedWhenExpired" classname="com.example.RenewalCallbackTest" time="0.06"/>
+  <testcase name="legacyPath" classname="com.example.RenewalCallbackTest" time="0.08"/>
+</testsuite>

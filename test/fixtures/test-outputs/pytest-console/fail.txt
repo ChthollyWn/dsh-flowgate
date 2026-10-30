@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+collected 3 items
+
+tests/test_renewal.py ..F                                                [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_duplicate __________________________________
+
+    def test_duplicate():
+        state = apply_callback("order-1")
+>       assert state.renewals == 1
+E       assert 2 == 1
+
+tests/test_renewal.py:12: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_renewal.py::test_duplicate - assert 2 == 1
+========================= 1 failed, 2 passed in 0.08s =========================

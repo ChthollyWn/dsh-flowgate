@@ -1,0 +1,8 @@
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "start", "Package": "example.com/renewal"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "run", "Package": "example.com/renewal", "Test": "TestDuplicateCallbackIsIgnored"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "output", "Package": "example.com/renewal", "Test": "TestDuplicateCallbackIsIgnored", "Output": "=== RUN   TestDuplicateCallbackIsIgnored\n"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "output", "Package": "example.com/renewal", "Test": "TestDuplicateCallbackIsIgnored", "Output": "    renewal_test.go:42: got 2026-12-31, want 2026-12-01\n"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "fail", "Package": "example.com/renewal", "Test": "TestDuplicateCallbackIsIgnored", "Elapsed": 0.01}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "run", "Package": "example.com/renewal", "Test": "TestRenewedWhenExpired"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "pass", "Package": "example.com/renewal", "Test": "TestRenewedWhenExpired", "Elapsed": 0.02}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "fail", "Package": "example.com/renewal", "Elapsed": 0.03}

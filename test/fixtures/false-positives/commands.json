@@ -1,0 +1,51 @@
+{
+  "_comment": "误伤回归样本（03 §4.4）：safe 样本不得命中写入/危险命令；dangerous 样本必须命中列出的分类。",
+  "safe": [
+    {
+      "command": "node -e \"const f = x => x * 2\"",
+      "note": "dsh-perm-gate#4：引号内的箭头函数不是重定向，也不是写入"
+    },
+    {
+      "command": "echo \"=> x\"",
+      "note": "=> 在引号内只是字符串，不能当成重定向"
+    },
+    {
+      "command": "git status",
+      "note": "只读命令"
+    },
+    {
+      "command": "pnpm vitest run",
+      "note": "测试命令，不修改源码"
+    },
+    {
+      "command": "cat <<EOF\nrm -rf /\nEOF",
+      "note": "heredoc 正文不是命令位置"
+    },
+    {
+      "command": "echo \"git reset --hard\"",
+      "note": "引号内的关键字不参与危险命令匹配"
+    }
+  ],
+  "dangerous": [
+    {
+      "command": "git -C ../repo push --force",
+      "classes": ["dangerous", "push"],
+      "note": "cc-safety-net 公开漏检：-C 全局参数不能绕过 push --force"
+    },
+    {
+      "command": "rsync -a --delete src/ backup/",
+      "classes": ["dangerous", "mutating"],
+      "note": "cc-safety-net 公开漏检：rsync --delete 会删除目标侧文件"
+    },
+    {
+      "command": "git reset --hard HEAD",
+      "classes": ["dangerous", "mutating"],
+      "note": "丢弃未提交改动"
+    },
+    {
+      "command": "psql -c \"DROP TABLE users\"",
+      "classes": ["dangerous"],
+      "note": "SQL 客户端执行 DROP"
+    }
+  ]
+}

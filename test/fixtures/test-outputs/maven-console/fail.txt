@@ -1,0 +1,6 @@
+[INFO] Scanning for projects...
+[INFO] Running com.example.RenewalServiceTest
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.55 s <<< FAILURE! - in com.example.RenewalServiceTest
+[ERROR] Failures: 
+[ERROR]   RenewalServiceTest.duplicateCallbackIsIgnored:88 expected: <2026-12-01> but was: <2026-12-31>
+[INFO] BUILD FAILURE

@@ -1,0 +1,16 @@
+     Running unittests src/lib.rs
+
+running 2 tests
+test tests::duplicate_callback_is_ignored ... FAILED
+test tests::renewed_when_expired ... ok
+
+failures:
+
+---- tests::duplicate_callback_is_ignored stdout ----
+thread 'tests::duplicate_callback_is_ignored' panicked at 'assertion failed: got 2026-12-31, want 2026-12-01', src/renewal.rs:42:5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+failures:
+    tests::duplicate_callback_is_ignored
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s

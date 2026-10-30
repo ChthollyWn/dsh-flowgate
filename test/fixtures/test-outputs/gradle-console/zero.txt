@@ -1,0 +1,4 @@
+> Task :test
+
+0 tests completed
+BUILD SUCCESSFUL in 1s

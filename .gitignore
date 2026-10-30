@@ -1,0 +1,12 @@
+node_modules/
+lib/
+lib.tmp/
+coverage/
+spike/node_modules/
+spike/*.tgz
+*.log
+.DS_Store
+# Local dogfooding state when FlowGate manages its own repository.
+.flowgate/state/
+.flowgate/worktrees/
+.flowgate/dashboard.html

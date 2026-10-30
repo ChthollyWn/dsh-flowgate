@@ -1,0 +1,72 @@
+# FlowGate 组合包 patch 层（由 `package.json` 的 `dsh.bundle.patch` 引用）。
+#
+# 第一行把本包的 host 入口作为普通 Cordis 插件加载；
+# `package.json` 的 `dsh.client` 声明让 Web 端加载 ./lib/client.js 作为浏览器半边。
+#
+# 下面是 FlowGate 的三个 Agent Preset（H25，写作依据：docs/impl/dsh-plugin-api-cheatsheet.md §3.3）。
+# rc.5 的 preset 不是特殊语法，就是插入一行 `@deepseek-ai/dsh-agent-preset`，
+# config 里给 id/name/description/order/plugins；子行与 patch 行同构。
+# 行 id 固定（preset-*），profile patch 可以按 id 覆盖 config。
+#
+# ⚠️ 待实测（M0 兼容矩阵）：preset 的 plugins 列表在不同 DSH 版本里可能要求额外的
+# model-selection / 压缩参数子行；若宿主组合缺少 `@deepseek-ai/dsh-agent-preset`
+# 或 `@deepseek-ai/dsh-tool-fs`，本层会整体被跳过（skippedBundles），
+# 不影响 host 插件行与 /flow 命令、守卫、工具等核心功能。
+- insert:
+    - id: dsh-flowgate
+      name: dsh-flowgate
+      config:
+        # 总开关（调试用）；正常保持 true。
+        enabled: true
+
+    # ── 工程模式：受管控项目的推荐会话 preset ────────────────────────────────
+    - id: preset-flowgate
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: flowgate
+        name: FlowGate 工程模式
+        description: 硬约束开发流程：先澄清与设计，再按执行图 TDD，证据驱动验收；写操作由 FlowGate 守卫把关。
+        order: 50
+        plugins:
+          - id: flowgate-persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: '你在 FlowGate 工程模式下工作：严格按阶段推进，先澄清需求与边界，再设计拆解，禁止跳步；用证据而不是自述证明完成。'
+
+    # ── 执行者：flow_dispatch_next 派发的子 agent ───────────────────────────
+    - id: preset-flowgate-executor
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: flowgate-executor
+        name: FlowGate 执行者
+        description: 只负责一个任务卡：读写范围内文件、跑验证、回传结构化摘要；不能委派、不能提问。
+        order: 51
+        plugins:
+          - id: executor-persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: '你是 FlowGate 执行者子 agent，只完成分配给你的单个任务卡；只改任务范围，用 flow_verify 产生证据，完成后回传结构化摘要。'
+
+    # ── 只读取证：审查/调查子 agent（能力边界先由工具集保证，守卫兜底）──────
+    - id: preset-flowgate-reviewer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: flowgate-reviewer
+        name: FlowGate 只读取证
+        description: 只读审查/调查：read/glob/grep/flow_diff + 结构化输出；没有写文件与 shell，不能委派。
+        order: 52
+        plugins:
+          - id: reviewer-persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: '你是 FlowGate 的独立审查者：只用只读工具取证，结论必须带 文件:行号，输出结构化 findings；不要修改任何文件。'
+          # 只读文件工具（H25 肯定答案：tool-fs 的 read/write/edit 开关就是硬边界）。
+          - id: reviewer-tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+          - id: reviewer-tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'

@@ -1,0 +1,7 @@
+> Task :test
+com.example.billing.InvoiceTest > invoiceIsCreated PASSED
+com.example.billing.InvoiceTest > invoiceTotals FAILED
+    org.opentest4j.AssertionFailedError at InvoiceTest.java:57
+
+3 tests completed, 1 failed
+> Task :test FAILED

@@ -1,0 +1,25 @@
+{
+  "numTotalTests": 2,
+  "numPassedTests": 2,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "testResults": [
+    {
+      "name": "tests/renewal.test.ts",
+      "assertionResults": [
+        {
+          "title": "duplicate callback is ignored",
+          "fullName": "renewal > duplicate callback is ignored",
+          "status": "passed",
+          "failureMessages": []
+        },
+        {
+          "title": "renewed when expired",
+          "fullName": "renewal > renewed when expired",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "numTotalTests": 2,
+  "numPassedTests": 1,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "testResults": [
+    {
+      "name": "tests/renewal.test.ts",
+      "assertionResults": [
+        {
+          "title": "duplicate callback is ignored",
+          "fullName": "renewal > duplicate callback is ignored",
+          "status": "failed",
+          "failureMessages": [
+            "AssertionError: expected 2026-12-01 to be 2026-12-31\n    at tests/renewal.test.ts:42:5"
+          ]
+        },
+        {
+          "title": "renewed when expired",
+          "fullName": "renewal > renewed when expired",
+          "status": "passed",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

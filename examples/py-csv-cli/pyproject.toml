@@ -1,0 +1,11 @@
+[project]
+name = "py-csv-cli"
+version = "0.1.0"
+description = "FlowGate 基准仓库：零运行时依赖的 Python CSV 小工具"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

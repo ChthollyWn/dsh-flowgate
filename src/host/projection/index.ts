@@ -1,0 +1,108 @@
+/**
+ * 会话投影注册（`key: 'flowgate'`，契约见 docs/impl/host-client-contract.md §1）。
+ *
+ * 数据来源：host 每次引擎状态变化写一条插件记录 `plugin:dsh-flowgate/state`
+ * （appendPluginRecord；见 runtime.emit），本投影的 `apply` 折叠该事件。
+ * 这样冷恢复（resume/fork）时投影可从日志重建，客户端 `useProjection('flowgate')`
+ * 拿到完整状态；面板/状态条不需要轮询。
+ *
+ * schema 说明：rc.5 的注册表只在 checkpoint 冷读时调用 `stateSchema.parse` /
+ * `wire.viewSchema.parse`，因此这里用本地 passthrough schema（不引入 zod）；
+ * 若未来 DSH 版本改为真实校验，再补 zod 依赖。
+ */
+import type { DshContext } from '../adapters/dsh-types.js'
+import type { HostRuntime } from '../runtime.js'
+import { STATE_RECORD_TYPE } from '../adapters/session-record.js'
+import type { FlowgateProjection } from './types.js'
+import { initialProjection } from './types.js'
+import { toAgentError } from '../errors.js'
+
+/** 投影 key（客户端用 `useProjection('flowgate')` 读取）。 */
+export const PROJECTION_KEY = 'flowgate'
+/** 状态语义/字段变化时递增；旧 checkpoint 会被丢弃。 */
+export const PROJECTION_STATE_VERSION = 1
+
+/** passthrough schema（rc.5 只用 .parse；见文件头注释）。 */
+function passthroughSchema<T>(): { parse(value: unknown): T } {
+  return { parse: (value: unknown) => value as T }
+}
+
+/** 校验从插件记录折叠出来的投影值（损坏时保留原状态，绝不返回半截对象）。 */
+export function sanitizeProjection(value: unknown): FlowgateProjection | null {
+  if (value === null || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const snapshot = record.snapshot
+  if (snapshot === null || typeof snapshot !== 'object') return null
+  const revision = typeof record.revision === 'number' ? record.revision : 0
+  const updatedAt = typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString()
+  const learning = record.learning === 'brief' || record.learning === 'off' || record.learning === 'detail' ? record.learning : 'detail'
+  const projection: FlowgateProjection = {
+    snapshot: snapshot as FlowgateProjection['snapshot'],
+    learning,
+    revision,
+    updatedAt,
+  }
+  if (record.panel !== undefined && record.panel !== null && typeof record.panel === 'object') {
+    projection.panel = record.panel as FlowgateProjection['panel']
+  }
+  return projection
+}
+
+/** 投影定义（导出便于单测直接折叠事件）。 */
+export function createFlowgateProjection(now: () => string): {
+  key: typeof PROJECTION_KEY
+  stateVersion: number
+  stateSchema: { parse(value: unknown): FlowgateProjection }
+  init(): FlowgateProjection
+  apply(state: FlowgateProjection, event: { type?: string; data?: unknown }): FlowgateProjection
+  wire: { viewSchema: { parse(value: unknown): unknown }; view(state: FlowgateProjection): FlowgateProjection }
+} {
+  return {
+    key: PROJECTION_KEY as typeof PROJECTION_KEY,
+    stateVersion: PROJECTION_STATE_VERSION,
+    stateSchema: passthroughSchema<FlowgateProjection>(),
+    init: () => initialProjection(now()),
+    apply: (state, event) => {
+      if (!event || event.type !== STATE_RECORD_TYPE) return state
+      const next = sanitizeProjection(event.data)
+      if (!next) return state
+      // revision 单调：忽略乱序/重复事件。
+      if (next.revision < state.revision) return state
+      return next
+    },
+    wire: {
+      viewSchema: passthroughSchema<unknown>(),
+      view: (state) => state,
+    },
+  }
+}
+
+/** 安装投影。 */
+export function installProjection(runtime: HostRuntime): void {
+  runtime.injectService('sessionProjections', (scoped: DshContext) => {
+    const registry = scoped.get('sessionProjections') as {
+      register?(definition: unknown): () => void
+    } | null
+    if (!registry || typeof registry.register !== 'function') return
+    const definition = createFlowgateProjection(() => runtime.isoNow())
+    const dispose = registry.register(definition)
+    if (typeof dispose === 'function') runtime.registerDisposer(dispose)
+    runtime.capabilities.sessionProjections = true
+    runtime.noteFeature('projection', `已注册会话投影 ${PROJECTION_KEY}（stateVersion=${PROJECTION_STATE_VERSION}）`)
+    // 注册完成后把当前投影补写一次，保证打开中的会话立即有值。
+    if (runtime.engine()) runtime.emit()
+  })
+}
+
+/** 供 doctor/测试读取的投影定义信息。 */
+export function projectionInfo(): { key: string; stateVersion: number; recordType: string } {
+  return { key: PROJECTION_KEY, stateVersion: PROJECTION_STATE_VERSION, recordType: STATE_RECORD_TYPE }
+}
+
+/** 供模块文档引用：投影 wire 值与客户端契约一致。 */
+export type { FlowgateProjection }
+
+/** 把错误转成面板可读字符串（调试用）。 */
+export function describeProjectionError(error: unknown): string {
+  return toAgentError(error).error
+}

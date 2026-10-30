@@ -1,0 +1,15 @@
+{
+  "name": "ts-todo-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FlowGate 基准仓库：零依赖 Node.js 待办 HTTP 服务（用于新功能/修 bug/风险改造三类基准任务）",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js",
+    "test:bug": "node --test test/known-bugs.mjs"
+  }
+}

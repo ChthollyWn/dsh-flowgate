@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.billing.InvoiceTest" tests="4" skipped="1" failures="0" errors="0" time="0.31">
+  <testcase name="invoiceIsCreated" classname="com.example.billing.InvoiceTest" time="0.02"/>
+  <testcase name="invoiceTotals" classname="com.example.billing.InvoiceTest" time="0.03"/>
+  <testcase name="refundPath" classname="com.example.billing.InvoiceTest" time="0.04"/>
+  <testcase name="legacyInvoice" classname="com.example.billing.InvoiceTest" time="0.0">
+    <skipped message="legacy flow removed"/>
+  </testcase>
+</testsuite>

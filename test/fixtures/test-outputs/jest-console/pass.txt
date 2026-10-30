@@ -1,0 +1,7 @@
+PASS tests/renewal.test.js
+  ✓ duplicate callback is ignored (5 ms)
+  ✓ renewed when expired (4 ms)
+
+Tests:       2 passed, 2 total
+Snapshots:   0 total
+Time:        0.8 s

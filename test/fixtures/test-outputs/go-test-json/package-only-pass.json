@@ -1,0 +1,2 @@
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "start", "Package": "example.com/empty"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "pass", "Package": "example.com/empty", "Elapsed": 0.01}

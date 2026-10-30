@@ -1,0 +1,13 @@
+FAIL tests/renewal.test.js
+  ✓ renewed when expired (4 ms)
+  ✕ duplicate callback is ignored (5 ms)
+
+  ● duplicate callback is ignored
+
+    expect(received).toBe(expected)
+
+    Expected: 2026-12-01
+    Received: 2026-12-31
+
+Tests:       1 failed, 1 passed, 2 total
+Snapshots:   0 total

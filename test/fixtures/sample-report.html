@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="FlowGate">
+<title>C-003 会员续费 · FlowGate 交付报告</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--card:#fff;--text:#1f2430;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--ok:#0f7b46;--bad:#c02626;--warn:#9a6a00;--info:#1d4ed8;--track:#eef1f5}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1a1f29;--text:#e5e8ee;--muted:#9aa3b2;--line:#2b3240;--accent:#69a2ff;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;--info:#93c5fd;--track:#242b38}}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:10;background:var(--card);border-bottom:1px solid var(--line);padding:14px 22px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+header h1{font-size:17px;margin:0}header .meta{color:var(--muted);font-size:12px}
+nav a{color:var(--accent);text-decoration:none;font-size:12px;margin-right:10px;white-space:nowrap}nav a:hover{text-decoration:underline}
+main{max-width:1180px;margin:0 auto;padding:18px 22px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:16px 0;scroll-margin-top:70px}
+.card h2{font-size:18px;margin:0 0 14px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.card h2 .sec-no{display:inline-block;color:var(--accent);margin-right:8px}.card h2 .sec-sub{display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:4px}
+h3{font-size:15px;margin:18px 0 8px}h4{font-size:13px;margin:12px 0 6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.kv{background:var(--track);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.kv span{color:var(--muted);font-size:11px}.kv strong{font-size:13px;font-weight:600}
+.two-col{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+th{background:var(--track);font-weight:600;white-space:nowrap}tr:last-child td{border-bottom:none}
+code{background:var(--track);border-radius:4px;padding:1px 4px;font-size:12px;word-break:break-all}
+blockquote{margin:8px 0;padding:8px 12px;border-left:3px solid var(--accent);background:var(--track);border-radius:0 8px 8px 0;color:var(--text)}
+ul{margin:6px 0;padding-left:20px}
+.chip,.badge{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;border:1px solid var(--line);background:var(--track);color:var(--text);margin:1px 2px}
+.badge.ok,.chip.ok,.lane-chip.done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.badge.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.badge.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.badge.info{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent)}
+.badge.muted,.chip.muted{color:var(--muted)}
+.empty{color:var(--muted);font-size:12.5px}.unknown{color:var(--warn)}
+.note{background:var(--track);border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--muted)}
+.progress{height:10px;background:var(--track);border-radius:999px;overflow:hidden;margin:8px 0}
+.progress-fill{display:block;height:100%;background:var(--accent)}
+.bars .bar-row{display:grid;grid-template-columns:130px 1fr auto;gap:10px;align-items:center;margin:5px 0}
+.bar-label{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-track{position:relative;display:block;height:14px;border-radius:4px;background:var(--track);overflow:hidden}
+.bar-fill{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.bar-fill.lane{position:absolute;top:0;background:var(--info)}
+.bar-value{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.bar-fill.done{background:var(--ok)}.bar-fill.running,.bar-fill.review{background:var(--info)}.bar-fill.failed,.bar-fill.blocked{background:var(--bad)}
+.diagram-row{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:start;padding:6px 0;border-bottom:1px dashed var(--line)}
+.diagram-batch{font-size:12px;color:var(--muted);white-space:nowrap}
+.diagram-lanes{display:flex;flex-wrap:wrap;gap:4px}
+.lane-chip{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:11.5px;background:var(--track)}
+.timeline-batch{margin:12px 0}.timeline-batch h4{margin:4px 0 6px;color:var(--muted)}
+footer{text-align:center;color:var(--muted);font-size:11.5px;padding:18px}
+@media print{header{position:static}nav{display:none}.card{break-inside:avoid;border-color:#ccc}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>FlowGate 交付报告 · C-003 会员续费</h1>
+  <div class="meta">阶段 S6 交付 · 生成于 2026-11-12T12:00:00+08:00</div></div>
+  <nav><a href="#sec-overview">概览</a><a href="#sec-requirements">需求</a><a href="#sec-plan">计划</a><a href="#sec-execution">执行</a><a href="#sec-verification">验证</a><a href="#sec-risks">风险</a><a href="#sec-metrics">指标</a><a href="#sec-appendix">附录</a><a href="#sec-appendix" id="ledger-toggle">账本</a></nav>
+</header>
+<main>
+<section class="card" id="sec-overview">
+  <h2><span class="sec-no">①</span>概览<span class="sec-sub">目标：已过期会员可以续费恢复权益，重复回调不重复扣费</span></h2>
+  <div class="grid"><div class="kv"><span>变更编号</span><strong><code>C-003</code></strong></div><div class="kv"><span>标题</span><strong>会员续费</strong></div><div class="kv"><span>复杂度</span><strong>中</strong></div><div class="kv"><span>风险</span><strong>高风险</strong></div><div class="kv"><span>当前阶段</span><strong>S6 交付</strong></div><div class="kv"><span>生命周期</span><strong>进行中</strong></div><div class="kv"><span>分支</span><strong><code>flowgate/C-003</code></strong></div><div class="kv"><span>创建时间</span><strong>2026-11-12T09:00:00+08:00</strong></div><div class="kv"><span>最近更新</span><strong>2026-11-12T12:00:00+08:00</strong></div><div class="kv"><span>报告生成</span><strong>2026-11-12T12:00:00+08:00</strong></div></div>
+    <h3>任务进度</h3>
+    <div class="progress"><span class="progress-fill" style="width:100%"></span></div>
+    <p>已完成 3 / 3 个任务（100%）；批次 2 个；证据回执 5 条；拦截记录 2 条。</p>
+    <h3>阶段耗时</h3>
+    <div class="bars"><div class="bar-row"><span class="bar-label">S0</span><span class="bar-track"><span class="bar-fill" style="width:18%"></span></span><span class="bar-value">10 分钟</span></div><div class="bar-row"><span class="bar-label">S1</span><span class="bar-track"><span class="bar-fill" style="width:18%"></span></span><span class="bar-value">10 分钟</span></div><div class="bar-row"><span class="bar-label">S2</span><span class="bar-track"><span class="bar-fill" style="width:27%"></span></span><span class="bar-value">15 分钟</span></div><div class="bar-row"><span class="bar-label">S3</span><span class="bar-track"><span class="bar-fill" style="width:27%"></span></span><span class="bar-value">15 分钟</span></div><div class="bar-row"><span class="bar-label">S4</span><span class="bar-track"><span class="bar-fill" style="width:82%"></span></span><span class="bar-value">45 分钟</span></div><div class="bar-row"><span class="bar-label">S5</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-value">55 分钟</span></div><div class="bar-row"><span class="bar-label">S6</span><span class="bar-track"><span class="bar-fill" style="width:55%"></span></span><span class="bar-value">30 分钟</span></div></div>
+    <div class="two-col">
+      <div><h3>门禁状态</h3><div class="chips"><span class="badge ok">G0 · passed · 尝试 1</span> <span class="badge ok">G1 · passed · 尝试 1</span> <span class="badge ok">G2 · passed · 尝试 1</span> <span class="badge ok">G3 · passed · 尝试 1</span> <span class="badge ok">G4 · passed · 尝试 1</span> <span class="badge ok">G5 · passed · 尝试 1</span> <span class="badge warn">G6 · awaiting · 尝试 1</span></div></div>
+      <div><h3>产物概览</h3><span class="chip">澄清记录</span> <span class="chip">增量规格</span> <span class="chip">上下文</span> <span class="chip">设计</span> <span class="chip">风险登记</span> <span class="chip">任务卡</span></div>
+    </div>
+</section>
+<section class="card" id="sec-requirements">
+  <h2><span class="sec-no">②</span>需求</h2>
+  <h3>原始描述</h3><blockquote>给会员系统加续费功能，重复回调不能重复扣费</blockquote>
+       <h3>六要素</h3>
+       <div class="table-wrap"><table><thead><tr><th>要素</th><th>结论</th><th>来源</th><th>状态</th></tr></thead><tbody><tr><td>目标</td><td>过期会员可以续费恢复权益</td><td>clarify.md</td><td>confirmed</td></tr><tr><td>边界</td><td>只做续费，不做自动续费签约</td><td>clarify.md</td><td>confirmed</td></tr><tr><td>角色</td><td>会员、支付回调方</td><td>clarify.md</td><td>confirmed</td></tr><tr><td>验收</td><td>R1.S1、R1.S2</td><td>clarify.md</td><td>confirmed</td></tr><tr><td>约束</td><td>沿用现有支付回调协议，幂等键 (orderId, cycle)</td><td>context.md:12</td><td>confirmed</td></tr><tr><td>未知</td><td>无</td><td>—</td><td>confirmed</td></tr></tbody></table></div>
+       <h3>澄清问答（2 条，2 轮）</h3>
+       <div class="table-wrap"><table><thead><tr><th>轮次</th><th>问题</th><th>回答</th><th>改变了什么</th></tr></thead><tbody><tr><td>1</td><td>续费从哪天起算？</td><td>支付日</td><td>决定续费起算点</td></tr><tr><td>2</td><td>重复回调怎么判重？</td><td>(orderId, billingCycle)</td><td>决定幂等键</td></tr></tbody></table></div>
+       <div class="two-col">
+         <div><h3>假设</h3><ul><li>支付回调协议短期不变</li></ul></div>
+         <div><h3>未决问题</h3><p class="empty">（已清零）</p></div>
+       </div>
+     <h3>提案</h3>
+       <div class="table-wrap"><table><thead><tr><th>为什么</th><th>做什么</th><th>影响</th><th>不做</th></tr></thead><tbody><tr><td>会员到期后流失率高</td><td>增加续费入口与幂等回调处理</td><td>会员模块、支付回调、账单</td><td>优惠券叠加；自动续费签约；发票</td></tr></tbody></table></div>
+     <h3>需求清单（1 条）</h3>
+     <div class="table-wrap"><table><thead><tr><th>ID</th><th>标题</th><th>类型</th><th>场景数</th></tr></thead><tbody><tr><td><code>R1</code></td><td>会员续费</td><td>ADDED</td><td>0</td></tr></tbody></table></div>
+     <h3>验收场景（2 条）</h3>
+     <div class="table-wrap"><table><thead><tr><th>场景</th><th>标题</th><th>GIVEN</th><th>WHEN</th><th>THEN</th></tr></thead><tbody><tr><td><code>R1.S1</code></td><td>正常续费</td><td>会员已过期</td><td>发起续费并支付成功</td><td>会员权益恢复，到期日 = 支付日 + 1 个周期</td></tr><tr><td><code>R1.S2</code></td><td>重复回调</td><td>同一订单的支付回调</td><td>回调到达两次</td><td>只产生一条续费记录且第二次返回 200</td></tr></tbody></table></div>
+</section>
+<section class="card" id="sec-plan">
+  <h2><span class="sec-no">③</span>计划</h2>
+  <h3>方案对比</h3>
+       <div class="table-wrap"><table><thead><tr><th>方案</th><th>摘要</th><th>优点</th><th>缺点</th></tr></thead><tbody><tr><td>方案 A：新增幂等记录表</td><td>独立表记录回调指纹</td><td>清晰、可审计</td><td>需要数据库迁移</td></tr><tr><td>方案 B：复用唯一索引</td><td>订单+周期唯一索引</td><td>无迁移、实现简单</td><td>受限于现有表结构</td></tr></tbody></table></div>
+       <div class="two-col">
+         <div><h3>推荐方案</h3><p>方案 B：复用唯一索引，迁移风险最小</p></div>
+         <div><h3>回滚方案</h3><p>关闭续费入口 + 回滚唯一索引，已有续费记录只读保留</p></div>
+       </div>
+       <h3>数据流 / 错误处理</h3>
+       <p><strong>数据流：</strong>支付回调 → 验签 → 幂等校验 → 续费服务 → 会员权益</p>
+       <p><strong>错误处理：</strong>幂等冲突直接返回 200 且不重复扣费；验签失败返回 400 并告警</p>
+     <h3>任务清单（3 张卡）</h3>
+     <div class="table-wrap"><table><thead><tr><th>ID</th><th>标题</th><th>TDD</th><th>规模</th><th>范围</th><th>验证组</th></tr></thead><tbody><tr><td><code>T1</code></td><td>幂等键与复现测试（RED）</td><td>required</td><td>S</td><td>src/main/java/com/example/renewal/**</td><td>renewal-unit: ./mvnw -B -q -Dtest=RenewalServiceTest test</td></tr><tr><td><code>T2</code></td><td>回调验签与幂等处理</td><td>required</td><td>M</td><td>src/main/java/com/example/callback/**</td><td>callback-unit: ./mvnw -B -q -Dtest=CallbackTest test</td></tr><tr><td><code>T3</code></td><td>续费规则与到期日计算</td><td>optional</td><td>S</td><td>src/main/java/com/example/renewal/**</td><td>renewal-rule: ./mvnw -B -q -Dtest=RenewalRuleTest test</td></tr></tbody></table></div>
+     <h3>执行计划</h3>
+     <div class="table-wrap"><table><thead><tr><th>批次</th><th>模式</th><th>任务</th><th>理由</th><th>降级</th></tr></thead><tbody><tr><td><code>B1</code></td><td>sequential</td><td>T1</td><td>先有失败测试再写实现（TDD）</td><td></td></tr><tr><td><code>B2</code></td><td>parallel</td><td>T2、T3</td><td>回调模块与规则模块范围不重叠，可并行</td><td></td></tr></tbody></table></div>
+     <h3>追溯矩阵</h3>
+     <div class="table-wrap"><table><thead><tr><th>需求</th><th>场景</th><th>标题</th><th>任务</th><th>自动化证据</th><th>覆盖</th></tr></thead><tbody><tr><td><code>R1</code></td><td><code>R1.S1</code></td><td>正常续费</td><td>T3</td><td>E-0004</td><td><span class="badge ok">已覆盖</span></td></tr><tr><td><code>R1</code></td><td><code>R1.S2</code></td><td>重复回调</td><td>T1、T2</td><td>E-0002、E-0003</td><td><span class="badge ok">已覆盖</span></td></tr></tbody></table></div>
+</section>
+<section class="card" id="sec-execution">
+  <h2><span class="sec-no">④</span>执行</h2>
+  <p class="note">串行任务耗时合计 40 分钟；实际墙钟 31 分钟；并行加速比约 1.3×（并行省下的时间可以直接从下面的泳道看出）。</p>
+     <h3>执行流程图</h3>
+     <div class="diagram"><div class="diagram-row"><span class="diagram-batch">B1（sequential）</span><span class="diagram-lanes"><span class="lane-chip done">T1 · done · GREEN</span></span></div><div class="diagram-row"><span class="diagram-batch">B2（parallel）</span><span class="diagram-lanes"><span class="lane-chip done">T2 · done · GREEN</span> <span class="lane-chip done">T3 · done · GREEN</span></span></div></div>
+     <h3>按批次 / 并行泳道的时间线</h3>
+     <div class="timeline"><div class="timeline-batch"><h4>B1 · sequential</h4><div class="bar-row"><span class="bar-label">T1 <span class="badge ok">done</span></span><span class="bar-track"><span class="bar-fill lane done" style="left:0%;width:65%"></span></span><span class="bar-value">20 分钟</span></div></div><div class="timeline-batch"><h4>B2 · parallel</h4><div class="bar-row"><span class="bar-label">T2 <span class="badge ok">done</span></span><span class="bar-track"><span class="bar-fill lane done" style="left:65%;width:35%"></span></span><span class="bar-value">11 分钟</span></div><div class="bar-row"><span class="bar-label">T3 <span class="badge ok">done</span></span><span class="bar-track"><span class="bar-fill lane done" style="left:65%;width:29%"></span></span><span class="bar-value">9 分钟</span></div></div></div>
+     <h3>批次与集成检查点</h3>
+     <div class="table-wrap"><table><thead><tr><th>批次</th><th>模式</th><th>状态</th><th>检查点</th></tr></thead><tbody><tr><td><code>B1</code></td><td>sequential</td><td>done</td><td>passed · 2026-11-12T10:20:00+08:00</td></tr><tr><td><code>B2</code></td><td>parallel</td><td>done</td><td>passed · 2026-11-12T10:35:00+08:00</td></tr></tbody></table></div>
+     <h3>任务证据（RED / GREEN）</h3>
+     <div class="table-wrap"><table><thead><tr><th>任务</th><th>回执</th><th>验证组</th><th>阶段</th><th>结果</th><th>完成时间</th><th>完整日志</th></tr></thead><tbody><tr><td><code>T1</code></td><td><code>E-0001</code></td><td>renewal-unit</td><td><span class="badge bad">RED</span></td><td>运行 1 / 失败 1</td><td>2026-11-12T10:02:00+08:00</td><td><code>.flowgate/state/evidence/E-0001.log</code></td></tr><tr><td><code>T1</code></td><td><code>E-0002</code></td><td>renewal-unit</td><td><span class="badge ok">GREEN</span></td><td>运行 6 / 失败 0</td><td>2026-11-12T10:06:00+08:00</td><td><code>.flowgate/state/evidence/E-0002.log</code></td></tr><tr><td><code>T2</code></td><td><code>E-0003</code></td><td>callback-unit</td><td><span class="badge ok">GREEN</span></td><td>运行 4 / 失败 0</td><td>2026-11-12T10:23:00+08:00</td><td><code>.flowgate/state/evidence/E-0003.log</code></td></tr><tr><td><code>T3</code></td><td><code>E-0004</code></td><td>renewal-rule</td><td><span class="badge ok">GREEN</span></td><td>运行 3 / 失败 0</td><td>2026-11-12T10:25:00+08:00</td><td><code>.flowgate/state/evidence/E-0004.log</code></td></tr><tr><td><code>（全量/手工）</code></td><td><code>E-0005</code></td><td>full-suite</td><td><span class="badge ok">GREEN</span></td><td>运行 48 / 失败 0</td><td>2026-11-12T11:02:00+08:00</td><td><code>.flowgate/state/evidence/E-0005.log</code></td></tr></tbody></table></div>
+     <h3>拦截与审查</h3>
+     <div class="two-col">
+       <div><h4>越界与违规（2）</h4><div class="table-wrap"><table><thead><tr><th>ID</th><th>类型</th><th>路径</th><th>任务</th><th>来源</th><th>时间</th><th>状态</th></tr></thead><tbody><tr><td><code>V-1</code></td><td>outside-scope</td><td>src/main/java/com/example/legacy/Wrong.java</td><td>T2</td><td>pre</td><td>2026-11-12T10:25:00+08:00</td><td><span class="badge ok">已撤销</span></td></tr><tr><td><code>V-2</code></td><td>undeclared-new-file</td><td>src/main/java/com/example/NewUtil.java</td><td>T3</td><td>post</td><td>2026-11-12T10:28:00+08:00</td><td><span class="badge bad">未撤销</span></td></tr></tbody></table></div></div>
+       <div><h4>审查记录（3）</h4><div class="table-wrap"><table><thead><tr><th>ID</th><th>任务</th><th>类型</th><th>结论</th><th>发现</th><th>轮次</th><th>时间</th></tr></thead><tbody><tr><td><code>R-1</code></td><td>T1</td><td>task</td><td><span class="badge bad">需修改</span></td><td>1</td><td>1</td><td>2026-11-12T10:10:00+08:00</td></tr><tr><td><code>R-2</code></td><td>T2</td><td>task</td><td><span class="badge ok">通过</span></td><td>0</td><td>1</td><td>2026-11-12T10:30:00+08:00</td></tr><tr><td><code>R-3</code></td><td>（终审）</td><td>final</td><td><span class="badge ok">通过</span></td><td>0</td><td>1</td><td>2026-11-12T11:30:00+08:00</td></tr></tbody></table></div></div>
+     </div>
+</section>
+<section class="card" id="sec-verification">
+  <h2><span class="sec-no">⑤</span>验证</h2>
+  <div class="grid">
+       <div class="kv"><span>全量测试回执</span><strong>1 条</strong></div>
+       <div class="kv"><span>最新全量结论</span><strong><span class="badge ok">GREEN</span></strong></div>
+       <div class="kv"><span>新增回归</span><strong>0</strong></div>
+       <div class="kv"><span>验收覆盖率</span><strong>100%</strong></div>
+       <div class="kv"><span>终审结论</span><strong><span class="badge ok">通过</span></strong></div>
+     </div>
+     <h3>与基线的回归对比</h3>
+     <p>新增回归：<span class="badge ok">0（无回归）</span></p>
+     <h3>全量测试回执</h3>
+     <div class="table-wrap"><table><thead><tr><th>回执</th><th>命令</th><th>计数</th><th>判定</th><th>退出码</th><th>完成时间</th><th>完整日志</th></tr></thead><tbody><tr><td><code>E-0005</code></td><td>./mvnw -B test</td><td>运行 48，通过 46，失败 0，跳过 2</td><td><span class="badge ok">GREEN</span></td><td>0</td><td>2026-11-12T11:02:00+08:00</td><td><code>.flowgate/state/evidence/E-0005.log</code></td></tr></tbody></table></div>
+     <h3>运行证据 / 手工证据</h3>
+     <div class="table-wrap"><table><thead><tr><th>回执</th><th>任务</th><th>类型</th><th>验证组</th><th>命令</th><th>判定</th><th>计数</th><th>解析器</th><th>完成时间</th><th>完整日志</th></tr></thead><tbody><tr><td><code>E-0001</code></td><td><code>T1</code></td><td>test</td><td>renewal-unit</td><td>./mvnw -B -q -Dtest=RenewalServiceTest test</td><td><span class="badge bad">RED</span></td><td>运行 1 / 通过 0 / 失败 1 / 跳过 0</td><td>junit-xml</td><td>2026-11-12T10:02:00+08:00</td><td><code>.flowgate/state/evidence/E-0001.log</code></td></tr><tr><td><code>E-0002</code></td><td><code>T1</code></td><td>test</td><td>renewal-unit</td><td>./mvnw -B -q -Dtest=RenewalServiceTest test</td><td><span class="badge ok">GREEN</span></td><td>运行 6 / 通过 6 / 失败 0 / 跳过 0</td><td>junit-xml</td><td>2026-11-12T10:06:00+08:00</td><td><code>.flowgate/state/evidence/E-0002.log</code></td></tr><tr><td><code>E-0003</code></td><td><code>T2</code></td><td>test</td><td>callback-unit</td><td>./mvnw -B -q -Dtest=CallbackTest test</td><td><span class="badge ok">GREEN</span></td><td>运行 4 / 通过 4 / 失败 0 / 跳过 0</td><td>junit-xml</td><td>2026-11-12T10:23:00+08:00</td><td><code>.flowgate/state/evidence/E-0003.log</code></td></tr><tr><td><code>E-0004</code></td><td><code>T3</code></td><td>test</td><td>renewal-rule</td><td>./mvnw -B -q -Dtest=RenewalRuleTest test</td><td><span class="badge ok">GREEN</span></td><td>运行 3 / 通过 3 / 失败 0 / 跳过 0</td><td>junit-xml</td><td>2026-11-12T10:25:00+08:00</td><td><code>.flowgate/state/evidence/E-0004.log</code></td></tr><tr><td><code>E-0005</code></td><td>—</td><td>test</td><td>full-suite</td><td>./mvnw -B test</td><td><span class="badge ok">GREEN</span></td><td>运行 48 / 通过 46 / 失败 0 / 跳过 2</td><td>junit-xml</td><td>2026-11-12T11:02:00+08:00</td><td><code>.flowgate/state/evidence/E-0005.log</code></td></tr></tbody></table></div>
+     <h3>审查发现（1 条）</h3>
+     <div class="table-wrap"><table><thead><tr><th>审查</th><th>严重级别</th><th>文件</th><th>行</th><th>规则</th><th>说明</th><th>建议</th></tr></thead><tbody><tr><td><code>R-1</code></td><td>major</td><td>RenewalService.java</td><td>55</td><td>idempotency</td><td>幂等冲突分支没有返回 200</td><td>第二次回调直接返回成功，不重复扣费</td></tr></tbody></table></div>
+</section>
+<section class="card" id="sec-risks">
+  <h2><span class="sec-no">⑥</span>风险</h2>
+  <h3>风险登记（5 项）</h3>
+     <div class="table-wrap"><table><thead><tr><th>类别</th><th>等级</th><th>原因</th><th>缓解</th><th>验证方式</th><th>人工确认</th></tr></thead><tbody><tr><td>安全</td><td>高</td><td>支付回调可能被伪造或重放</td><td>验签 + (orderId, cycle) 幂等键 + 重放窗口</td><td>伪造/重放回调测试用例 + 运行日志</td><td><span class="badge warn">需人工确认</span></td></tr><tr><td>性能</td><td>低</td><td>幂等校验增加一次索引查询</td><td>唯一索引覆盖查询</td><td>压测续费接口 P95</td><td><span class="badge muted">否</span></td></tr><tr><td>成本</td><td>无</td><td>无新增外部服务</td><td>—</td><td>账单对比</td><td><span class="badge muted">否</span></td></tr><tr><td>合规</td><td>低</td><td>续费记录涉及交易留痕</td><td>保留审计日志</td><td>审计字段检查</td><td><span class="badge muted">否</span></td></tr><tr><td>可维护性</td><td>低</td><td>幂等逻辑集中在一个服务</td><td>单测覆盖冲突分支</td><td>共享输入变化后重跑验证组</td><td><span class="badge muted">否</span></td></tr></tbody></table></div>
+     <h3>待处理项与处理结果（2 项）</h3>
+     <div class="table-wrap"><table><thead><tr><th>ID</th><th>类型</th><th>标题</th><th>状态</th><th>创建时间</th><th>处理时间</th><th>理由</th></tr></thead><tbody><tr><td><code>RK-1</code></td><td>risk</td><td>依赖变更：新增 caffeine</td><td><span class="badge ok">已批准</span></td><td>2026-11-12T09:30:00+08:00</td><td>2026-11-12T09:32:00+08:00</td><td>允许一次</td></tr><tr><td><code>SC-1</code></td><td>scope</td><td>范围变更：新增 DateTime 工具类</td><td><span class="badge bad">已拒绝</span></td><td>2026-11-12T10:05:00+08:00</td><td>2026-11-12T10:07:00+08:00</td><td>复用现有工具类</td></tr></tbody></table></div>
+     <div class="two-col">
+       <div><h3>单次放行（1）</h3><div class="table-wrap"><table><thead><tr><th>ID</th><th>规则</th><th>理由</th><th>创建时间</th><th>状态</th></tr></thead><tbody><tr><td><code>OV-1</code></td><td>R-SCOPE</td><td>误判：测试数据文件在范围内</td><td>2026-11-12T10:10:00+08:00</td><td><span class="badge muted">已使用</span></td></tr></tbody></table></div></div>
+       <div><h3>例外（0）</h3><p class="empty">（无记录）</p></div>
+     </div>
+     <h3>风险事件（账本）</h3>
+     <p class="empty">（无记录）</p>
+</section>
+<section class="card" id="sec-metrics">
+  <h2><span class="sec-no">⑦</span>指标</h2>
+  <p class="note">M-1 ~ M-18 按变更口径自动计算；取不到的指标显示为「未知」，不用 0 代替，也不参与平均值（FR-10.4）。</p>
+     <div class="table-wrap"><table><thead><tr><th>ID</th><th>指标</th><th>数值</th><th>目标</th><th>统计口径</th></tr></thead><tbody><tr><td><code>M-1</code></td><td>跳步拦截数</td><td><strong class="">1</strong></td><td>越早越少越好</td><td>账本中 rule.denied 且规则为 R-STAGE-SRC（或 category=stage-order）的事件数</td></tr><tr><td><code>M-2</code></td><td>实际跳步数</td><td><strong class="">6</strong></td><td>0</td><td>账本审计：向前进入新阶段时，若同一窗口内没有对应门禁的 gate.passed/gate.approved，或一次跳过多个阶段，计一次跳步；回退（如风险提升回 S4）不计</td></tr><tr><td><code>M-3</code></td><td>越界尝试数</td><td><strong class="">2</strong></td><td>残留 = 0</td><td>来自 change.violations 的越界记录数；交付时越界残留 1 个（clearedAt 为空）</td></tr><tr><td><code>M-4</code></td><td>虚假完成拦截数</td><td><strong class="">0</strong></td><td>—</td><td>turn.continued 0 次 + 因缺少/过期证据被拒的 task.blocked 0 次 + 证据类 rule.denied 0 次</td></tr><tr><td><code>M-5</code></td><td>误判率</td><td><strong class="">0</strong></td><td>≤ 5%</td><td>误判 0 ÷ 全部拦截 1；统计账本中显式标为 misjudged 或理由含「误判」的放行/例外记录</td></tr><tr><td><code>M-6</code></td><td>门禁首次通过率</td><td><strong class="">85.7</strong></td><td>随使用上升</td><td>6 ÷ 7 个提交过的门禁（attempts=1 且 state=passed）</td></tr><tr><td><code>M-7</code></td><td>澄清效率</td><td><strong class="">2</strong></td><td>—</td><td>澄清轮数；问题 2 个，其中自定义回答 1 个（占比 50%）</td></tr><tr><td><code>M-8</code></td><td>需求返工数</td><td><strong class="">0</strong></td><td>越少越好</td><td>G1 重复提交 0 次 + requirement 返工事件 0 次</td></tr><tr><td><code>M-9</code></td><td>验收覆盖率</td><td><strong class="">100</strong></td><td>G6 时 100%</td><td>自动化覆盖 2/2 个场景；手工证据覆盖率需负责人确认，标为未知</td></tr><tr><td><code>M-10</code></td><td>TDD 合规率</td><td><strong class="">50</strong></td><td>100%</td><td>1 ÷ 2 个必需 TDD 任务有 RED → GREEN 回执（按 finishedAt 排序）</td></tr><tr><td><code>M-11</code></td><td>审查发现</td><td><strong class="">0</strong></td><td>—</td><td>critical 0 / major 0 / minor 0；审查记录 0 条，修复轮次 0</td></tr><tr><td><code>M-12</code></td><td>回归失败数</td><td><strong class="">0</strong></td><td>0</td><td>汇总 1 条全量测试回执的 regressions 字段</td></tr><tr><td><code>M-13</code></td><td>人工负担</td><td><strong class="">2</strong></td><td>中复杂度每变更 ≤ 5 次</td><td>人工审批 2 次（账本 0 次 / 已处理待处理项 2 个，取较大值避免重复计数）；单次放行 1 次；平均响应时间 2 分钟</td></tr><tr><td><code>M-14</code></td><td>阶段成本</td><td><strong class="">180</strong></td><td>—</td><td>变更总耗时（createdAt → updatedAt）；分阶段：S0 10 分钟、S1 10 分钟、S2 15 分钟、S3 15 分钟、S4 45 分钟、S5 55 分钟、S6 30 分钟；token 用量宿主未提供，标为未知</td></tr><tr><td><code>M-15</code></td><td>流程开销</td><td><strong class="unknown">未知</strong></td><td>先测量</td><td>需要同一基准任务有/无插件的耗时与 token 对照测量，插件内无法自动获得</td></tr><tr><td><code>M-16</code></td><td>路线图进度</td><td><strong class="unknown">未知</strong></td><td>—</td><td>路线图数据不在 ArtifactBundle 中；需要 roadmap.md/路线图模块把已交付与总数写进账本 roadmap.approved 事件</td></tr><tr><td><code>M-17</code></td><td>上下文健康度</td><td><strong class="unknown">未知</strong></td><td>—</td><td>上下文峰值占用宿主未提供；跨会话接续 0 次，轮次继续 0 次；压缩次数与节省 token 宿主未提供</td></tr><tr><td><code>M-18</code></td><td>并行效率</td><td><strong class="">1.33</strong></td><td>先测量</td><td>加速比 = 并行批次内任务耗时之和 20 分钟 ÷ 实际墙钟 15 分钟；集成检查点失败 0 次、合并冲突 0 次、降级为顺序 0 次</td></tr></tbody></table></div>
+     <p class="empty">指标生成时间：2026-11-12T12:00:00+08:00</p>
+</section>
+<section class="card" id="sec-appendix">
+  <h2><span class="sec-no">⑧</span>附录</h2>
+  <h3>产物路径</h3>
+     <div class="table-wrap"><table><thead><tr><th>产物</th><th>路径</th></tr></thead><tbody><tr><td>澄清记录</td><td><code>.flowgate/changes/C-003/clarify.md</code></td></tr><tr><td>提案</td><td><code>.flowgate/changes/C-003/proposal.md</code></td></tr><tr><td>增量规格</td><td><code>.flowgate/changes/C-003/spec.md</code></td></tr><tr><td>上下文</td><td><code>.flowgate/changes/C-003/context.md</code></td></tr><tr><td>设计</td><td><code>.flowgate/changes/C-003/design.md</code></td></tr><tr><td>风险登记</td><td><code>.flowgate/changes/C-003/risk.md</code></td></tr><tr><td>任务卡</td><td><code>.flowgate/changes/C-003/tasks.md</code></td></tr><tr><td>状态</td><td><code>.flowgate/changes/C-003/status.json</code></td></tr><tr><td>回执日志目录</td><td><code>.flowgate/state/evidence/</code></td></tr></tbody></table></div>
+     <h3>账本摘录（最近 21 条 / 共 21 条）</h3>
+     <div class="table-wrap"><table><thead><tr><th>序号</th><th>时间</th><th>事件类型</th><th>数据</th><th>前序哈希</th></tr></thead><tbody><tr><td>1</td><td>2026-11-12T09:00:00+08:00</td><td><code>change.created</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;}</td><td><code>sha256:0002…</code></td></tr><tr><td>2</td><td>2026-11-12T09:00:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S0&quot;,&quot;gate&quot;:&quot;G0&quot;}</td><td><code>sha256:0003…</code></td></tr><tr><td>3</td><td>2026-11-12T09:10:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S1&quot;,&quot;gate&quot;:&quot;G0&quot;}</td><td><code>sha256:0004…</code></td></tr><tr><td>4</td><td>2026-11-12T09:15:00+08:00</td><td><code>gate.submitted</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;gate&quot;:&quot;G1&quot;}</td><td><code>sha256:0005…</code></td></tr><tr><td>5</td><td>2026-11-12T09:20:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S2&quot;,&quot;gate&quot;:&quot;G1&quot;}</td><td><code>sha256:0006…</code></td></tr><tr><td>6</td><td>2026-11-12T09:35:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S3&quot;,&quot;gate&quot;:&quot;G2&quot;}</td><td><code>sha256:0007…</code></td></tr><tr><td>7</td><td>2026-11-12T09:40:00+08:00</td><td><code>rule.denied</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;ruleId&quot;:&quot;R-STAGE-SRC&quot;,&quot;path&quot;:&quot;src/main/java/com/example/RenewalService.java&quot;}</td><td><code>sha256:0008…</code></td></tr><tr><td>8</td><td>2026-11-12T09:50:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S4&quot;,&quot;gate&quot;:&quot;G3&quot;}</td><td><code>sha256:0009…</code></td></tr><tr><td>9</td><td>2026-11-12T10:00:00+08:00</td><td><code>task.started</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;taskId&quot;:&quot;T1&quot;}</td><td><code>sha256:0010…</code></td></tr><tr><td>10</td><td>2026-11-12T10:02:00+08:00</td><td><code>verify.receipt</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;evidenceId&quot;:&quot;E-0001&quot;,&quot;phase&quot;:&quot;red&quot;}</td><td><code>sha256:0011…</code></td></tr><tr><td>11</td><td>2026-11-12T10:06:00+08:00</td><td><code>verify.receipt</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;evidenceId&quot;:&quot;E-0002&quot;,&quot;phase&quot;:&quot;green&quot;}</td><td><code>sha256:0012…</code></td></tr><tr><td>12</td><td>2026-11-12T10:10:00+08:00</td><td><code>review.reported</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;reviewId&quot;:&quot;R-1&quot;,&quot;verdict&quot;:&quot;changes-required&quot;}</td><td><code>sha256:0013…</code></td></tr><tr><td>13</td><td>2026-11-12T10:20:00+08:00</td><td><code>task.done</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;taskId&quot;:&quot;T1&quot;}</td><td><code>sha256:0014…</code></td></tr><tr><td>14</td><td>2026-11-12T10:20:00+08:00</td><td><code>batch.completed</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;batch&quot;:&quot;B1&quot;,&quot;checkpoint&quot;:&quot;passed&quot;}</td><td><code>sha256:0015…</code></td></tr><tr><td>15</td><td>2026-11-12T10:20:00+08:00</td><td><code>batch.started</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;batch&quot;:&quot;B2&quot;,&quot;mode&quot;:&quot;parallel&quot;}</td><td><code>sha256:0016…</code></td></tr><tr><td>16</td><td>2026-11-12T10:25:00+08:00</td><td><code>violation.detected</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;violationId&quot;:&quot;V-1&quot;,&quot;path&quot;:&quot;src/main/java/com/example/legacy/Wrong.java&quot;}</td><td><code>sha256:0017…</code></td></tr><tr><td>17</td><td>2026-11-12T10:26:00+08:00</td><td><code>violation.cleared</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;violationId&quot;:&quot;V-1&quot;}</td><td><code>sha256:0018…</code></td></tr><tr><td>18</td><td>2026-11-12T10:35:00+08:00</td><td><code>batch.completed</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;batch&quot;:&quot;B2&quot;,&quot;checkpoint&quot;:&quot;passed&quot;}</td><td><code>sha256:0019…</code></td></tr><tr><td>19</td><td>2026-11-12T10:35:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S5&quot;,&quot;gate&quot;:&quot;G4&quot;}</td><td><code>sha256:0020…</code></td></tr><tr><td>20</td><td>2026-11-12T11:02:00+08:00</td><td><code>verify.receipt</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;evidenceId&quot;:&quot;E-0005&quot;,&quot;phase&quot;:&quot;green&quot;,&quot;group&quot;:&quot;full-suite&quot;}</td><td><code>sha256:0021…</code></td></tr><tr><td>21</td><td>2026-11-12T11:30:00+08:00</td><td><code>stage.entered</code></td><td>{&quot;changeId&quot;:&quot;C-003&quot;,&quot;stage&quot;:&quot;S6&quot;,&quot;gate&quot;:&quot;G5&quot;}</td><td><code>sha256:0022…</code></td></tr></tbody></table></div>
+     <h3>关于本报告</h3>
+     <ul>
+       <li>本报告由 FlowGate 自动生成，单文件、离线可打开，不引用任何外部资源。</li>
+       <li>生成时间：2026-11-12T12:00:00+08:00；变更：<code>C-003</code>；插件版本：dsh-flowgate v0.1.0。</li>
+       <li>报告默认位于 <code>.flowgate/changes/C-003/report.html</code>，不进入 git；需要放进 PR 时从 <code>.flowgate/archive/</code> 复制。</li>
+       <li>页面内所有用户输入均已做 HTML 转义，避免需求/日志文本注入页面脚本。</li>
+     </ul>
+</section>
+</main>
+<footer>FlowGate · 硬约束开发流程门禁 · 单文件离线报告</footer>
+<script>
+(function(){
+  var links = document.querySelectorAll('nav a');
+  for (var i = 0; i < links.length; i++) {
+    links[i].addEventListener('click', function (event) {
+      var id = this.getAttribute('href').slice(1);
+      var target = document.getElementById(id);
+      if (target) { event.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
+  }
+  var ledger = document.getElementById('ledger-toggle');
+  if (ledger) {
+    ledger.addEventListener('click', function () {
+      var target = document.getElementById('sec-appendix');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+})();
+</script>
+</body>
+</html>

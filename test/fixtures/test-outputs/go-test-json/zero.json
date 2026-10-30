@@ -1,0 +1,6 @@
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "start", "Package": "example.com/none"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "output", "Package": "example.com/none", "Output": "?   example.com/none\t[no test files]\n"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "skip", "Package": "example.com/none", "Elapsed": 0}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "start", "Package": "example.com/notests"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "output", "Package": "example.com/notests", "Output": "ok  \texample.com/notests\t0.002s\n"}
+{"Time": "2026-11-12T10:30:28+08:00", "Action": "pass", "Package": "example.com/notests", "Elapsed": 0.002}

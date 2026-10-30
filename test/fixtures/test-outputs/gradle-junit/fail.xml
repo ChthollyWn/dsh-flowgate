@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.billing.InvoiceTest" tests="3" skipped="0" failures="1" errors="0" time="0.28">
+  <testcase name="invoiceIsCreated" classname="com.example.billing.InvoiceTest" time="0.02"/>
+  <testcase name="invoiceTotals" classname="com.example.billing.InvoiceTest" time="0.03">
+    <failure message="org.opentest4j.AssertionFailedError: expected: 100 but was: 90">org.opentest4j.AssertionFailedError: expected: 100 but was: 90
+	at com.example.billing.InvoiceTest.invoiceTotals(InvoiceTest.java:57)</failure>
+  </testcase>
+  <testcase name="refundPath" classname="com.example.billing.InvoiceTest" time="0.04"/>
+</testsuite>
