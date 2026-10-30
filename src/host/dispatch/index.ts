@@ -68,6 +68,18 @@ export function resetDispatchStateForTest(): void {
   running.clear()
 }
 
+/**
+ * 并行任务的 worktree 分支名。
+ *
+ * 注意：不能用 `flowgate/<changeId>/<taskId>`——变更分支本身是 `flowgate/<changeId>`，
+ * git 的 ref 目录不允许 D/F 冲突（不能同时存在 refs/heads/flowgate/C-001 与
+ * refs/heads/flowgate/C-001/T1），否则 worktree add 直接失败并静默降级为主工作区
+ * （2026-10-31 真机发现）。因此任务分支放在兄弟命名空间 `flowgate-tasks/` 下。
+ */
+export function taskWorktreeBranch(changeId: string, taskId: string): string {
+  return `flowgate-tasks/${changeId}/${taskId}`
+}
+
 /** 安装 dispatch（register flow_dispatch_next）。 */
 export function installDispatch(runtime: HostRuntime): void {
   runtime.injectService('tools', (scoped: DshContext) => {
@@ -354,7 +366,7 @@ async function maybeCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId
     const failures: string[] = []
     for (const taskId of batch.tasks) {
       const task = change.tasks[taskId]
-      const branch = `flowgate/${change.id}/${taskId}`
+      const branch = taskWorktreeBranch(change.id, taskId)
       if (!task?.worktree) continue
       const branchExists = await runGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], root)
       if (branchExists.exitCode !== 0) continue
@@ -387,7 +399,7 @@ async function maybeCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId
       const absolute = runtime.absolute(task.worktree)
       const removed = await runGit(['worktree', 'remove', '--force', absolute], root, 60_000)
       if (removed.exitCode === 0) {
-        await runGit(['branch', '-D', `flowgate/${change.id}/${taskId}`], root, 30_000)
+        await runGit(['branch', '-D', taskWorktreeBranch(change.id, taskId)], root, 30_000)
       }
     }
     runtime.emit()
@@ -401,7 +413,7 @@ async function maybeCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId
   }
 }
 
-/** 建 worktree（`.flowgate/worktrees/<变更>/<任务>/`，分支 `flowgate/<变更>/<任务>`）。 */
+/** 建 worktree（`.flowgate/worktrees/<变更>/<任务>/`，分支见 taskWorktreeBranch）。 */
 async function prepareWorktree(
   runtime: HostRuntime,
   engine: EngineLike,
@@ -414,7 +426,7 @@ async function prepareWorktree(
   const relative = normalizeSlashes(`.flowgate/worktrees/${change.id}/${envelope.taskId}`)
   const absolute = nodePath.resolve(root, relative)
   await fsp.mkdir(nodePath.dirname(absolute), { recursive: true })
-  const branch = `flowgate/${change.id}/${envelope.taskId}`
+  const branch = taskWorktreeBranch(change.id, envelope.taskId)
   const base = change.branch ?? (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], root)).stdout.trim()
   const add = await runGit(['worktree', 'add', '-b', branch, absolute, base || 'HEAD'], root, 120_000)
   if (add.exitCode !== 0) {

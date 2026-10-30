@@ -71,6 +71,40 @@ describe('守卫：动作映射', () => {
   })
 })
 
+describe('守卫：派发执行者的 worktree 路径归一', () => {
+  it('worktree 内绝对路径相对 worktree 根归一（不再带 .flowgate 前缀）', async () => {
+    harness = await setupPlugin()
+    const worktree = '.flowgate/worktrees/C-001/T1'
+    harness.runtime.registerAgentRole('child-T1', 'executor', { changeId: 'C-001', taskId: 'T1' } as never, worktree)
+    const exec = makeExec({
+      name: 'edit',
+      arguments: { file_path: '/fake/project/.flowgate/worktrees/C-001/T1/src/main/java/A.java', content: 'x' },
+      callId: 'call-executor-worktree',
+      agent: { id: 'child-T1' } as never,
+    })
+    await runPreExecute(harness, exec)
+    const call = engineState(harness.engine).calls.evaluateAction.at(-1) as
+      | { action: unknown; caller: { cwd?: string } }
+      | undefined
+    expect(call?.action).toMatchObject({ kind: 'write', path: 'src/main/java/A.java' })
+    expect(call?.caller.cwd).toBe('/fake/project/.flowgate/worktrees/C-001/T1')
+  })
+
+  it('执行者写 worktree 之外的绝对路径不会被错误归一（仍交范围规则判定）', async () => {
+    harness = await setupPlugin()
+    harness.runtime.registerAgentRole('child-T1', 'executor', { changeId: 'C-001', taskId: 'T1' } as never, '.flowgate/worktrees/C-001/T1')
+    const exec = makeExec({
+      name: 'write',
+      arguments: { file_path: '/fake/project/src/outside.ts', content: 'x' },
+      callId: 'call-executor-outside',
+      agent: { id: 'child-T1' } as never,
+    })
+    await runPreExecute(harness, exec)
+    const call = engineState(harness.engine).calls.evaluateAction.at(-1) as { action: unknown } | undefined
+    expect(call?.action).toMatchObject({ kind: 'write', path: '/fake/project/src/outside.ts' })
+  })
+})
+
 describe('守卫：拒绝与 fail-closed', () => {
   it('engine 判定 deny 时 pre-execute 返回 deny，且同步 guard 也拒绝（单调）', async () => {
     harness = await setupPlugin()

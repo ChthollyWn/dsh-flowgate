@@ -92,20 +92,29 @@ export function buildCallerInfo(runtime: HostRuntime, exec: DshToolExecution, to
     agentId,
     agentRole: role.role,
   }
-  if (role.worktree) caller.cwd = role.worktree
+  if (role.worktree) caller.cwd = runtime.absolute(role.worktree)
   else if (runtime.root()) caller.cwd = runtime.root() ?? undefined
   if (role.dispatch) caller.dispatch = role.dispatch
   return caller
 }
 
 /** 把路径类动作归一成仓库相对路径（受保护路径/任务范围都按相对路径判定）。 */
-function normalizeActionPath(runtime: HostRuntime, action: Action): Action {
-  const root = runtime.root()
-  if (!root) return action
-  if (action.kind === 'write' || action.kind === 'create' || action.kind === 'delete' || action.kind === 'rename' || action.kind === 'read') {
-    return { ...action, path: toRepoRelative(root, action.path) }
+function normalizeActionPath(runtime: HostRuntime, action: Action, caller?: CallerInfo): Action {
+  if (
+    action.kind !== 'write' &&
+    action.kind !== 'create' &&
+    action.kind !== 'delete' &&
+    action.kind !== 'rename' &&
+    action.kind !== 'read'
+  ) {
+    return action
   }
-  return action
+  // 派发执行者的 cwd 是任务 worktree（绝对路径）：写操作要相对 **worktree 根** 归一，
+  // 否则路径会带上 `.flowgate/worktrees/<变更>/<任务>/` 前缀，被 R-PROTECTED 当成插件状态
+  // 拒绝、或被 R-SCOPE 判定越界（2026-10-31 真机发现）。主会话仍以仓库根为基准。
+  const base = caller?.cwd ?? runtime.root()
+  if (!base) return action
+  return { ...action, path: toRepoRelative(base, action.path) }
 }
 
 /** 安装守卫。可重复调用（服务替换时由 cordis 重新挂载）。 */
@@ -173,7 +182,7 @@ async function evaluatePreExecute(
       putDecision(runtime, { callId, tool: exec.name, caller, decision: { effect: 'allow', message: '' }, at: runtime.now().getTime() })
       return next()
     }
-    const normalized = normalizeActionPath(runtime, action)
+    const normalized = normalizeActionPath(runtime, action, caller)
     debugGuard(`action kind=${normalized.kind} path=${String((normalized as { path?: string }).path)} caller=${JSON.stringify(caller).slice(0, 200)}`)
     const decision = await engine.evaluateAction(normalized, caller)
     debugGuard(`decision effect=${decision.effect} rule=${decision.rule?.ruleId ?? '-'} message=${decision.message.slice(0, 160)}`)

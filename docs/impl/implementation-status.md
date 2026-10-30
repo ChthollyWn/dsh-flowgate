@@ -13,7 +13,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期、并发会话租约、`/flow repair` |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点在 host 侧接线并已有 host 单测（test/host/dispatch.test.ts）；缺 provider/git 时降级 |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 主体完成 | 真实 web 宿主走查 + 11 张截图（见 §3.1/§3.3）；剩余：面板按钮 Remote 兜底、低复杂度确认卡、误判反馈截图 |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 112 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 114 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -182,6 +182,23 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 
 **新增脚本**：`scripts/measure-startup.mjs`（启动增量）、`scripts/verify-uninstall.mjs`（卸载干净度）；均只操作临时/隔离目录，绝不使用进程里的真实 `DSH_HOME`。
 
+## 3.7 派发 / worktree 真机验证（2026-10-31，C-003/C-004）
+
+目标：在真实 headless 宿主里用 `flow_dispatch_next` 跑并行批次，验证 worktree 创建、子 agent 启动、任务门/审查/集成检查点结算。
+
+**C-003（第一轮，发现两个真机缺陷）**
+
+- 派发成功：`batch.started B1`、`task.started T1/T2 mode=parallel`，两个执行者子 agent（`flowgate-exec-T1/T2`）真实启动并分别结算（最终 T1=done、T2=failed）。
+- **缺陷 A：worktree 分支 D/F 冲突**。变更分支是 `flowgate/C-003`，任务分支按 `flowgate/C-003/T1` 命名，git 不允许 `refs/heads/flowgate/C-003` 与 `refs/heads/flowgate/C-003/T1` 共存 → `git worktree add` 失败并被静默降级为主工作区（日志只有 feature note）。已修：任务分支改用兄弟命名空间 `flowgate-tasks/<changeId>/<taskId>`（`taskWorktreeBranch`），worktree add/merge/cleanup 三处统一，并补单测断言。
+- **缺陷 B：worktree 内写操作路径归一错误**。执行者 cwd 是 worktree，但守卫把绝对路径相对**主仓库根**归一，路径变成 `.flowgate/worktrees/C-004/T2/src/...`，随即被 `R-PROTECTED`（插件状态）拒绝；即使通过也会被 `R-SCOPE` 判越界。已修：`buildCallerInfo` 把 worktree 转绝对路径，`normalizeActionPath` 以 caller.cwd 为基准归一（主会话仍用仓库根），并补 2 个守卫回归测试（worktree 内路径 → `src/...`；worktree 外路径保持绝对交范围规则）。
+
+**C-004（第二轮，修复后的真机证据）**
+
+- 真实创建了两个 worktree：`.flowgate/worktrees/C-004/T1` 与 `.../T2`，分支 `flowgate-tasks/C-004/T1`、`flowgate-tasks/C-004/T2`；`git worktree list` 可见；主分支 `flowgate/C-004`。
+- `flow_dispatch_next` 的 `data.dispatched` 回填真实 `worktree` 字段（此前修复的问题在真机闭环）。
+- 两个执行者子 agent 在各自 worktree 内启动并执行；账本有 `rule.denied`（R-SCOPE/旧版 R-PROTECTED）与 `scope.requested SC-1/SC-2` 记录——这是子 agent 越界后的正确转人工路径，但也暴露调度侧缺口：**并行批次里 scope 变更请求需要负责人审批**，host 目前只把 pending 留在状态里，没有自动通知/审批者（交互式会话里由负责人处理；E2E 用 `admin pending <id> approve`）。
+- **本轮未完成**：C-004 的 worktree 合并、集成检查点与任务门结算使用修复前的 lib 运行，因此只验证到"worktree 创建 + 子 agent 启动 + 结构化回填"；用修复后 lib 的完整结算复验（C-005）留下一轮。
+
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |
@@ -189,7 +206,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 | 1 | ~~浏览器端交互未在真实 DSH web/desktop 会话里跑过~~（已 2026-10-30 实测，见 §3.1） | 剩余：人工按钮点击流程（Remote 兜底）、低复杂度确认卡、误判反馈截图 | 用桌面会话补做 |
 | 2 | 三个 preset 已在真实 web 宿主的预设菜单出现（§3.3）；headless 用 overlay 补 `@deepseek-ai/dsh-agent-preset-registry` 后可激活（§3.5 实测），但**会话内切换**仍未验证 | 工程模式/执行者/只读 preset 的运行时行为仍需确认 | 桌面/Web 会话切换实测；overlay 写法已记入 host-integration |
 | 3 | 有 / 无插件对照评测未执行（M6 T6.1）；评测脚本 `scripts/run-evaluation.mjs` 与 greenfield 空仓库已就绪并通过 dry-run | 无法给出 M-15/M-18 实测数字 | 按 [evaluation.md](../evaluation.md) 跑 9 任务 × 2 条件 |
-| 4 | 审查子 agent 已在真机跑通（RV-1/RV-2，见 §3.5）；派发已有 host 单测（25 例），但真实 git worktree 合并/集成检查点仍未真机跑通（headless 一次性运行在子 agent 结算前退出） | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式会话里跑 `flow_dispatch_next` 验证 worktree 结算与集成检查点 |
+| 4 | 审查子 agent 真机跑通（§3.5）；派发/worktree 真机已验证 worktree 创建、分支命名、子 agent 启动与 data 回填（§3.7）；合并/集成检查点结算需用修复后 lib 复验（C-005）；并行批次内子 agent 的 scope 变更请求需要负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 下一轮跑 C-005 完整结算；交互式会话验证审批通知 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
 | 7 | 覆盖率分支 67.8% 低于 80% 目标（语句 82.5% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
@@ -206,7 +223,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 
 ## 6. 下一步（按优先级）
 
-1. **派发/并行 worktree 真机验证**：在交互式会话里调用 `flow_dispatch_next`，确认子 agent 结算 → 任务门/审查 → worktree 合并 + 集成检查点（headless 一次性运行无法等待后台子 agent 结算）。
+1. **派发/并行 worktree 完整结算复验（C-005）**：用已修复 lib 跑一次并行批次，确认子 agent 结算 → 任务门/审查 → worktree 合并 + 集成检查点；交互式会话里补验 scope 变更的审批通知。
 2. **M6 对照评测**：pilot 1/9 已完成（ts-todo-api/fix-bug A/B）；继续跑剩余 8 任务 × 2 条件、从 0 开发（greenfield）演练与并行对照，填入 [evaluation.md](../evaluation.md) §6.2。
 3. 真实会话里切换三个 preset；更新 `cordis.patch.yml` 的"待实测"注释（当前已刷新为实际剩余项）。
 4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；Desktop 宿主人工走查（启动耗时/卸载干净度已完成，见 §3.6）。

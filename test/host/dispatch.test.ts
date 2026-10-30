@@ -11,7 +11,7 @@ import type { DshSubagentActivationSpec, DshSubagentResult } from '../../src/hos
 import type { ChangeStatus, DispatchOutcome, DispatchTaskEnvelope, FlowgateConfig, TaskCard, TaskState } from '../../src/core/types.js'
 import { flush, setupPlugin, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
-import { dispatchBusy, EXECUTOR_OUTPUT_SCHEMA, resetDispatchStateForTest, runningDispatches } from '../../src/host/dispatch/index.js'
+import { dispatchBusy, EXECUTOR_OUTPUT_SCHEMA, resetDispatchStateForTest, runningDispatches, taskWorktreeBranch } from '../../src/host/dispatch/index.js'
 import { createFakeEngine, createFakeSubagents, defaultFakeConfig, type FakeEngineState } from '../../src/host/testing/fake-ctx.js'
 import { FLOWGATE_PRESETS } from '../../src/host/guard/delegation.js'
 import * as fsp from 'node:fs/promises'
@@ -356,10 +356,14 @@ describe('并行批次 worktree', () => {
       expect(subagents.state.started.length).toBe(2)
       const wtT1 = nodePath.join(projectRoot, '.flowgate/worktrees/C-001/T1')
       const wtT2 = nodePath.join(projectRoot, '.flowgate/worktrees/C-001/T2')
+      // 任务分支必须在 flowgate-tasks/ 命名空间：变更分支是 flowgate/C-001，
+      // 再建 flowgate/C-001/T1 会触发 git ref D/F 冲突（真机回归）。
+      expect(taskWorktreeBranch('C-001', 'T1')).toBe('flowgate-tasks/C-001/T1')
+      expect(taskWorktreeBranch('C-001', 'T1').startsWith('flowgate/C-001/')).toBe(false)
       // git worktree add 成功路径被走到（未被降级）。
       const gitCalls = gitMock.runGit.mock.calls.map((call) => (call[0] as string[]).join(' '))
-      expect(gitCalls.some((line) => line === `worktree add -b flowgate/C-001/T1 ${wtT1} main`)).toBe(true)
-      expect(gitCalls.some((line) => line === `worktree add -b flowgate/C-001/T2 ${wtT2} main`)).toBe(true)
+      expect(gitCalls.some((line) => line === `worktree add -b flowgate-tasks/C-001/T1 ${wtT1} main`)).toBe(true)
+      expect(gitCalls.some((line) => line === `worktree add -b flowgate-tasks/C-001/T2 ${wtT2} main`)).toBe(true)
       // 执行者 cwd 指向各自 worktree；摘要行展示 worktree 路径。
       expect(specAt(subagents, 0).request.cwd).toBe(wtT1)
       expect(specAt(subagents, 1).request.cwd).toBe(wtT2)
