@@ -1,7 +1,7 @@
 node_modules/
 lib/
 lib.tmp/
-coverage/
+/coverage/
 spike/node_modules/
 spike/*.tgz
 *.log
