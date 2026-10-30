@@ -694,7 +694,11 @@ export class FlowEngine {
       }
     }
 
-    const changeId = store.nextChangeId(this.state.changes, input.kind ?? 'change')
+    // 已归档变更的目录被移出 `.flowgate/changes/`，不会出现在 this.state.changes 里；
+    // 编号分配必须把它们也算进去，否则归档后新建变更会复用 C-001/A-001，导致账本与
+    // 归档报告目录出现同号冲突（2026-10-31 真机发现）。
+    const archived = await this.archivedChangeIds()
+    const changeId = store.nextChangeId([...this.state.changes, ...archived], input.kind ?? 'change')
     // `/flow new <描述>` only carries a title; G0 requires a one-line goal. Default the
     // summary to the title instead of failing G0 on a human-typed command.
     const summary = input.summary?.trim() ? input.summary.trim() : title
@@ -2470,6 +2474,28 @@ export class FlowEngine {
       if (entry?.capability?.trim()) return entry.capability
     }
     return change.title?.trim() || change.id
+  }
+
+  /**
+   * 已归档变更/分析任务的编号（从 `.flowgate/archive/<日期>-<编号>/` 目录名解析）。
+   * 归档会移除 `.flowgate/changes/<id>/`，所以状态列表里已看不到它们；编号分配
+   * 需要这些历史 id 来避免复用。
+   */
+  private async archivedChangeIds(): Promise<{ id: string }[]> {
+    const archiveDir = store.layout(this.root).archiveDir
+    if (!(await this.fs.exists(archiveDir))) return []
+    let entries: string[] = []
+    try {
+      entries = await this.fs.readdir(archiveDir)
+    } catch {
+      return []
+    }
+    const ids: { id: string }[] = []
+    for (const entry of entries) {
+      const match = /-([AC]-\d+)$/.exec(entry)
+      if (match?.[1]) ids.push({ id: match[1] })
+    }
+    return ids
   }
 
   private async copyDirRecursive(from: string, to: string): Promise<void> {

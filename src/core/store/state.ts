@@ -291,7 +291,7 @@ export async function writeLeases(
 // ---------------------------------------------------------------------------
 
 /** 下一个变更编号：变更 `C-001`、分析任务 `A-001`。 */
-export function nextChangeId(changes: ChangeStatus[], kind: 'change' | 'analysis'): string {
+export function nextChangeId(changes: { id: string }[], kind: 'change' | 'analysis'): string {
   const prefix = kind === 'analysis' ? 'A' : 'C'
   const pattern = new RegExp(`^${prefix}-(\\d+)$`)
   let max = 0

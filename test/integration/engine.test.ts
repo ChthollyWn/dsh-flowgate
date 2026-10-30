@@ -191,6 +191,11 @@ describe('FlowEngine pipeline', () => {
     expect(merged).toContain('### Requirement: R1')
     expect(merged).toContain('R1.S1')
     expect(merged).toContain('# 主规格：')
+
+    // 归档后的编号不复用：归档目录里仍有 C-001，新建变更必须是 C-002
+    //（否则账本与归档报告目录会出现同号冲突，2026-10-31 真机发现）。
+    const next = await engine.newChange({ title: '归档后的下一个变更', summary: '归档后新建' })
+    expect(next.changeId).toBe('C-002')
   })
 
   it('S1 阶段写源码被规则拒绝，单次放行只生效一次', async () => {

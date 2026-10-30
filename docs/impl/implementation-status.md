@@ -155,6 +155,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 2. **`flow_dispatch_next` 结构化 data 的 worktree 为空**：并行批次里回填的是派发前 envelope 快照，实际 worktree 由 `startExecutor` 创建。已修 `src/host/dispatch/index.ts`（回填 `started.worktree`），并补单测断言。
 3. **G5 的 build/lint 回执依赖命令可执行环境**：插件只自动跑全量测试；配置了 build/lint 命令时需在 S4/S5 通过验证组或 `attach_evidence` 收集回执（或把命令配置成沙箱内可执行的等价命令）。已记入 [host-integration.md](host-integration.md) 的 E2E 坑位。
 4. **headless 一次性运行没有交互通道**：无审批回答器、macOS sandbox-exec 在受限环境不可用，agent 侧 shell 不可用；插件自身的命令执行不受影响（`flow_verify`/G2 baseline/G5 全量测试均正常）。负责人操作用 `tools/admin.js` 驱动。
+5. **归档后变更编号被复用**：归档把 `.flowgate/changes/C-001/` 移出后，状态列表里不再有 C-001，`nextChangeId` 只扫当前列表 → 新建变更又分配了 C-001，账本出现两条 `change.created` C-001、变更台账被覆盖。已修：编号分配同时读取 `.flowgate/archive/<日期>-<id>/` 里的历史编号（`Engine.archivedChangeIds()`），并新增 engine 集成回归测试（归档后新建必须是 C-002）。
 
 **host 单测补齐**：新增 `test/host/dispatch.test.ts`（11 例：注册/降级/顺序与并行派发/worktree 落点/互斥/失败结算）与 `test/host/review.test.ts`（14 例：开关、provider 降级、findings 归一化、重试 1 次、读取覆盖、调查任务）；`test/host` 85 → 110 例，全仓 63 files/944 tests → **65 files/969 tests**。
 
