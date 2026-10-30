@@ -13,7 +13,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期、并发会话租约、`/flow repair` |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点在 host 侧接线并已有 host 单测（test/host/dispatch.test.ts）；缺 provider/git 时降级 |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 主体完成 | 真实 web 宿主走查 + 11 张截图（见 §3.1/§3.3）；剩余：面板按钮 Remote 兜底、低复杂度确认卡、误判反馈截图 |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 116 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 119 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -30,7 +30,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/null
 ```
 
-最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入/检查点/util 测试后 68 files / 992 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 849.8KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%（`pnpm coverage`）。
+最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/命令执行器/故障注入/检查点/util 测试后 69 files / 995 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 850.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%（`pnpm coverage`）。
 
 ## 3. 关键实现决策（与 03 方案的差异）
 
@@ -205,6 +205,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - C-007（保持主会话轮询 211s 后仍是同样结果）：worktree + 子 agent + 测试 + **review RV-1 verdict=pass / coverageOk=true** + task.done 全部通过；批次仍停在 `checkpoint`。结论：headless 一次性运行无法可靠等待"子 agent finalize → 合并 → 集成命令"的后台链路，需要交互式/常驻宿主会话复验。
 - **缺陷 C：并行执行者的范围判定用全局 activeTask**。C-005 里 T2 写自己 `new_files` 中的文件被 T1 的 scope 拒绝（`rule.denied R-SCOPE target=RenewalSummaryText.java`）。已修：`Engine.evaluateAction` 优先用 `caller.dispatch.taskId` 定位任务卡，再回退 activeTask；新增 engine 集成回归测试（T2 执行者允许、主会话按 T1 拒绝）。
 - 并行批次内的 `scope.requested`（SC-n）仍需负责人审批；headless 下拉不到审批通知，交互式会话可在面板处理，E2E 用 `admin pending <id> approve`。
+- **缺陷 D：命令执行器超时后可能永久挂起**（2026-10-31 真机发现）：`flow_verify` 执行 `spring-boot:start` 时 java 后代进程继承 stdout/stderr，只 kill shell 不会触发 'close'，宿主在超时后仍然悬挂（风险 B 评测卡住 >10 分钟）。已修 `NodeCommandRunner`：POSIX 用 detached 进程组、超时对整组 SIGTERM/SIGKILL，并在宽限期后强制 resolve(exitCode=124)；新增 3 个回归测试（含"后代持有管道"场景）。
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |

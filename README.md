@@ -216,7 +216,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
 | 有 / 无插件对照评测报告 | 🟡 pilot 1/9 完成（`ts-todo-api/fix-bug` A/B 各 1 次，两种条件均修复正确；B 组多 2 轮/13x 耗时/3 次人工门）；其余 8 任务与从 0 演练待跑，见 [docs/evaluation.md](docs/evaluation.md) §6.1 |
 
-**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（68 文件 / 992 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 pilot（1/9 任务，A/B 各 1 次），完整 9×2 待跑，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
+**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（69 文件 / 995 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 pilot（1/9 任务，A/B 各 1 次），完整 9×2 待跑，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
 
 ## 界面
 

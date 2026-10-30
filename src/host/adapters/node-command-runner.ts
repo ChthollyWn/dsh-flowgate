@@ -19,16 +19,33 @@ export interface RunCommandOptions extends CommandRunOptions {
   extraEnv?: Record<string, string>
 }
 
-/** 终止一个（可能已经派生了子进程树的）shell。 */
+/**
+ * 终止一个（可能已经派生了子进程树的）shell。
+ *
+ * POSIX 上以 `detached: true` 启动，shell 自己是进程组 leader；只 kill shell
+ * 会让 `mvn spring-boot:start` 派生出的 java 子进程继续持有 stdout/stderr 管道，
+ * Node 的 'close' 事件因此永远不触发（2026-10-31 真机发现：flow_verify 超时后
+ * 宿主线卡住 10 分钟以上）。所以这里对**进程组**发信号。
+ */
 function terminate(child: ReturnType<typeof spawn>): void {
+  const pid = child.pid
+  if (pid === undefined) return
   try {
     if (process.platform === 'win32') {
       // Windows 没有进程组信号；taskkill /T 才能带走 shell 派生的子进程。
-      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
     } else {
-      child.kill('SIGTERM')
+      try {
+        process.kill(-pid, 'SIGTERM')
+      } catch {
+        child.kill('SIGTERM')
+      }
       setTimeout(() => {
-        if (child.exitCode === null && !child.killed) child.kill('SIGKILL')
+        try {
+          process.kill(-pid, 'SIGKILL')
+        } catch {
+          if (child.exitCode === null && !child.killed) child.kill('SIGKILL')
+        }
       }, KILL_GRACE_MS).unref?.()
     }
   } catch {
@@ -49,15 +66,37 @@ export class NodeCommandRunner implements CommandRunner {
       const child = spawn(command, {
         cwd: options.cwd,
         shell: true,
+        // POSIX：创建独立进程组，超时时可以整组终止（见 terminate）。
+        detached: process.platform !== 'win32',
         env: { ...process.env, ...options.env, ...(process.platform === 'win32' ? {} : {}) },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
+      const finish = (exitCode: number): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (stdout.length >= MAX_OUTPUT_CHARS) stdout += '\n…（stdout 超过 8MB，已截断）\n'
+        if (stderr.length >= MAX_OUTPUT_CHARS) stderr += '\n…（stderr 超过 8MB，已截断）\n'
+        resolve({ exitCode, stdout, stderr, timedOut, durationMs: Date.now() - startedAt })
+      }
+
       const timer = setTimeout(() => {
         if (settled) return
         timedOut = true
         terminate(child)
+        // 兜底：即使残留后代仍持有管道，也要在宽限期后强制返回，绝不让调用方
+        // 永久挂起（管道 destroy 解除 'close' 依赖）。
+        setTimeout(() => {
+          try {
+            child.stdout?.destroy()
+            child.stderr?.destroy()
+          } catch {
+            // 忽略。
+          }
+          finish(124)
+        }, KILL_GRACE_MS + 500).unref?.()
       }, timeoutMs)
       timer.unref?.()
 
@@ -73,15 +112,6 @@ export class NodeCommandRunner implements CommandRunner {
 
       child.stdout?.on('data', (chunk: Buffer) => append('stdout', chunk))
       child.stderr?.on('data', (chunk: Buffer) => append('stderr', chunk))
-
-      const finish = (exitCode: number): void => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        if (stdout.length >= MAX_OUTPUT_CHARS) stdout += '\n…（stdout 超过 8MB，已截断）\n'
-        if (stderr.length >= MAX_OUTPUT_CHARS) stderr += '\n…（stderr 超过 8MB，已截断）\n'
-        resolve({ exitCode, stdout, stderr, timedOut, durationMs: Date.now() - startedAt })
-      }
 
       child.on('error', (error) => {
         stderr += `${stderr === '' ? '' : '\n'}[CommandRunner] 启动命令失败：${error.message}`

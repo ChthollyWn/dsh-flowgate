@@ -18,6 +18,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - T6.2 加固：`test/fault-injection/host-resilience.test.ts`（4 例：账本篡改锁定、守卫抛错 fail-closed、宿主服务缺失降级、配置损坏报错）、`scripts/measure-startup.mjs`（启动增量 +14.2ms，验收线 200ms）与 `scripts/verify-uninstall.mjs`（隔离 profile 安装/卸载干净度），结果录入 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md) 与 [docs/compat/startup.md](docs/compat/startup.md)。
 - 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
 - 核心工具单测补齐：`test/core/util/util.test.ts` 覆盖 paths/glob/hash/time/markdown（11 例：路径归一、** glob 与重叠、哈希/HMAC/稳定 JSON/密钥脱敏、时间格式与过期、围栏/表格/章节/列表解析）；核心覆盖率升至语句 83.0% / 分支 68.4%。
+- **命令执行器超时挂起修复**（真机发现：`flow_verify` 跑 `spring-boot:start` 时宿主超时后永久挂起）。`NodeCommandRunner` 改为 POSIX detached 进程组、超时整组 SIGTERM/SIGKILL，并在宽限期后强制返回 `timedOut`/exit 124，避免后代进程持有管道导致 Promise 不 resolve；新增 3 个回归测试。
 - 评测脚本新增 `--no-run`：B 组把 `commands.run` 覆盖为 `none`，避免 Spring Boot 这类长驻服务命令在 headless 一次性运行里挂起（A 组不受影响；普通风险 G5 本就不强制运行证据）。
 - 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
@@ -35,7 +36,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（本次提交实测）：**68 个测试文件 / 992 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例 + 11 个 util 测试用例）。
+- 测试规模（本次提交实测）：**69 个测试文件 / 995 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例 + 11 个 util 测试用例 + 3 个命令执行器用例）。
 
 ## [0.1.0] - 2026-10-30
 
@@ -95,7 +96,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **68 files / 992 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
+- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **69 files / 995 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
 - 真实 Web 宿主走查（隔离 `DSH_HOME`，DSH 0.2.1-rc.5 + Chrome）：插件组合与加载、浏览器 bundle、`/flow` 命令族、tools 模块 14/14 工具注册（含派发模块共 15 个 `flow_*` 工具）、状态条/面板、preset 菜单、自动接续、宿主能力检测。
 - 守卫真机证据：真实 headless 会话中 agent 对 `src/server.js` 的 `edit` 被 `R-STAGE-SRC` 拦截，文件未被修改，模型收到完整拒绝原因与解锁路径（debug trace + 账本可查；此前一次「放行」经查为上一轮遗留的单次放行 `OV-1`）。
 - 真实模型完整闭环：在 `ts-todo-api` 上以 C-002 从 `/flow new` 走到 S6 归档——G1 7/7、G2 真实 baseline 34/34、G3 9/9、G4 任务门、G5 全量测试/场景/运行证据、G6 批准；产出 116KB HTML 交付报告，主规格按 R1–R5 合并（账本 `spec.merged`）。API key 经环境变量注入隔离 home，未提交。
