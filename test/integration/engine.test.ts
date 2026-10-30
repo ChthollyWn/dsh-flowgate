@@ -184,6 +184,13 @@ describe('FlowEngine pipeline', () => {
     const files = fs.listFiles()
     expect(files.some((file) => file.startsWith('.flowgate/archive/') && file.endsWith('C-001/status.json'))).toBe(true)
     expect(files.some((file) => file.startsWith('.flowgate/changes/C-001/'))).toBe(false)
+    // T4.4: the incremental spec is folded into the capability main spec.
+    const mainSpec = files.find((file) => file.startsWith('.flowgate/specs/') && file.endsWith('/spec.md'))
+    expect(mainSpec).toBeDefined()
+    const merged = await fs.readFile(mainSpec!)
+    expect(merged).toContain('### Requirement: R1')
+    expect(merged).toContain('R1.S1')
+    expect(merged).toContain('# 主规格：')
   })
 
   it('S1 阶段写源码被规则拒绝，单次放行只生效一次', async () => {

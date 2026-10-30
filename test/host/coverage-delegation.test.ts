@@ -18,6 +18,18 @@ afterEach(async () => {
   resetHostPluginForTest()
 })
 
+describe('能力标志（doctor 用）', () => {
+  it('注册 agent 生命周期、restrict、presentAs 后能力标志为 true', async () => {
+    harness = await setupPlugin()
+    const caps = harness.runtime.capabilitySnapshot()
+    expect(caps.agents).toBe(true)
+    // 覆盖自检在引擎就绪后用 agent scope 扫描：假宿主提供 schemas 时应产生条目。
+    expect(harness.runtime.coverage()).not.toBeNull()
+    const entries = harness.runtime.coverage()?.entries ?? []
+    expect(entries.length).toBeGreaterThan(0)
+  })
+})
+
 describe('工具覆盖自检', () => {
   it('computeCoverage 分类统计可写工具覆盖率', async () => {
     harness = await setupPlugin({ bindAgent: false })

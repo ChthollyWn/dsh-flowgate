@@ -82,9 +82,16 @@ export async function formatDoctorReport(runtime: HostRuntime): Promise<string> 
   lines.push('')
   lines.push('宿主能力：')
   const capabilities = runtime.capabilitySnapshot()
+  const unavailableHint: Record<string, string> = {
+    subagents: '该宿主组合未提供；派发降级为 inline 执行',
+    sessionQuery: '该宿主组合未提供；审查读取覆盖降级为启发式核对',
+    userQuestions: '该宿主组合未提供；澄清访谈仍以 clarify.md 检查为准',
+    remote: '未启用；面板按钮回退为填入 /flow 命令',
+  }
   for (const [key, label] of CAPABILITY_LABELS) {
     const ok = capabilities[key] === true
-    lines.push(`  ${ok ? '✓' : '✗'} ${label}`)
+    const hint = ok ? '' : (unavailableHint[key] ?? '')
+    lines.push(`  ${ok ? '✓' : '✗'} ${label}${hint ? `（${hint}）` : ''}`)
   }
   lines.push(`  ${capabilities.remote ? '✓' : '✗'} 面板 Remote 调用（未启用时面板按钮回退为填命令）`)
 

@@ -69,10 +69,20 @@ export function installCoverage(runtime: HostRuntime): void {
       runtime.noteFeature('coverage', '宿主 tools 服务没有 schemas()，覆盖自检降级为"未检查"')
       return
     }
-    const scan = (): void => {
+    const scan = (agent?: unknown): void => {
       if (!runtime.isEnabled()) return
       try {
-        const report = computeCoverage(runtime, tools.schemas?.() ?? [], runtime.isoNow())
+        // rc.5: `schemas(scope?: ScopeKey)` — the scope key is the AGENT object
+        // (not its ctx). With an agent scope this returns all inherited global
+        // tools; without it only tools registered on this plugin's own context.
+        let schemas: readonly { name: string; parameters?: Record<string, unknown> }[] = []
+        const scopeAgent = agent ?? runtime.mainAgent()
+        try {
+          schemas = scopeAgent !== undefined && scopeAgent !== null ? tools.schemas?.(scopeAgent) ?? [] : tools.schemas?.() ?? []
+        } catch {
+          schemas = tools.schemas?.() ?? []
+        }
+        const report = computeCoverage(runtime, schemas, runtime.isoNow())
         runtime.setCoverage(report)
         const uncovered = report.entries.filter(
           (entry) => WRITABLE_CATEGORIES.has(entry.category) && !entry.covered,
@@ -87,13 +97,13 @@ export function installCoverage(runtime: HostRuntime): void {
         runtime.markInert('覆盖自检', error, '工具覆盖自检失败；门禁其余功能不受影响。')
       }
     }
-    runtime.registerEngineReadyHook(() => {
-      scan()
+    runtime.registerEngineReadyHook((agent) => {
+      scan(agent)
     })
     runtime.onScoped(scoped, 'tools/change', () => {
-      scan()
+      scan(runtime.mainAgent())
     })
     // 引擎可能先于本服务就绪（服务加载顺序不定）：如果已经就绪，立即补一次。
-    if (runtime.engine()) scan()
+    if (runtime.engine()) scan(runtime.mainAgent())
   })
 }

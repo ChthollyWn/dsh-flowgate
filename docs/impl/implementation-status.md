@@ -89,6 +89,25 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - `agent 生命周期事件` 能力标志 ✗（实际 `agent/created` 已在用于会话注入，属检测标志误报，待修）；
 - `subagent/sessionQuery/结构化提问/Remote` 在该精简 web 组合未启用（按降级处理）。
 
+## 3.3 能力补齐与无模型走查（2026-10-30 深夜）
+
+这一轮不需要真模型，在真实 Web 宿主（隔离 home + 一个**占位 API Key** 仅用于解锁 UI，未发起模型调用）验证并修复：
+
+| 项 | 结果 |
+|---|---|
+| 预设选择器 | ✅ 菜单中出现 **FlowGate 工程模式 / FlowGate 执行者**（`docs/screenshots/09-preset-menu.png`；reviewer 只给审查子 agent 用，不在主会话菜单） |
+| 自动接续（H23） | ✅ 打开页面即显示 `◆ FlowGate C-001 中 · 普通风险 │ ① 需求澄清`（无活动会话租约时自动附着，无需命令） |
+| H26 关闭原生委派 | ✅ `restrict`/`presentAs` 能力标志变 ✓；真实宿主日志：**已关闭 subagent_fork、workflow、send_message** |
+| 宿主能力检测 | ✅ `restrict` / `presentAs` / `agent 生命周期事件` 由 ✗ 修成 ✓；仍然缺失的 `subagents`/`sessionQuery`/`userQuestions`/`Remote` 在 doctor 里带"该宿主组合未提供/按降级处理"说明 |
+| 覆盖自检（03 §4.3） | ✅ 修复 tool scope 用法：`schemas(scope)` 的 scope key 是 **agent 对象**（不是 agent.ctx）；真实宿主扫描到 46 个可见工具、已覆盖可写工具 4 个/未覆盖 0 |
+| 归档主规格合并（T4.4） | ✅ 新增纯函数 `src/core/archive/merge.ts` + 7 个单测；S6 归档时按 ADDED/MODIFIED/REMOVED 合并进 `.flowgate/specs/<capability>/spec.md`（能力名优先取路线图能力，否则用标题），有警告时进通知与账本 `spec.merged` |
+
+**这轮仍没解决 / 需要真模型**：
+- 「S1 写操作被 R-STAGE-SRC 拒绝」的真实宿主证据仍缺：需要真模型发起 `edit` 工具调用（上一轮用真 key 时被自身流程说明、DSH 读后写策略和会话租约挡住）。下一步用 `--takeover` + 先 read 再 edit 做。
+- 真实 S0→S6（java-renewal）仍需真 key。
+- 派发/并行/审查子 agent 在本精简 web 组合里 `subagents` 未提供，需要带 provider 的组合或桌面会话再验。
+- 覆盖自检数值会随扫描时机在 4–7 之间波动（扫描发生在工具注册过程中）；正确性已保证（未覆盖始终 0），显示口径待稳定。
+
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |

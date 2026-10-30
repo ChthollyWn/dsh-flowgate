@@ -46,7 +46,7 @@ export function installDelegation(runtime: HostRuntime): void {
     runtime.onScoped(scoped, 'agent/created', (payload: { agent?: DshAgent }) => {
       const agent = payload?.agent
       if (!agent) return
-      void applyDelegationPolicy(runtime, agent).catch((error: unknown) => {
+      void applyDelegationPolicy(runtime, agent, tools).catch((error: unknown) => {
         runtime.markInert('原生委派关闭', error, '关闭原生委派失败；守卫仍会拒绝原生委派工具。')
       })
     })
@@ -54,7 +54,11 @@ export function installDelegation(runtime: HostRuntime): void {
 }
 
 /** 对单个 agent 应用 restrict + presentAs（可重复调用，结果记录在 WeakMap）。 */
-export async function applyDelegationPolicy(runtime: HostRuntime, agent: DshAgent): Promise<DelegationClosure | undefined> {
+export async function applyDelegationPolicy(
+  runtime: HostRuntime,
+  agent: DshAgent,
+  rootTools?: DshToolRuntime | null,
+): Promise<DelegationClosure | undefined> {
   if (!runtime.isEnabled()) return undefined
   // 主会话的引擎可能仍在异步初始化：等它就绪再判断是否受管。
   let engine = runtime.engine()
@@ -81,6 +85,7 @@ export async function applyDelegationPolicy(runtime: HostRuntime, agent: DshAgen
 
   // 1) presentAs('native')：失败不影响 restrict。
   if (typeof agentTools.presentAs === 'function') {
+    runtime.capabilities.toolsPresentAs = true
     runtime.safe('presentAs(native)', () => {
       const dispose = agentTools.presentAs?.('native')
       if (typeof dispose === 'function') runtime.registerDisposer(dispose)
@@ -91,23 +96,45 @@ export async function applyDelegationPolicy(runtime: HostRuntime, agent: DshAgen
     runtime.noteFeature('delegation', '当前宿主没有可用的 tools.presentAs，PTC 模式无法强制关闭（守卫仍生效）')
   }
 
-  // 2) restrict({ deny })：只 deny 真实存在的全局工具名，否则 rc.5 会直接抛错。
+  // 2) restrict({ deny })：只 deny 宿主认可的全局工具名，否则 rc.5 会直接抛错。
   if (typeof agentTools.restrict === 'function') {
+    runtime.capabilities.toolsRestrict = true
+    // rc.5 restricts only *restrictable global* tools; the visible set can also
+    // include scope-local tools, so batch the candidate list first and fall back
+    // to one-name probes when the host rejects the batch as containing unknowns.
+    const candidates = runtime.deps.core.blockedDelegationTools()
+    let visibleNames = new Set<string>()
     try {
-      const known = new Set((agentTools.schemas?.() ?? []).map((schema) => schema.name))
-      const candidates = runtime.deps.core.blockedDelegationTools()
-      const deny = candidates.filter((name) => known.has(name))
-      if (deny.length > 0) {
-        const dispose = agentTools.restrict({ deny })
+      const visible = (rootTools?.schemas?.(agent) ?? agentTools.schemas?.() ?? []) as { name: string }[]
+      visibleNames = new Set(visible.map((schema) => schema.name))
+    } catch {
+      visibleNames = new Set<string>()
+    }
+    const filtered = visibleNames.size > 0 ? candidates.filter((name) => visibleNames.has(name)) : candidates
+    const accepted: string[] = []
+    let lastError: string | undefined
+    const tryRestrict = (names: string[]): boolean => {
+      if (names.length === 0) return false
+      try {
+        const dispose = agentTools.restrict?.({ deny: names })
         if (typeof dispose === 'function') runtime.registerDisposer(dispose)
-        closure.restricted = true
-        closure.denied = deny
-      } else {
-        closure.reason = '原生委派工具当前不可见（可能已被其他插件关闭）'
+        accepted.push(...names)
+        return true
+      } catch (error) {
+        lastError = toAgentError(error).error
+        return false
       }
-    } catch (error) {
-      closure.reason = toAgentError(error).error
-      runtime.markInert('原生委派关闭', error, '关闭原生委派失败；守卫仍会拒绝原生委派工具（R-DELEGATE）。')
+    }
+    if (!tryRestrict(filtered)) {
+      for (const name of candidates) {
+        if (accepted.includes(name)) continue
+        tryRestrict([name])
+      }
+    }
+    closure.denied = accepted
+    closure.restricted = accepted.length > 0
+    if (accepted.length === 0) {
+      closure.reason = lastError ?? '原生委派工具当前不可见（可能已被其他插件关闭）'
     }
   } else {
     closure.reason = '宿主 tools 服务没有 restrict 方法'

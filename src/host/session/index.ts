@@ -35,6 +35,8 @@ export function installSession(runtime: HostRuntime): void {
     if (!session) return
     void runtime.handleSessionDisposed(session)
   })
+  // agent/created + agent/disposed 注册成功 = 生命周期事件可用（doctor 用）。
+  runtime.capabilities.agents = true
 
   runtime.registerEngineReadyHook(async (agent, engine) => {
     await onEngineReady(runtime, agent, engine)

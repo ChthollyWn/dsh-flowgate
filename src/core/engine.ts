@@ -133,6 +133,7 @@ import { invalidateOnRework } from './revision'
 import { computeMetrics } from './metrics'
 import { renderChangeReport } from './report'
 import { renderDashboard } from './dashboard'
+import { mergeIncrementalSpec, capabilityDirName } from './archive'
 
 export class FlowGateError extends Error {
   hint?: string
@@ -2430,11 +2431,28 @@ export class FlowEngine {
     const archiveDir = posixJoin(layout.archiveDir, `${dateOnly(now)}-${change.id}`)
     await this.fs.mkdir(archiveDir)
     await this.copyDirRecursive(paths.dir, archiveDir)
-    // Keep a copy of the incremental spec under the project specs tree.
-    const specCopy = posixJoin(layout.specsDir, change.id)
-    await this.fs.mkdir(specCopy)
+    // Fold the incremental spec into the project's main capability spec
+    // (ADDED/MODIFIED/REMOVED, OpenSpec-compatible layout, T4.4).
     if (await this.fs.exists(paths.spec)) {
-      await this.fs.writeFile(posixJoin(specCopy, 'spec.md'), await this.fs.readFile(paths.spec))
+      const incremental = await this.fs.readFile(paths.spec)
+      const capability = capabilityDirName(this.capabilityOf(change), change.id)
+      const capabilityDir = posixJoin(layout.specsDir, capability)
+      const mainSpecPath = posixJoin(capabilityDir, 'spec.md')
+      const existing = (await this.fs.exists(mainSpecPath)) ? await this.fs.readFile(mainSpecPath) : null
+      const merged = mergeIncrementalSpec(existing, incremental, { capability })
+      await this.fs.mkdir(capabilityDir)
+      await this.fs.writeFile(mainSpecPath, merged.markdown)
+      await this.appendLedger('spec.merged', {
+        changeId: change.id,
+        capability,
+        added: merged.added,
+        modified: merged.modified,
+        removed: merged.removed,
+        warnings: merged.warnings,
+      })
+      if (merged.warnings.length > 0) {
+        this.pushNotice(`主规格合并提示：${merged.warnings.join('；')}`)
+      }
     }
     change.lifecycle = 'archived'
     change.stage = 'archived'
@@ -2442,6 +2460,15 @@ export class FlowEngine {
     await this.fs.remove(paths.dir)
     await this.appendLedger('report.generated', { changeId: change.id, path: posixJoin(archiveDir, 'report.html') })
     this.pushNotice(`${change.id} 已交付归档到 ${archiveDir}。建议开新会话继续下一个变更。`)
+  }
+
+  /** Capability name for the main spec: roadmap capability when known, else the title. */
+  private capabilityOf(change: ChangeStatus): string {
+    if (change.roadmap) {
+      const entry = this.roadmapDoc?.entries.find((item) => item.change === change.roadmap)
+      if (entry?.capability?.trim()) return entry.capability
+    }
+    return change.title?.trim() || change.id
   }
 
   private async copyDirRecursive(from: string, to: string): Promise<void> {

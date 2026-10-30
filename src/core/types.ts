@@ -999,6 +999,7 @@ export type LedgerEventType =
   | 'citation.stale'
   | 'config.changed'
   | 'change.updated'
+  | 'spec.merged'
   | 'flow.init'
   | 'roadmap.approved'
   | 'report.generated'

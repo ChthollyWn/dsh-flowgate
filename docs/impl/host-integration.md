@@ -136,3 +136,9 @@ rm -rf /tmp/dsh-flowgate-dev /tmp/flowgate-schema.json
 | `FLOWGATE_CONTEXT_MODE=pre-step` | 跳过 `systemPrompt.section`、强制走 `agent/pre-step` 注入（兼容性排查用） |
 
 已实测结论：注入给模型的 user 消息必须使用 DSH 已登记的 MessageSource kind（当前用官方 `runtime-context` + `form: 'relay'`）；自造 kind 会让 provider 在发请求前抛错，表现为 `DeepSeek Messages transport failed`。
+
+## 真实宿主踩坑记录（rc.5）
+
+- `ctx.tools.schemas(scope?: ScopeKey)` 的 scope key 是 **agent 对象**（不是 `agent.ctx`）。传 ctx 只会拿到 scope-local 工具；不传则只有本插件注册的工具。覆盖自检/委派关闭都需要用 agent 作为 key。
+- `ctx.tools.restrict({ deny })` 只接受**可限制的全局工具名**：visible 集合里可能有 scope-local 工具或不同组合下不存在的名字，批量 deny 只要有一个未知名字就整体抛错。策略：先按可见集合过滤批量调用，失败则逐个工具名探测（本仓库 `guard/delegation.ts` 已实现）。
+- DSH 的 MessageSource 是登记表：注入给模型的 user 消息必须用已登记 kind（当前用 `runtime-context`+`form:'relay'`），自造 kind 会导致 provider 在 fetch 前抛错并被包装成 `DeepSeek Messages transport failed`（详见 §3.2）。
