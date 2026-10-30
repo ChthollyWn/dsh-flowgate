@@ -161,29 +161,97 @@ describe('client plugin entry', () => {
     expect(fake.tabs).toHaveLength(0)
   })
 
-  it('registers the sidebar tab directly when the service is already on the context', () => {
+  it('registers the sidebar tab through deferred inject even when the service object exists', () => {
+    // A plugin may NOT read an undeclared service directly (real Cordis throws);
+    // the panel must be registered from inside ctx.inject.
     const slots: SlotCall[] = []
     const tabs: Record<string, unknown>[] = []
+    const slotService = {
+      register: (def: Record<string, unknown>, component: unknown) => {
+        slots.push({ def, component })
+        return () => {}
+      },
+    }
     const ctx: ClientContext = {
-      slots: {
-        register: (def: Record<string, unknown>, component: unknown) => {
-          slots.push({ def, component })
-          return () => {}
-        },
-      },
-      sidebarRightTabs: {
-        register: (def: Record<string, unknown>) => {
-          tabs.push(def)
-          return () => {}
-        },
-      },
+      effect: (callback: () => (() => void) | void) => callback(),
+      slots: slotService,
       locale: {
         register: () => () => {},
         bind: () => (key: string) => key,
       },
       logger: { warn: () => {} },
+      inject: (deps: string[], callback: (c: ClientContext) => unknown) => {
+        expect(deps).toEqual(['sidebarRightTabs', 'slots'])
+        const injected = {
+          slots: slotService,
+          sidebarRightTabs: {
+            register: (def: Record<string, unknown>) => {
+              tabs.push(def)
+              return () => {}
+            },
+          },
+        } as unknown as ClientContext
+        const result = callback(injected)
+        return typeof result === 'function' ? result : undefined
+      },
     }
     expect(() => apply(ctx)).not.toThrow()
+    expect(tabs.map((tab) => tab.id)).toEqual([TAB_ID])
+    expect(slots.find((call) => call.def.name === 'sidebar.right.pane.tab')?.def.key).toBe(TAB_ID)
+  })
+})
+
+/**
+ * Regression (found in a real DSH 0.2.1-rc.5 web host, 2026-10-30): Cordis
+ * contexts throw `cannot get property "<service>" without inject` when a plugin
+ * reads a service it did not declare. `apply()` must never read optional
+ * services (sidebarRightTabs / sidebarRight / remote / sessions / conversation)
+ * directly — only through deferred `ctx.inject`.
+ */
+describe('strict Cordis context (non-injected property access throws)', () => {
+  it('apply() does not throw and registers dock + panel through ctx.inject only', () => {
+    const slots: SlotCall[] = []
+    const tabs: Record<string, unknown>[] = []
+    const declared = new Set<string>([...inject])
+
+    const slotService = {
+      register: (def: Record<string, unknown>, component: unknown) => {
+        slots.push({ def, component })
+        return () => {}
+      },
+    }
+    const base = {
+      effect: (callback: () => (() => void) | void) => callback(),
+      slots: slotService,
+      locale: { register: () => () => {}, bind: () => (key: string) => key },
+      logger: { warn: () => {}, info: () => {} },
+      inject: (deps: string[], callback: (c: ClientContext) => unknown) => {
+        // Cordis only lets the callback read injected services.
+        const injected: Record<string, unknown> = {
+          slots: slotService,
+          sidebarRightTabs: { register: (def: Record<string, unknown>) => { tabs.push(def); return () => {} } },
+          sidebarRight: { openTab: () => undefined },
+          sessions: { binding: () => undefined },
+          conversation: { input: { for: () => undefined } },
+          remote: {},
+        }
+        const picked: Record<string, unknown> = {}
+        for (const dep of deps) picked[dep] = injected[dep]
+        const result = callback(picked as unknown as ClientContext)
+        return typeof result === 'function' ? result : undefined
+      },
+    }
+    const ctx = new Proxy(base as unknown as ClientContext, {
+      get(target, prop, receiver) {
+        if (typeof prop === 'string' && !(prop in target) && !declared.has(prop)) {
+          throw new Error(`cannot get property "${prop}" without inject`)
+        }
+        return Reflect.get(target, prop, receiver)
+      },
+    }) as ClientContext
+
+    expect(() => apply(ctx)).not.toThrow()
+    expect(slots.find((call) => call.def.name === 'conversation.input.dock')).toBeDefined()
     expect(tabs.map((tab) => tab.id)).toEqual([TAB_ID])
     expect(slots.find((call) => call.def.name === 'sidebar.right.pane.tab')?.def.key).toBe(TAB_ID)
   })

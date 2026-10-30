@@ -10,12 +10,13 @@ import {
   PROJECTION_STATE_VERSION,
   sanitizeProjection,
 } from '../../src/host/projection/index.js'
-import { STATE_RECORD_TYPE } from '../../src/host/adapters/session-record.js'
+import { resetPluginSessionApiForTest, STATE_RECORD_TYPE } from '../../src/host/adapters/session-record.js'
 import { initialProjection } from '../../src/host/projection/types.js'
 
 let harness: PluginHarness | null = null
 
 afterEach(async () => {
+  resetPluginSessionApiForTest(undefined)
   if (harness) {
     await harness.cleanup()
     harness = null
@@ -78,7 +79,13 @@ describe('投影定义', () => {
 })
 
 describe('插件运行期投影', () => {
-  it('注册后每次 engine 状态变化写 plugin:dsh-flowgate/state 插件记录', async () => {
+  it('注册后每次 engine 状态变化写 plugin:dsh-flowgate/state 插件记录（appendPluginRecord 可用时）', async () => {
+    // 真实宿主提供 appendPluginRecord；测试注入等价实现（写进 fake session 日志）。
+    resetPluginSessionApiForTest({
+      appendPluginRecord(session: unknown, type: string, data: Record<string, unknown>) {
+        ;(session as { append(type: string, data: Record<string, unknown>): unknown }).append(type, data)
+      },
+    })
     harness = await setupPlugin()
     const definition = harness.projections.state.definitions.get('flowgate')
     expect(definition).toBeDefined()
@@ -100,6 +107,20 @@ describe('插件运行期投影', () => {
     expect(latest?.data).toMatchObject({ learning: 'detail' })
     expect((latest?.data.snapshot as { stage?: string }).stage).toBe('S4')
     expect(typeof latest?.data.revision).toBe('number')
+  })
+
+  it('appendPluginRecord 不可用时不写 session.append（避免损坏会话日志）', async () => {
+    resetPluginSessionApiForTest(null)
+    harness = await setupPlugin()
+    const session = harness.agent.session as unknown as { state: { appended: { type: string }[] } }
+    const before = session.state.appended.length
+    harness.runtime.emit()
+    for (let index = 0; index < 50 && session.state.appended.length === before; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(session.state.appended.length).toBe(before)
+    // 投影仍然在内存里更新，供 client 的 latest-snapshot 兜底读取。
+    expect(harness.runtime.projection().revision).toBeGreaterThanOrEqual(0)
   })
 
   it('内容不变时去重（revision 不增长、不重复写日志）', async () => {

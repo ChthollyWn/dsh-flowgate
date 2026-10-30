@@ -218,6 +218,14 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 
 **Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green; a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); browser interaction and the controlled evaluation are not executed yet — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
+## Screenshots
+
+Taken in a real DSH `0.2.1-rc.5` web host (isolated `flowgate-dev` profile); how to reproduce: [docs/screenshots/](docs/screenshots/README.md).
+
+| Input-dock status bar | Right-sidebar panel |
+|---|---|
+| ![status bar](docs/screenshots/01-statusbar-home.png) | ![panel](docs/screenshots/03-panel-overview.png) |
+
 ## FAQ
 
 **Can it lock me out?**

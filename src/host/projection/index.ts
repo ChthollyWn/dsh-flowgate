@@ -49,7 +49,7 @@ export function sanitizeProjection(value: unknown): FlowgateProjection | null {
 }
 
 /** 投影定义（导出便于单测直接折叠事件）。 */
-export function createFlowgateProjection(now: () => string): {
+export function createFlowgateProjection(now: () => string, latest?: () => FlowgateProjection | undefined): {
   key: typeof PROJECTION_KEY
   stateVersion: number
   stateSchema: { parse(value: unknown): FlowgateProjection }
@@ -61,14 +61,23 @@ export function createFlowgateProjection(now: () => string): {
     key: PROJECTION_KEY as typeof PROJECTION_KEY,
     stateVersion: PROJECTION_STATE_VERSION,
     stateSchema: passthroughSchema<FlowgateProjection>(),
-    init: () => initialProjection(now()),
+    init: () => latest?.() ?? initialProjection(now()),
     apply: (state, event) => {
-      if (!event || event.type !== STATE_RECORD_TYPE) return state
-      const next = sanitizeProjection(event.data)
-      if (!next) return state
-      // revision 单调：忽略乱序/重复事件。
-      if (next.revision < state.revision) return state
-      return next
+      if (event && event.type === STATE_RECORD_TYPE) {
+        const next = sanitizeProjection(event.data)
+        if (next) {
+          // revision 单调：忽略乱序/重复事件。
+          if (next.revision >= state.revision) return next
+          return state
+        }
+      }
+      // Fallback when the host does not expose appendPluginRecord (custom session
+      // records unavailable): refresh from the host's latest in-memory projection
+      // on any committed event. The projection then tracks command/tool activity
+      // without depending on the experimental record API.
+      const fresh = latest?.()
+      if (fresh && fresh.revision > state.revision) return fresh
+      return state
     },
     wire: {
       viewSchema: passthroughSchema<unknown>(),
@@ -84,7 +93,10 @@ export function installProjection(runtime: HostRuntime): void {
       register?(definition: unknown): () => void
     } | null
     if (!registry || typeof registry.register !== 'function') return
-    const definition = createFlowgateProjection(() => runtime.isoNow())
+    const definition = createFlowgateProjection(
+      () => runtime.isoNow(),
+      () => runtime.projection(),
+    )
     const dispose = registry.register(definition)
     if (typeof dispose === 'function') runtime.registerDisposer(dispose)
     runtime.capabilities.sessionProjections = true

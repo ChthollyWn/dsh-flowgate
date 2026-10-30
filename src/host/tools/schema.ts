@@ -133,12 +133,25 @@ export function defineHostTool(options: DefineHostToolOptions): DshToolDefinitio
     description: options.description,
     parameters: schema,
     output: {
+      // NOTE: ctx.tools.register() asserts the *supported JSON Schema subset*
+      // (single type string, oneOf, properties/required/additionalProperties,
+      // items/enum/const; type arrays are rejected). `data` is any JSON value,
+      // so it is expressed with oneOf instead of a type array.
       schema: {
         type: 'object',
         properties: {
           ok: { type: 'boolean' },
           summary: { type: 'string' },
-          data: { type: ['object', 'array', 'string', 'number', 'boolean', 'null'] },
+          data: {
+            oneOf: [
+              { type: 'object' },
+              { type: 'array' },
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+              { type: 'null' },
+            ],
+          },
         },
         required: ['ok', 'summary'],
         additionalProperties: true,

@@ -689,9 +689,10 @@ export class HostRuntime {
   }
 
   /**
-   * 写一条插件记录到主会话日志。
-   * 优先 `appendPluginRecord`；失败降级 `session.append`（运行时可接受任意 type）；
-   * 再失败标记 `none`（投影只在内存中，doctor 报告）。
+   * 写一条插件记录到主会话日志（只走 `appendPluginRecord`）。
+   * 该 API 不可用时标记 `none`：投影只在内存中（client 投影有 latest-snapshot
+   * 兜底），绝不降级 `session.append` —— rc.5 会把未声明类型持久化成语义不完整的
+   * SessionEvent，下次加载时报 "lacks an identified message" 并让会话损坏。
    */
   async appendSessionEvent(type: string, data: Record<string, unknown>): Promise<boolean> {
     const session = this.mainSessionValue
@@ -699,7 +700,9 @@ export class HostRuntime {
     const api = await this.ensureSessionApi()
     if (api && this.sessionAppendMode !== 'session-append') {
       try {
-        api.appendPluginRecord(session, normalizeRecordType(type), data)
+        // Plugin records must be *losslessly JSON*; strip undefined/Date/etc.
+        const safeData = JSON.parse(JSON.stringify(data)) as Record<string, unknown>
+        api.appendPluginRecord(session, normalizeRecordType(type), safeData)
         this.sessionAppendMode = 'plugin-record'
         this.capabilities.sessionAppend = true
         this.capabilities.sessionAppendPluginRecord = true
@@ -709,17 +712,18 @@ export class HostRuntime {
         this.log('debug', `appendPluginRecord 不可用，改用 session.append：${toAgentError(error).error}`)
       }
     }
-    try {
-      session.append(normalizeRecordType(type), data)
-      this.sessionAppendMode = 'session-append'
-      this.capabilities.sessionAppend = true
-      return true
-    } catch (error) {
+    // NOTE: do NOT fall back to session.append() with an undeclared event type.
+    // rc.5 persists it as a SessionEvent that fails message-identity validation on
+    // the next load ("session event at seq N lacks an identified message"), which
+    // corrupts the stored session. When appendPluginRecord is unavailable we keep
+    // the projection in memory only; the client-side projection fallback refreshes
+    // it from the host's latest snapshot on every committed event.
+    {
       this.sessionAppendMode = 'none'
       this.capabilities.sessionAppend = false
       this.markInert(
         '会话事件写入',
-        error,
+        new Error('appendPluginRecord unavailable'),
         '当前宿主不允许插件写自定义会话事件：状态条/面板改为每次打开时读取，其他门禁功能不受影响。',
       )
       return false
@@ -732,11 +736,9 @@ export class HostRuntime {
     if (!session) return
     try {
       const api = await this.ensureSessionApi()
-      if (api) {
-        api.appendPluginRecord(session, `${FLOWGATE_RECORD_PREFIX}ledger`, { type, data, at: this.isoNow() })
-        return
-      }
-      session.append(`${FLOWGATE_RECORD_PREFIX}ledger`, { type, data, at: this.isoNow() })
+      if (!api) return // never session.append() an undeclared type (would corrupt the session log)
+      const safe = JSON.parse(JSON.stringify({ type, data, at: this.isoNow() })) as Record<string, unknown>
+      api.appendPluginRecord(session, `${FLOWGATE_RECORD_PREFIX}ledger`, safe)
     } catch {
       // 账本事件写会话日志失败只降级，不影响 .flowgate/ledger.jsonl。
     }

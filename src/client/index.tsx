@@ -56,7 +56,12 @@ function safeWarn(ctx: ClientContext, message: string, error?: unknown): void {
 /** Bind the locale service, falling back to the bundled Chinese dictionary. */
 function bindTranslator(ctx: ClientContext): TFn {
   let t: TFn = fallbackTranslator()
-  const locale: LocaleService | undefined = ctx.locale
+  let locale: LocaleService | undefined
+  try {
+    locale = ctx.locale
+  } catch {
+    locale = undefined
+  }
   if (locale !== undefined) {
     try {
       if (typeof locale.register === 'function') {
@@ -82,12 +87,12 @@ function bindTranslator(ctx: ClientContext): TFn {
   return t
 }
 
-function registerDock(ctx: ClientContext, t: TFn, bridge: ReturnType<typeof createHostBridge>): void {
+function registerDock(ctx: ClientContext, t: TFn, bridge: ReturnType<typeof createHostBridge>): boolean {
   const slots = ctx.slots
-  if (slots === undefined || typeof slots.register !== 'function') return
+  if (slots === undefined || typeof slots.register !== 'function') return false
   const DockSlot = (props: SlotPropRecord) => createElement(StatusBar, { props, t, bridge })
   try {
-    const register = () =>
+    const register = (): void => {
       slots.register?.(
         {
           name: 'conversation.input.dock',
@@ -97,10 +102,31 @@ function registerDock(ctx: ClientContext, t: TFn, bridge: ReturnType<typeof crea
         },
         DockSlot,
       )
-    if (typeof ctx.effect === 'function') ctx.effect(register, 'flowgate: input dock')
-    else register()
+    }
+    // The slot is declared by the conversation entry's children table, which may
+    // not be registered yet when this plugin applies. `slots.inject(name, cb)`
+    // defers registration until the declaration exists (same idiom as ui plugins).
+    const registerWhenDeclared = (): void => {
+      if (typeof slots.inject === 'function') {
+        slots.inject('conversation.input.dock', () => {
+          register()
+        })
+        return
+      }
+      register()
+    }
+    if (typeof ctx.effect === 'function') ctx.effect(registerWhenDeclared, 'flowgate: input dock')
+    else registerWhenDeclared()
+    return true
   } catch (error) {
     safeWarn(ctx, 'conversation.input.dock registration failed', error)
+    try {
+      // eslint-disable-next-line no-console
+      console.warn('[flowgate] conversation.input.dock registration failed:', error)
+    } catch {
+      /* ignore */
+    }
+    return false
   }
 }
 
@@ -172,20 +198,10 @@ function registerSidebarNow(
 }
 
 function registerSidebarPanel(ctx: ClientContext, t: TFn, bridge: ReturnType<typeof createHostBridge>): void {
-  // Fast path: the sidebar package is (by `dsh.client.inject` ordering) already
-  // loaded when the plugin materialises, so both services are on the context.
-  if (ctx.sidebarRightTabs !== undefined && ctx.slots !== undefined) {
-    try {
-      const dispose = registerSidebarNow(ctx.sidebarRightTabs, ctx.slots, t, bridge)
-      if (typeof dispose === 'function') {
-        if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'flowgate: sidebar tab')
-      }
-      return
-    } catch (error) {
-      safeWarn(ctx, 'direct sidebar tab registration failed, retrying deferred', error)
-    }
-  }
-  // Deferred path: optional service — resolves whenever the host provides it.
+  // Cordis contexts forbid reading a service that the plugin did not declare in
+  // `inject` ("cannot get property X without inject"), and `sidebarRightTabs` is
+  // optional (the dock must still work on hosts without the right sidebar). So
+  // the panel is registered exclusively through deferred `ctx.inject`.
   if (typeof ctx.inject !== 'function') return
   try {
     ctx.inject(['sidebarRightTabs', 'slots'], (injected: ClientContext) => {
@@ -210,6 +226,16 @@ export function apply(ctx: ClientContext): void {
   } catch (error) {
     safeWarn(ctx, 'host bridge wiring failed', error)
   }
-  registerDock(ctx, t, bridge)
+  const dockRegistered = registerDock(ctx, t, bridge)
   registerSidebarPanel(ctx, t, bridge)
+  // Diagnostics (host doctor / e2e): proves the browser half actually applied.
+  try {
+    ;(globalThis as { __FLOWGATE_CLIENT__?: unknown }).__FLOWGATE_CLIENT__ = {
+      name,
+      dockRegistered,
+      at: new Date().toISOString(),
+    }
+  } catch {
+    /* ignore */
+  }
 }

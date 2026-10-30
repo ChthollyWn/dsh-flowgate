@@ -218,6 +218,14 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 
 **验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；浏览器交互与有/无插件对照评测尚未执行，见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
 
+## 界面
+
+在真实 DSH `0.2.1-rc.5` Web 宿主（隔离 `flowgate-dev` profile）里的实拍，采集方式见 [docs/screenshots/](docs/screenshots/README.md)：
+
+| 输入框状态条 | 右侧栏面板 |
+|---|---|
+| ![状态条](docs/screenshots/01-statusbar-home.png) | ![面板](docs/screenshots/03-panel-overview.png) |
+
 ## FAQ
 
 **会不会把我锁死？**
