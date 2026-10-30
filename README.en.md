@@ -216,7 +216,7 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
 | With / without plugin evaluation report | 🟡 pilot 1/9 done (`ts-todo-api/fix-bug`, one A + one B run, both fixed correctly; B took 2 extra rounds, ~13x wall time, 3 human gates); 8 tasks + greenfield rehearsal remain — see [docs/evaluation.md](docs/evaluation.md) §6.1 |
 
-**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (66 files / 972 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has a 1/9-task pilot (A/B) and the full 9x2 matrix is pending — see [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
+**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (67 files / 976 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has a 1/9-task pilot (A/B) and the full 9x2 matrix is pending — see [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
 ## Screenshots
 
@@ -268,6 +268,8 @@ pnpm build       # tsdown
 pnpm verify:package   # inspect the npm tarball (no host core packages; lib/ + skills/)
 pnpm verify:client    # offline check of the browser bundle protocol + slot registrations
 pnpm verify:compat    # compose/import the plugin in an isolated DSH_HOME (never the daily profile)
+pnpm verify:uninstall # isolated-profile install/uninstall cleanliness (never the daily profile)
+pnpm measure:startup  # host entry module-load overhead (T6.2, target <200ms)
 ```
 
 During development use the isolated profile (see Quick start); do not install into the daily profile before M6. See [examples/README.md](examples/README.md) for how to run the three benchmark repos.

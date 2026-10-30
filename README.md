@@ -216,7 +216,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
 | 有 / 无插件对照评测报告 | 🟡 pilot 1/9 完成（`ts-todo-api/fix-bug` A/B 各 1 次，两种条件均修复正确；B 组多 2 轮/13x 耗时/3 次人工门）；其余 8 任务与从 0 演练待跑，见 [docs/evaluation.md](docs/evaluation.md) §6.1 |
 
-**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（66 文件 / 972 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 pilot（1/9 任务，A/B 各 1 次），完整 9×2 待跑，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
+**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（67 文件 / 976 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 pilot（1/9 任务，A/B 各 1 次），完整 9×2 待跑，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
 
 ## 界面
 
@@ -271,6 +271,8 @@ pnpm build       # tsdown
 pnpm verify:package   # 检查 npm 包内容（不含宿主核心包，含 lib/ 与 skills/）
 pnpm verify:client    # 离线验证浏览器 bundle 的加载协议与插槽注册
 pnpm verify:compat    # 在隔离 DSH_HOME 里真实组合/导入插件（不碰日常 profile）
+pnpm verify:uninstall # 隔离 profile 安装→卸载干净度（不碰日常 profile）
+pnpm measure:startup  # 插件 host 入口加载耗时增量（T6.2，验收线 <200ms）
 ```
 
 开发期请用隔离 profile（见"快速开始"）；M6 之前不要在日用 profile 里安装插件。三个基准仓库的跑法见 [examples/README.md](examples/README.md)。

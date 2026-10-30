@@ -13,7 +13,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期、并发会话租约、`/flow repair` |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点在 host 侧接线并已有 host 单测（test/host/dispatch.test.ts）；缺 provider/git 时降级 |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 主体完成 | 真实 web 宿主走查 + 11 张截图（见 §3.1/§3.3）；剩余：面板按钮 Remote 兜底、低复杂度确认卡、误判反馈截图 |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 部分 | 兼容验证 7/7、host 单测 112 例；java-renewal S0→S6 与审查真机已完成；对照评测 pilot 1/9（A/B 均通过）；未发布 npm |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 112 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -30,7 +30,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/null
 ```
 
-最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git 适配器测试后 66 files / 972 tests）；构建产物 host 991KB / client 192KB；`verify:package` 通过（39 文件 / 845KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%（`pnpm coverage`）。
+最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/故障注入测试后 67 files / 976 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 848.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%（`pnpm coverage`）。
 
 ## 3. 关键实现决策（与 03 方案的差异）
 
@@ -165,11 +165,22 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - RV-1（无代码 diff 时）：审查子 agent 真实启动；因读取覆盖不足返回 `changes-required / coverageOk=false`，账本 `review.coverage_failed` + `review.reported` 留痕（本次不消耗审查轮次）。
 - RV-2（实现完成后，diff 指纹 `d1e9bd86…`）：审查子 agent 再次启动，`coverageOk=true`，返回 **5 条带 文件:行号 的 findings**（verdict `changes-required`）：测试桩在反射失败时兜底返回空页导致 RED 不可能红、无参 `orders()` 与契约不符、控制器 try 包裹过宽会吞掉服务端异常、`RenewalPage` 落点与设计不符且未校验 pageSize、`memberId=" M "` 未 trim 的边界；账本 `review.reported` 可查。
 
-**host 单测补齐**：新增 `test/host/dispatch.test.ts`（11 例）、`test/host/review.test.ts`（14 例）与 `test/host/node-git.test.ts`（2 例，自动提交参数回归）；`test/host` 85 → 112 例，全仓 63 files/944 tests → **66 files/972 tests**（另含 TDD 测试路径回归 1 例）。
+**host 单测补齐**：新增 `test/host/dispatch.test.ts`（11 例）、`test/host/review.test.ts`（14 例）与 `test/host/node-git.test.ts`（2 例，自动提交参数回归）；`test/host` 85 → 112 例，全仓 63 files/944 tests → **67 files/976 tests**（另含 TDD 测试路径回归 1 例、故障注入 4 例）。
 
 **对照评测 pilot（2026-10-31）**：用 `scripts/run-evaluation.mjs` 在 `ts-todo-api / fix-bug` 上跑 A/B 各 1 次：A 26s/0 门/1 轮，B 363s/3 次人工门/3 轮；两种条件回归 34/34、验收 4/4 全绿。pilot 同时发现基准 fixture 断言错误（R2 期望值与倒序契约矛盾）与 git 自动提交 bug，均已修复。原始数据与局限见 [evaluation.md](../evaluation.md) §6.1。
 
 **本轮未完成**：派发/并行 worktree 的完整真机结算（headless 一次性运行在子 agent 结算前退出，需要交互式会话或常驻宿主）；有/无插件完整 9 任务 × 2 条件对照评测与从 0 开发演练（pilot 1/9 已完成，见 §6）。审查链路已真机跑通并产出结构化 findings。
+
+## 3.6 T6.2 加固与兼容验证（2026-10-31）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| 故障注入 | ✅ 4/4 | [test/fault-injection/host-resilience.test.ts](../../test/fault-injection/host-resilience.test.ts)：账本篡改→锁定+拒写+repair 拒绝静默重建；守卫抛错→fail-closed；宿主服务全缺失→apply 不抛错、能力 inert；配置损坏→带路径/行号 ConfigError |
+| 启动耗时增量 | ✅ **+14.2ms**（验收线 <200ms） | `pnpm measure:startup` → [compat/startup.md](../compat/startup.md)。口径：新 Node 进程加载 `lib/host.js` 与空进程的中位数差（模块加载成本，不含 Electron/UI 启动） |
+| 安装 / 卸载干净度 | ✅ 通过 | `pnpm verify:uninstall`：隔离 headless profile 安装→卸载后组合树/依赖/bundles 均不含插件，profile 内无 `lib/`、`skills/`、`.flowgate/` 残留。**已知残留**：DSH rc.5 的 `plugin remove` 不 prune `node_modules`（软链仍在，删 profile 或重跑 `pnpm install` 清理），脚本以警告如实报告 |
+| 兼容矩阵 | Web ✅ / headless ✅ / Desktop ⏳ | Web 走查见 §3.1；headless 真机见 §3.4/§3.5；Desktop 需人工桌面会话走查（未自动化） |
+
+**新增脚本**：`scripts/measure-startup.mjs`（启动增量）、`scripts/verify-uninstall.mjs`（卸载干净度）；均只操作临时/隔离目录，绝不使用进程里的真实 `DSH_HOME`。
 
 ## 4. 已知缺口（如实列出）
 
@@ -183,7 +194,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
 | 7 | 覆盖率分支 67.8% 低于 80% 目标（语句 82.5% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
 | 8 | npm 未发布、无 GitHub Release；tag `v0.1.0` 落后 HEAD 4 个提交 | 无法按 README 的 npm 安装路径使用 | 发布物料已备（CHANGELOG、release notes、release.yml），待配置 `NODE_AUTH_TOKEN` 后发布并刷新 tag |
-| 9 | Desktop 宿主未验证；T6.2 的启动耗时增量（<200ms）、卸载干净度未测 | 兼容矩阵只有 Web / headless 证据 | 桌面会话走查 + 计时脚本 |
+| 9 | Desktop 宿主未验证（T6.2 的启动耗时与卸载干净度已完成，见 §3.6） | 兼容矩阵只有 Web / headless 证据 | 桌面会话人工走查 |
 
 ## 5. 文件地图（主干）
 
@@ -198,6 +209,6 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 1. **派发/并行 worktree 真机验证**：在交互式会话里调用 `flow_dispatch_next`，确认子 agent 结算 → 任务门/审查 → worktree 合并 + 集成检查点（headless 一次性运行无法等待后台子 agent 结算）。
 2. **M6 对照评测**：pilot 1/9 已完成（ts-todo-api/fix-bug A/B）；继续跑剩余 8 任务 × 2 条件、从 0 开发（greenfield）演练与并行对照，填入 [evaluation.md](../evaluation.md) §6.2。
 3. 真实会话里切换三个 preset；更新 `cordis.patch.yml` 的"待实测"注释（当前已刷新为实际剩余项）。
-4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；补 T6.2 的启动耗时/卸载干净度与 Desktop 矩阵。
+4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；Desktop 宿主人工走查（启动耗时/卸载干净度已完成，见 §3.6）。
 5. 发布：提交发布物料，配置 `NODE_AUTH_TOKEN` 后重打 tag / npm publish / GitHub Release；README 演示动图与 awesome-dsh-plugin 收录申请。
 6. 自举：用 FlowGate 管理自身仓库开发（04 方案第 9 节），当前仍以 demo 仓库做 E2E。
