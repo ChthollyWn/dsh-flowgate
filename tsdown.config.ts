@@ -41,6 +41,20 @@ export default defineConfig([
     outExtensions: () => ({ js: '.js' }),
   },
   {
+    // Owner-side E2E/recovery CLI (dev tooling; tools/ is not published).
+    entry: { admin: 'src/dev/admin.ts' },
+    format: ['esm'],
+    platform: 'node',
+    target: 'node22',
+    outDir: 'tools',
+    clean: true,
+    sourcemap: false,
+    dts: false,
+    external: HOST_EXTERNALS,
+    noExternal: [/.*/],
+    outExtensions: () => ({ js: '.js' }),
+  },
+  {
     entry: { client: 'src/client/index.tsx' },
     format: ['cjs'],
     platform: 'browser',

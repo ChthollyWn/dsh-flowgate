@@ -1457,6 +1457,12 @@ export function checkG5RuntimeEvidence(ctx: GateCheckContext): CheckOutcome {
 }
 
 function finalReviewOutcome(ctx: GateCheckContext, item: string, label: string): CheckOutcome {
+  // Review is owner-configurable (lean host combinations have no subagents to
+  // run the reviewer preset). When the owner turns it off, G5/G6 must not
+  // dead-lock waiting for a review record that can never be produced.
+  if (ctx.config.review?.enabled === false) {
+    return pass(item, label, 'P0', ['review.enabled=false（负责人关闭或宿主降级）：不要求审查记录'])
+  }
   const reviews = ctx.change.reviews ?? []
   const sorted = [...reviews].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
   const finalReview = sorted.find((review) => review.kind === 'final')

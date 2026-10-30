@@ -147,6 +147,29 @@ describe('rules/evaluate — 受保护路径 / 锁定 / 分析只读 / 委派', 
     expect(shellDecision).toMatchObject({ effect: 'deny', rule: { ruleId: 'R-PROTECTED' } })
   })
 
+  it('lets the agent write the current stage artifacts under .flowgate/changes/<id>/', () => {
+    // S1 artifacts, including nested specs/.
+    for (const path of [
+      '.flowgate/changes/C-001/clarify.md',
+      '.flowgate/changes/C-001/proposal.md',
+      '.flowgate/changes/C-001/specs/spec.md',
+    ]) {
+      const decision = evaluate(write(path), { change: makeChange({ stage: 'S1' }) })
+      expect(decision.effect, path).toBe('allow')
+    }
+    // S2 context artifact + shell redirect to it.
+    const s2 = makeChange({ stage: 'S2' })
+    expect(evaluate(write('.flowgate/changes/C-001/context.md'), { change: s2 }).effect).toBe('allow')
+    expect(evaluate(shell('echo note > .flowgate/changes/C-001/context.md'), { change: s2 }).effect).toBe('allow')
+    // Earlier-stage-only artifact is blocked by the stage rule, not protected.
+    const denied = evaluate(write('.flowgate/changes/C-001/context.md'), { change: makeChange({ stage: 'S1' }) })
+    expect(denied.effect).toBe('deny')
+    expect(denied.rule?.ruleId).toBe('R-STAGE-SRC')
+    // Plugin-owned state is still protected even inside the change dir.
+    const state = evaluate(write('.flowgate/changes/C-001/status.json'), { change: s2 })
+    expect(state).toMatchObject({ effect: 'deny', rule: { ruleId: 'R-PROTECTED' } })
+  })
+
   it('protected-path denials cannot be overridden', () => {
     const action = write('.flowgate/changes/C-001/status.json')
     const override: OverrideRecord = {

@@ -8,7 +8,9 @@ import {
   checkG5FullTests,
   checkG5Scenarios,
   checkG5LintBuild,
+  checkG5FinalReview,
   checkG6Risks,
+  checkG6Reviews,
   checkProjectClarify,
   checkProjectCommands,
   checkScenarioVagueTerms,
@@ -386,6 +388,26 @@ const NEGATIVE_CONTEXTS: Record<string, (ctx: GateCheckContext) => GateCheckCont
 // ---------------------------------------------------------------------------
 
 const TABLE_GATES: GateId[] = ['GR', 'G0', 'G1', 'G2', 'G3', 'G5', 'G6']
+
+describe('终审检查与 review 配置', () => {
+  it('review.enabled=false 时 G5/G6 不因缺少终审记录而失败', () => {
+    const config = validConfig()
+    config.review.enabled = false
+    const ctx = makeCtx({ gate: 'G5', config, change: change({ reviews: [] }) })
+    const g5 = checkG5FinalReview(ctx)
+    expect(g5.passed).toBe(true)
+    expect(g5.details?.[0]).toContain('review.enabled=false')
+    const g6 = checkG6Reviews(makeCtx({ gate: 'G6', config, change: change({ reviews: [] }) }))
+    expect(g6.passed).toBe(true)
+  })
+
+  it('review 开启时仍要求终审记录', () => {
+    const ctx = makeCtx({ gate: 'G5', change: change({ reviews: [] }) })
+    const outcome = checkG5FinalReview(ctx)
+    expect(outcome.passed).toBe(false)
+    expect(outcome.details?.join(' ')).toContain('缺少 S5 终审记录')
+  })
+})
 
 describe('GATE_CHECKS 数据表', () => {
   it('覆盖 docs/03 §3.2 表格的全部门（GR/G0/G1/G2/G3/G5/G6）', () => {

@@ -108,6 +108,33 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - 派发/并行/审查子 agent 在本精简 web 组合里 `subagents` 未提供，需要带 provider 的组合或桌面会话再验。
 - 覆盖自检数值会随扫描时机在 4–7 之间波动（扫描发生在工具注册过程中）；正确性已保证（未覆盖始终 0），显示口径待稳定。
 
+## 3.4 真模型完整闭环 S0→S6（2026-10-30 深夜，C-002）
+
+用真实 DeepSeek API Key（通过环境变量注入，不落仓库；隔离 `DSH_HOME` + 新建 `fg-headless` headless profile）在 `ts-todo-api` 上跑完**从立项到交付归档的完整闭环**：
+
+| 阶段 | 证据 |
+|---|---|
+| S1 需求澄清 | 真模型写 clarify/proposal/specs，`flow_submit G1` 7/7 检查通过 → awaiting → 负责人 `/flow approve`（管理员 CLI） |
+| S2 上下文 | 真模型写 context.md；`flow_submit G2` 通过（含真实 baseline：`pnpm test` 34/34） |
+| S3 设计拆解 | 真模型写 design（方案对比/推荐/数据流/错误处理）、risk（五类）、tasks（任务卡+执行计划），`flow_submit G3` **9/9 通过** → 负责人批准 |
+| S4 执行 | 真模型按任务卡实现分享功能并补测试（scope 内），`flow_verify` + `flow_task_done` → G4 passed，自动进 S5（自动提交因 demo 目录非 git 降级，符合预期） |
+| S5 验证 | `flow_submit G5`：全量测试（34 基线无回归）、lint/build（未配置）、场景证据、运行证据、终审（review.enabled=false）全部通过 → 自动进 S6 |
+| S6 交付 | `flow_submit G6` 全部检查通过 → 负责人批准 → **归档 + 116KB HTML 交付报告 + 主规格合并** |
+
+产物（真实 demo 仓库，非测试 fixture）：
+- `.flowgate/archive/2026-10-30-C-002/`：全部产物 + `report.html`（含 M-1~M-18 指标）、status.json；
+- `.flowgate/specs/给待办列表增加分享功能/spec.md`：R1–R5 按 ADDED 合并（账本 `spec.merged` 事件，无 warning）；
+- `.flowgate/changes/index.md`：C-002 已交付并链接报告。
+
+**守卫真机证据（headless）**：C-001 S1 时 agent 真实调用 `read` + `edit` 改 `src/server.js`，被 `R-STAGE-SRC` 拦截；debug trace：`action kind=write path=src/server.js → effect=deny rule=R-STAGE-SRC → sync-guard cache=deny`，文件未被修改，模型收到完整拒绝原因与解锁路径。此前一次"放行"经查是消耗了上一轮遗留的**单次放行 OV-1**（账本 `override.used` 可证），语义正确。
+
+**本轮真机发现并修复的 3 个缺陷（都已回归测试）**：
+1. `R-PROTECTED` 误伤当前阶段产物（`.flowgate/changes/<id>/context.md` 被拦，导致 S2 无法推进）：现在当路径属于当前阶段可写产物时跳过保护，插件自有状态（status/ledger/config）仍受保护。
+2. baseline 解析缺 `node --test`：`ℹ tests 34 / ℹ pass 34` 无法识别，G2 baseline 判失败；新增 `node-test` 解析器（默认/规范 reporter + TAP 风格 + 失败用例名）。
+3. G5/G6 终审项无条件要求 review 记录：当 `review.enabled=false`（无 subagents 的宿主降级或负责人关闭）时死锁；现在尊重配置并放行，配置开启时仍强制要求。
+
+**新增开发工具**：`src/dev/admin.ts` → `tools/admin.js`（不随包发布），用于 headless E2E 的负责人操作（approve/reject/resume/pause/new/status/doctor）。这是 dev tooling，`tools/` 已 gitignore、不在 `verify:package` 清单。
+
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |

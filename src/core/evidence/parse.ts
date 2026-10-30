@@ -405,6 +405,43 @@ export function parseVitestConsole(output: string): TestSummary {
 // Jest console
 // ---------------------------------------------------------------------------
 
+/**
+ * `node --test` default/spec reporter (Node 20+) and TAP-ish summary lines.
+ * Recognised lines: `ℹ tests 34` / `# tests 34` plus pass/fail/skipped/duration.
+ */
+export function parseNodeTestConsole(output: string): TestSummary {
+  const parser = 'node-test'
+  const counter = (name: string): number | undefined => {
+    const match = new RegExp(`^\\s*(?:ℹ|#)\\s*${name}\\s+(\\d+)\\s*$`, 'm').exec(output)
+    if (!match) return undefined
+    const value = Number.parseInt(match[1]!, 10)
+    return Number.isFinite(value) ? value : undefined
+  }
+  const tests = counter('tests')
+  if (tests === undefined) return emptySummary(parser)
+  const durationMatch = /^\s*(?:ℹ|#)\s*duration_ms\s+([\d.]+)\s*$/m.exec(output)
+  const durationMs = durationMatch ? Math.round(Number.parseFloat(durationMatch[1]!)) : undefined
+  const failed = counter('fail') ?? 0
+  const summary: TestSummary = {
+    parser,
+    parsed: true,
+    run: tests,
+    passed: counter('pass') ?? 0,
+    failed,
+    skipped: (counter('skipped') ?? 0) + (counter('todo') ?? 0),
+  }
+  if (durationMs !== undefined && Number.isFinite(durationMs)) summary.durationMs = durationMs
+  if (failed > 0) {
+    // Node's spec reporter prints `✖ <name> (Nms)` for each failing test.
+    const failures: TestFailure[] = []
+    for (const match of output.matchAll(/^\s*✖\s+(.+?)\s*\([\d.]+m?s\)\s*$/gm)) {
+      failures.push(failureOf(normalizeName(match[1])))
+    }
+    if (failures.length > 0) summary.failures = failures
+  }
+  return summary
+}
+
 export function parseJestConsole(output: string): TestSummary {
   const parser = 'jest-console'
   const testsLine = /^\s*Tests:\s+(.+)$/m.exec(output)
@@ -659,6 +696,7 @@ const CONSOLE_PARSERS: { id: string; match: RegExp; parse: (output: string) => T
   { id: 'jest', match: /(?:^|[\s/])jest(?:\s|$)/i, parse: parseJestConsole },
   { id: 'go', match: /\bgo\s+test\b/i, parse: parseGoTestJson },
   { id: 'cargo', match: /\bcargo\s+(?:test|nextest)\b/i, parse: parseCargoConsole },
+  { id: 'node-test', match: /\bnode\s+(?:--test|--experimental-test)/i, parse: parseNodeTestConsole },
 ]
 
 function consoleParserOrder(command: string): ((output: string) => TestSummary)[] {

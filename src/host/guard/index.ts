@@ -19,6 +19,20 @@ import type { GuardDecisionEntry, ToolClassificationLike } from '../types.js'
 import { toAgentError } from '../errors.js'
 import { toRepoRelative } from '../adapters/windows-path.js'
 import { interceptRowOf } from '../projection/panel.js'
+import { appendFileSync } from 'node:fs'
+
+const GUARD_DEBUG_LOG = '/tmp/flowgate-guard.log'
+
+/** Debug-only guard tracer (FLOWGATE_DEBUG_GUARD=1); enabled for E2E diagnosis. */
+function debugGuard(line: string): void {
+  try {
+    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    if (env?.FLOWGATE_DEBUG_GUARD !== '1') return
+    appendFileSync(GUARD_DEBUG_LOG, `${new Date().toISOString()} ${line}\n`)
+  } catch {
+    /* ignore */
+  }
+}
 
 const MAX_REASON_CHARS = 300
 
@@ -129,6 +143,7 @@ async function evaluatePreExecute(
   next: () => Promise<unknown>,
 ): Promise<unknown> {
   const callId = callIdOf(exec)
+  debugGuard(`pre-execute tool=${exec.name} args=${JSON.stringify(exec.arguments)?.slice(0, 400)} enabled=${String(runtime.isEnabled())}`)
   if (!runtime.isEnabled()) return next()
   const engine = runtime.engine()
   if (!engine) return next()
@@ -142,6 +157,9 @@ async function evaluatePreExecute(
 
   try {
     const snapshot = runtime.lastSnapshot
+    debugGuard(
+      `snapshot initialized=${String(snapshot?.initialized)} off=${String(snapshot?.off)} change=${String(snapshot?.changeId)} stage=${String(snapshot?.stage)} managed=${String(runtime.isManagedNow())}`,
+    )
     // 未初始化 / 当前会话已 off：不拦截任何操作（03 §2.4）。
     if (!snapshot || snapshot.initialized === false || snapshot.off === true) return next()
 
@@ -156,7 +174,9 @@ async function evaluatePreExecute(
       return next()
     }
     const normalized = normalizeActionPath(runtime, action)
+    debugGuard(`action kind=${normalized.kind} path=${String((normalized as { path?: string }).path)} caller=${JSON.stringify(caller).slice(0, 200)}`)
     const decision = await engine.evaluateAction(normalized, caller)
+    debugGuard(`decision effect=${decision.effect} rule=${decision.rule?.ruleId ?? '-'} message=${decision.message.slice(0, 160)}`)
     putDecision(runtime, { callId, tool: exec.name, action: normalized, caller, decision, at: runtime.now().getTime() })
     if (decision.effect === 'allow') return next()
 
@@ -205,6 +225,7 @@ function evaluateSyncGuard(runtime: HostRuntime, exec: DshToolExecution): string
     if (!runtime.isManagedNow()) return undefined
     const callId = callIdOf(exec)
     const entry = runtime.takeGuardDecision(callId)
+    debugGuard(`sync-guard tool=${exec.name} cache=${entry ? entry.decision.effect : 'miss'}`)
     if (!entry) {
       return FAIL_CLOSED_REASON
     }

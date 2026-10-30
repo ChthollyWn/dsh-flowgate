@@ -726,6 +726,11 @@ function protectedTargetReason(input: RuleEvaluationInput): string | undefined {
     paths.push(...extractWriteTargets(action.command))
   }
   for (const path of paths) {
+    // The current stage's own artifacts live under .flowgate/ but are *meant*
+    // to be written by the agent (clarify/proposal/spec/context/design/...).
+    // Only plugin-owned state (ledger, status, evidence, config, keys) is
+    // protected; otherwise the protected-path rule would deadlock the pipeline.
+    if (input.change && isArtifactWritableInStage(input.change, path)) continue
     const verdict = isProtectedPath(path, config)
     if (verdict.protected) {
       return `路径 ${normalizeRelPath(path)} 受保护：${verdict.reason ?? '只有插件或负责人能写'}`

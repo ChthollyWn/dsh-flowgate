@@ -134,6 +134,7 @@ rm -rf /tmp/dsh-flowgate-dev /tmp/flowgate-schema.json
 | `FLOWGATE_DEBUG_FETCH=1` | 给宿主进程的 `fetch` 装追踪器，把每个 LLM 请求/响应状态写到 `/tmp/flowgate-fetch.log`（用于定位 provider 层的 `TRANSPORT` 失败；生产不要开） |
 | `FLOWGATE_DISABLE=context,tools,guard,...` | 按模块名跳过安装（E2E 二分定位用；可选：session/guard/delegation/coverage/postcheck/compression/context/projection/gates/commands/tools/dispatch） |
 | `FLOWGATE_CONTEXT_MODE=pre-step` | 跳过 `systemPrompt.section`、强制走 `agent/pre-step` 注入（兼容性排查用） |
+| `FLOWGATE_DEBUG_GUARD=1` | 把每次 pre-execute 的工具/动作/判定/同步守卫命中写到 `/tmp/flowgate-guard.log`（定位"为什么拦/为什么没拦"） |
 
 已实测结论：注入给模型的 user 消息必须使用 DSH 已登记的 MessageSource kind（当前用官方 `runtime-context` + `form: 'relay'`）；自造 kind 会让 provider 在发请求前抛错，表现为 `DeepSeek Messages transport failed`。
 
@@ -142,3 +143,29 @@ rm -rf /tmp/dsh-flowgate-dev /tmp/flowgate-schema.json
 - `ctx.tools.schemas(scope?: ScopeKey)` 的 scope key 是 **agent 对象**（不是 `agent.ctx`）。传 ctx 只会拿到 scope-local 工具；不传则只有本插件注册的工具。覆盖自检/委派关闭都需要用 agent 作为 key。
 - `ctx.tools.restrict({ deny })` 只接受**可限制的全局工具名**：visible 集合里可能有 scope-local 工具或不同组合下不存在的名字，批量 deny 只要有一个未知名字就整体抛错。策略：先按可见集合过滤批量调用，失败则逐个工具名探测（本仓库 `guard/delegation.ts` 已实现）。
 - DSH 的 MessageSource 是登记表：注入给模型的 user 消息必须用已登记 kind（当前用 `runtime-context`+`form:'relay'`），自造 kind 会导致 provider 在 fetch 前抛错并被包装成 `DeepSeek Messages transport failed`（详见 §3.2）。
+
+## Headless 真机 E2E 剧本（需要真模型 key）
+
+Web UI 在会话恢复场景下导航不稳定，评审/回归用 headless profile 更可靠（同一宿主进程、同一套插件与守卫）：
+
+```bash
+# 1) 隔离 home + headless profile（一次性）
+export DSH_HOME=/tmp/fg-demo-home
+DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+"$DSH" fg-headless --from-default-profile headless --help
+"$DSH" plugin --profile fg-headless add link:/path/to/dsh-flowgate
+
+# 2) 每个阶段跑一次 headless（key 从文件读，不出现在命令历史/仓库）
+cd /path/to/demo-repo
+DEEPSEEK_API_KEY="$(cat /tmp/flowgate-demo.key)"   DSH_HOME=/tmp/fg-demo-home "$DSH" --profile fg-headless "只做 S1 产物并 flow_submit G1"
+
+# 3) 负责人门用 tools/admin.js（dev 工具，不随包发布）
+node tools/admin.js /path/to/demo-repo approve G1
+node tools/admin.js /path/to/demo-repo status
+```
+
+经验与坑：
+- headless 组合没有 `agentPresets` 服务时，三个 `preset-flowgate*` 行会 pending（不影响插件与守卫）；provider 需要 `DEEPSEEK_API_KEY` 环境变量（credentials 文件只对 web 组合生效）。
+- headless 的 `agent/created` 同样会触发自动接续；同一目录只能有一个活动变更，否则自动接续会拒绝（用 admin `pause-id`/`resume` 调整）。
+- 真实 `ts-todo-api` 目录不是 git 仓库：任务门自动提交、G3 cleanWorktree 会走降级分支；需要完整 git 语义时先 `git init` + 初始提交。
+- 无 subagents 的精简组合跑 S5 时，把 `.flowgate/config.yaml` 的 `review.enabled` 设为 `false`（G5/G6 会按配置放行，不再死锁）。

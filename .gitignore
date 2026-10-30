@@ -10,3 +10,4 @@ spike/*.tgz
 .flowgate/state/
 .flowgate/worktrees/
 .flowgate/dashboard.html
+tools/

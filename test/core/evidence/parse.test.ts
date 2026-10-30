@@ -10,6 +10,7 @@ import {
   parseJestConsole,
   parseJUnitXml,
   parseMavenConsole,
+  parseNodeTestConsole,
   parsePytestConsole,
   parseTestOutput,
   parseVitestConsole,
@@ -380,5 +381,52 @@ describe('detectEvidenceKind / evidencePhase', () => {
   it('非测试证据（构建成功）不会误判为 GREEN', () => {
     const summary = parseTestOutput({ command: 'pnpm build', stdout: fixture('unparseable/build-success.txt'), stderr: '', exitCode: 0 })
     expect(evidencePhase(summary, 0)).toBe('none')
+  })
+})
+
+describe('node --test console parser', () => {
+  it('parses the default/spec reporter summary (ℹ counters)', () => {
+    const output = `✔ pagination splits by page size (2.1ms)
+✔ pagination clamps unknown page (0.8ms)
+
+ℹ tests 34
+ℹ suites 11
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 123.45
+`
+    const summary = parseNodeTestConsole(output)
+    expect(summary.parsed).toBe(true)
+    expect(summary.parser).toBe('node-test')
+    expect(summary.run).toBe(34)
+    expect(summary.passed).toBe(34)
+    expect(summary.failed).toBe(0)
+    expect(summary.skipped).toBe(0)
+    expect(summary.durationMs).toBe(123)
+    expect(parseTestOutput({ command: 'pnpm test', stdout: output, stderr: '', exitCode: 0 }).parser).toBe('node-test')
+  })
+
+  it('parses TAP-style counters and failing test names', () => {
+    const output = `✖ shares a todo with another user (5.2ms)
+# tests 3
+# pass 2
+# fail 1
+# skipped 0
+`
+    const summary = parseNodeTestConsole(output)
+    expect(summary.run).toBe(3)
+    expect(summary.passed).toBe(2)
+    expect(summary.failed).toBe(1)
+    expect(summary.failures?.[0]?.name).toContain('shares a todo')
+    const summaryFromCommand = parseTestOutput({ command: 'node --test', stdout: output, stderr: '', exitCode: 1 })
+    expect(summaryFromCommand.failed).toBe(1)
+    expect(evidencePhase(summaryFromCommand, 1)).toBe('red')
+  })
+
+  it('returns unparsed when the output has no node:test summary', () => {
+    expect(parseNodeTestConsole('all good').parsed).toBe(false)
   })
 })
