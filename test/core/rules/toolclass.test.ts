@@ -44,7 +44,7 @@ describe('rules/toolclass — 工具分类与覆盖自检（03 §4.3）', () => 
   })
 
   it('treats host metadata tools as covered non-writes (no false coverage alarms)', () => {
-    for (const tool of ['todo_write', 'ask_user_question', 'schedule_create', 'team_task_list', 'present']) {
+    for (const tool of ['todo_write', 'ask_user_question', 'schedule_create', 'team_task_list', 'present', 'structured_output']) {
       const classification = classifyTool(tool)
       expect(classification.covered, tool).toBe(true)
       expect(classification.category, tool).toBe('read')

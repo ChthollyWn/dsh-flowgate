@@ -5,6 +5,7 @@ import {
   evaluateRules,
   explainDecision,
   fingerprintAction,
+  looksLikeTestPath,
 } from '../../../src/core/rules/evaluate'
 import { AT, evaluate, makeChange, makeConfig, makeTask } from './fixtures'
 import { makeTaskState } from '../state/fixtures'
@@ -437,6 +438,36 @@ describe('rules/evaluate — TDD 顺序（FR-5.4 / 03 §6.5）', () => {
       evaluate(write('src/test/java/com/acme/renewal/RenewalServiceTest.java'), { change: tddChange('none') })
         .effect,
     ).toBe('allow')
+  })
+
+  it('recognizes conventional test paths even when task.tests lists bare class names (Java deadlock regression)', () => {
+    // 真机发现（2026-10-31）：任务卡 tests 写成 `RenewalPageQueryTest`（裸类名）时，
+    // matchAnyGlob 失配 → 测试文件写入被 R-TDD-ORDER 拒绝 → RED 永远无法产生。
+    const task = makeTask({
+      tests: ['RenewalPageQueryTest'],
+      scope: ['src/main/java/com/acme/member/renewal/**', 'src/test/java/com/acme/member/renewal/**'],
+      newFiles: [
+        'src/main/java/com/acme/member/renewal/RenewalPage.java',
+        'src/test/java/com/acme/member/renewal/RenewalPageQueryTest.java',
+      ],
+    })
+    expect(
+      evaluate(write('src/test/java/com/acme/member/renewal/RenewalPageQueryTest.java'), {
+        change: tddChange('none'),
+        task,
+      }).effect,
+    ).toBe('allow')
+    // 实现文件仍必须等 RED。
+    expect(
+      evaluate(write('src/main/java/com/acme/member/renewal/RenewalPage.java'), {
+        change: tddChange('none'),
+        task,
+      }).effect,
+    ).toBe('deny')
+    // 非任务测试约定的路径仍按普通文件处理（防止把 main 误判成测试）。
+    expect(looksLikeTestPath('src/main/java/com/acme/member/renewal/RenewalService.java')).toBe(false)
+    expect(looksLikeTestPath('tests/test_api.py')).toBe(true)
+    expect(looksLikeTestPath('src/foo.test.ts')).toBe(true)
   })
 
   it('does not enforce TDD for tdd: optional tasks', () => {

@@ -206,6 +206,27 @@ function isPublishAction(action: Action): boolean {
   return actionKindOf(action) === 'push'
 }
 
+/**
+ * 常见测试文件路径（不依赖任务卡 tests 是否写成 glob）。
+ * 用于 TDD 顺序：测试文件必须先于实现被允许写入，否则 RED 无法产生。
+ */
+export function looksLikeTestPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').toLowerCase()
+  const segments = normalized.split('/').filter(Boolean)
+  if (segments.some((segment) => segment === 'test' || segment === 'tests' || segment === '__tests__' || segment === 'spec')) {
+    return true
+  }
+  const file = segments[segments.length - 1] ?? ''
+  return (
+    /\.(test|spec)\.[cm]?[jt]sx?$/.test(file) ||
+    /_test\.(py|go|rb|rs)$/.test(file) ||
+    /^test_.*\.py$/.test(file) ||
+    /\.(test|spec)\.(php|cs)$/.test(file) ||
+    /(?:test|tests|it)\.(java|kt|scala)$/.test(file)
+  )
+}
+
+
 // ---------------------------------------------------------------------------
 // Conditions (used by project-appended rules)
 // ---------------------------------------------------------------------------
@@ -607,7 +628,10 @@ export function evaluateRules(input: RuleEvaluationInput): Decision {
         const task = input.task
         const tddRequired = task.tdd === 'required'
         const tddState = change?.tasks[task.id]?.tdd ?? 'none'
-        const isTestFile = matchAnyGlob(task.tests, target)
+        // 任务卡的 tests 字段可能是路径/glob，也可能被 agent 写成裸类名/短名；
+        // 后者会让 matchAnyGlob 失配，测试文件写入被 R-TDD-ORDER 拒绝，而 RED 又
+        // 必须由测试文件产生 —— 形成死锁。因此再加一层常见测试路径识别。
+        const isTestFile = matchAnyGlob(task.tests, target) || looksLikeTestPath(target)
         if (tddRequired && !isTestFile && tddState === 'none') {
           applyRule(
             tddRule,

@@ -210,13 +210,13 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 产物解析与 GR/G0/G1/G2/G3/G5/G6 检查（46 项）、任务卡检查、执行计划与执行图 | ✅ 已实现（每项检查一正一反） |
 | `.flowgate/` 目录、台账、账本哈希链 + HMAC、跨会话接续与租约、锁定模式与 `/flow repair` | ✅ 已实现（篡改可定位第 N 行；重建可严格往返） |
 | 证据回执、输入哈希判定过期、风险引擎、返工失效范围、可核验源码引用 | ✅ 已实现 |
-| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 25 例专项单测（注册/降级/worktree 落点/重试/读取覆盖）；真实子 agent 端到端验证进行中 |
+| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 25 例专项单测；审查子 agent 已在真实 headless 宿主跑通（RV-2：覆盖核查通过 + 5 条 findings）；派发/worktree 结算待交互式会话 |
 | 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主渲染验证（11 张截图）；剩余：面板按钮 Remote 兜底、低复杂度确认卡 |
 | HTML 交付报告、跨会话看板 | ✅ 已实现（单文件离线可用，样例见 test/fixtures） |
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
 | 有 / 无插件对照评测报告 | 🗓 规划中（M6；评测脚本与 greenfield 仓库已就绪，方法见 [docs/evaluation.md](docs/evaluation.md)） |
 
-**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（65 文件 / 969 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测尚未执行，见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
+**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（65 文件 / 970 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测尚未执行，见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
 
 ## 界面
 

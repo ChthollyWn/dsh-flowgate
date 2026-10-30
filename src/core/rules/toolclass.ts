@@ -68,8 +68,16 @@ const READ_TOOLS = new Set([
  * Host meta tools that never write the repository (todo list, goals, schedules,
  * team task board, presentation...). They are covered=true and treated as
  * read-only so normal operation is never mistaken for an unknown write tool.
+ *
+ * `structured_output` is the headless/structured-answer final-output tool used by
+ * the DSH agent loop (and by FlowGate's own subagents, which pass outputSchema);
+ * it does not write the repository. Without this entry the coverage self-check
+ * classifies it as an unknown writable tool and turns it into a human pending
+ * item (R-MCP), which blocks task gates in headless runs (2026-10-31 real-host
+ * finding).
  */
 const SAFE_HOST_TOOLS = new Set([
+  'structured_output',
   'ask_user_question',
   'skill',
   'todo_write',

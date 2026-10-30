@@ -10,6 +10,10 @@
  *   node tools/admin.js <projectRoot> status
  *   node tools/admin.js <projectRoot> approve G1
  *   node tools/admin.js <projectRoot> reject G3 "plan missing rollback"
+ *   node tools/admin.js <projectRoot> pending RK-1 approve "owner reason"
+ *   node tools/admin.js <projectRoot> resume C-001
+ *   node tools/admin.js <projectRoot> new "变更标题"
+ *   node tools/admin.js <projectRoot> pause [--handoff]
  *   node tools/admin.js <projectRoot> doctor
  */
 import { readFile } from 'node:fs/promises'
@@ -83,6 +87,19 @@ async function runCommand(engine: FlowEngine, command: string, args: string[]): 
     case 'doctor': {
       const report = await engine.doctor()
       console.log(JSON.stringify(report, null, 2))
+      return
+    }
+    case 'pending': {
+      // Owner decision for pending items (risk takeover RK-n, scope change SC-n,
+      // plan change PC-n, rule proposal RL-n). Used by headless E2E because the
+      // model has no approve tools by design.
+      const id = args[0]
+      const decision = args[1]
+      if (!id || (decision !== 'approve' && decision !== 'reject')) {
+        throw new Error('用法：pending <RK-n|SC-n|PC-n|RL-n> approve|reject [理由]')
+      }
+      const item = await engine.decidePending(id, decision === 'approve' ? 'approved' : 'rejected', args.slice(2).join(' ') || undefined)
+      console.log(`待处理项 ${item.id} 已${decision === 'approve' ? '批准' : '拒绝'}（${item.kind}）。`)
       return
     }
     case 'resume': {
