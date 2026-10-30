@@ -17,6 +17,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - **派发/worktree 真机缺陷修复**（C-003/C-004）：任务分支 `flowgate/<变更>/<任务>` 与变更分支 `flowgate/<变更>` 触发 git ref D/F 冲突，worktree 创建静默降级主工作区 → 改用 `flowgate-tasks/<变更>/<任务>` 兄弟命名空间；执行者在 worktree 内的绝对路径被按主仓库根归一，导致 `R-PROTECTED`/`R-SCOPE` 误伤 → 守卫改为按 caller.cwd（worktree）归一，补 2 个守卫回归测试与 1 个分支命名断言。真机已创建 `.flowgate/worktrees/C-004/T1|T2` 与对应分支，`data.dispatched.worktree` 回填生效；完整合并/集成检查点结算待 C-005 复验。
 - T6.2 加固：`test/fault-injection/host-resilience.test.ts`（4 例：账本篡改锁定、守卫抛错 fail-closed、宿主服务缺失降级、配置损坏报错）、`scripts/measure-startup.mjs`（启动增量 +14.2ms，验收线 200ms）与 `scripts/verify-uninstall.mjs`（隔离 profile 安装/卸载干净度），结果录入 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md) 与 [docs/compat/startup.md](docs/compat/startup.md)。
 - 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
+- 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
 
 ### Fixed
@@ -109,7 +110,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - 浏览器内人工交互流程（面板按钮的 Remote 兜底、低复杂度确认卡）未走查；状态条与面板渲染已在真实 Web 宿主验证。
 - 审查 / 派发 / 并行 worktree 的完整真机验证依赖提供 subagents 的宿主组合；当前精简 web 组合缺 subagents / sessionQuery / userQuestions / Remote，按降级处理。
 - `appendPluginRecord` 属实验性 API，DSH 升级可能失效；已保留降级路径，每个 RC 需跑 `verify:compat`。
-- 核心逻辑覆盖率（2026-10-31 重测）：语句 82.5% / 分支 67.8% / 函数 85.6% / 行 87.2%，分支覆盖率低于 80% 目标。
+- 核心逻辑覆盖率（2026-10-31 重测）：语句 82.6% / 分支 67.9% / 函数 85.8% / 行 87.2%，分支覆盖率低于 80% 目标。
 - npm 首发与 GitHub Release 尚未执行；tag `v0.1.0` 落后 HEAD 4 个提交（发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
 
 [Unreleased]: https://github.com/ChthollyWn/dsh-flowgate/compare/v0.1.0...HEAD

@@ -121,13 +121,35 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 - 隐藏需求遗漏/验收覆盖率尚未人工核对（脚本只收客观信号）；`M-13=4` 是门禁次数，不是真实人类响应时间。
 - pilot 发现并修复了两个基准/产品缺陷：R2 验收测试期望值与倒序契约矛盾（见 6.3）；git 自动提交参数 `git add -- -A` 恒失败（见 `docs/impl/implementation-status.md` §3.5）。
 
-### 6.2 完整 9 任务 × 2 条件表（待填）
+### 6.2 完整 9 任务 × 2 条件表（脚本汇总）
 
-| 任务 | 条件 | 隐藏需求遗漏 | 越界文件 | 虚假完成 | 回归失败 | 验收覆盖 | 人工交互 | 耗时 | token |
-|---|---|---|---|---|---|---|---|---|---|
-| java-renewal 新功能 | A | | | | | | | | |
-| java-renewal 新功能 | B | | | | | | | | |
-| … | | | | | | | | | |
+运行：`node scripts/collate-evaluation.mjs`（打印）/ `node scripts/collate-evaluation.mjs --write`（更新本节）。
+原始数据在 `docs/evaluation-data/<run-id>/`。
+
+<!-- EVAL-TABLE:BEGIN -->
+| 仓库 / 任务 | 条件 | 轮次 | 耗时(s) | 人工门 | 回归 | 验收 | 原始数据 |
+|---|---|---|---|---|---|---|---|
+| ts-todo-api / new-feature | A | 1 | 606 | 0 | green | — | [20261031-023943-ts-todo-api-new-feature-A](evaluation-data/20261031-023943-ts-todo-api-new-feature-A/) |
+| ts-todo-api / new-feature | B | 5 | 568 | 2 | green | — | [20261031-024949-ts-todo-api-new-feature-B](evaluation-data/20261031-024949-ts-todo-api-new-feature-B/) |
+| ts-todo-api / fix-bug | A | 1 | 28 | 0 | green | green | [20261031-022830-ts-todo-api-fix-bug-A](evaluation-data/20261031-022830-ts-todo-api-fix-bug-A/) |
+| ts-todo-api / fix-bug | B | 3 | 363 | 3 | green | green | [20261031-022858-ts-todo-api-fix-bug-B](evaluation-data/20261031-022858-ts-todo-api-fix-bug-B/) |
+| ts-todo-api / risk | A | 1 | 35 | 0 | green | — | [20261031-025917-ts-todo-api-risk-A](evaluation-data/20261031-025917-ts-todo-api-risk-A/) |
+| ts-todo-api / risk | B | 5 | 363 | 2 | red | — | [20261031-025952-ts-todo-api-risk-B](evaluation-data/20261031-025952-ts-todo-api-risk-B/) |
+| py-csv-cli / new-feature | A | 1 | 131 | 0 | red | — | [20261031-030554-py-csv-cli-new-feature-A](evaluation-data/20261031-030554-py-csv-cli-new-feature-A/) |
+| py-csv-cli / new-feature | B | 4 | 784 | 1 | green | — | [20261031-030805-py-csv-cli-new-feature-B](evaluation-data/20261031-030805-py-csv-cli-new-feature-B/) |
+| py-csv-cli / fix-bug | A | 1 | 44 | 0 | green | green | [20261031-032109-py-csv-cli-fix-bug-A](evaluation-data/20261031-032109-py-csv-cli-fix-bug-A/) |
+| py-csv-cli / fix-bug | B | — | — | — | — | — | 待跑 |
+| py-csv-cli / risk | A | — | — | — | — | — | 待跑 |
+| py-csv-cli / risk | B | — | — | — | — | — | 待跑 |
+| java-renewal / new-feature | A | — | — | — | — | — | 待跑 |
+| java-renewal / new-feature | B | — | — | — | — | — | 待跑 |
+| java-renewal / fix-bug | A | — | — | — | — | — | 待跑 |
+| java-renewal / fix-bug | B | — | — | — | — | — | 待跑 |
+| java-renewal / risk | A | — | — | — | — | — | 待跑 |
+| java-renewal / risk | B | — | — | — | — | — | 待跑 |
+
+已完成 **9/18** 个 run；未跑任务显示"待跑"。A/B 条件、prompt、隔离 DSH_HOME 与人工门策略见 §2/§5。
+<!-- EVAL-TABLE:END -->
 
 ### 6.3 pilot 修正记录
 
