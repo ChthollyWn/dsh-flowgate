@@ -284,6 +284,7 @@ function usage() {
   --max-rounds <n>      B 组最多 headless 轮数（默认 8；greenfield 默认 12；A 组固定 1 轮）
   --timeout <seconds>   单轮 headless 超时（默认 1800）
   --review              B 组保留 review.enabled=true（需要子 agent provider；默认关闭）
+  --no-run              B 组把 commands.run 覆盖为 none（headless 无法托管长驻服务，避免 spring-boot:start 之类命令挂起）
   --no-verify           不跑验收/回归命令（默认会跑）
   --keep-hidden         复制仓库时保留 README 隐藏章节（不推荐，会向 agent 泄漏评分标准）
   --keep-workdir        保留临时工作目录（排查用；路径会打印）
@@ -322,6 +323,7 @@ function parseArgs(argv) {
     '--list',
     '--review',
     '--no-verify',
+    '--no-run',
     '--keep-hidden',
     '--keep-workdir',
     '--help',
@@ -966,6 +968,7 @@ async function applyConfigOverrides(rootDir) {
   if (overrides.dispatch) config.dispatch = overrides.dispatch
   if (overrides.review) config.review = { ...(config.review ?? {}), ...overrides.review }
   if (overrides.git) config.git = { ...(config.git ?? {}), ...overrides.git }
+  if (overrides.commands) config.commands = { ...(config.commands ?? {}), ...overrides.commands }
   await writeFile(path, stringifyYaml(config))
   return config
 }
@@ -1458,7 +1461,11 @@ async function writeRunRecord({
       pluginInstallSteps: setup?.steps ?? [],
       configOverrides:
         plan.condition === 'B'
-          ? { dispatch: plan.dispatch, review: { enabled: Boolean(plan.options.review) } }
+          ? {
+              dispatch: plan.dispatch,
+              review: { enabled: Boolean(plan.options.review) },
+              ...(plan.options.norun ? { commands: { run: 'none' } } : {}),
+            }
           : null,
     },
     rounds: collected?.rounds ?? [],
@@ -1604,6 +1611,7 @@ async function writeRunRecord({
   lines.push('- headless 的「被问到才答」澄清无法自动完成：agent 若调用结构化提问而宿主组合不支持，会退化为写假设；这类交互质量需人工复盘事件流。')
   lines.push('- 脚本扮演负责人自动批准人工门，因此 M-13（人工负担）记录的是「门禁次数」，不是真实人类响应时间。')
   lines.push('- B 组默认 `dispatch=inline`、`review.enabled=false`（精简 headless 没有 subagent provider）；要测派发/审查需要换成带 provider 的组合。')
+  lines.push('- 需要长驻服务（如 Spring Boot）的项目可用 `--no-run` 把 B 组 `commands.run` 覆盖为 `none`，避免 `spring-boot:start` 之类命令在 headless 里挂起；A 组不受影响。')
   await writeFile(join(runDir, 'summary.md'), `${lines.join('\n')}\n`)
 }
 
@@ -1649,6 +1657,7 @@ async function runEvaluation(plan) {
       const config = {
         dispatch: plan.dispatch,
         review: { enabled: Boolean(plan.options.review) },
+        ...(plan.options.norun ? { commands: { run: 'none' } } : {}),
       }
       const init = await ownerAction(state.helperPath, 'init', workspace, [], config)
       if (!init.ok) {

@@ -93,6 +93,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 3. **B 组默认 `dispatch=inline`、`review.enabled=false`**：精简 headless 没有 subagent provider；并行派发与独立审查要用带 provider 的组合后再跑，`--dispatch auto` 在精简组合里可能降级或被拒。
 4. **README 消毒有边界**：脚本按 `<!-- PUBLIC -->` 标记或"隐藏需求/答案表/预期基线/已知缺陷"等标题移除评分材料，但仓库里的已知缺陷测试文件（`test/known-bugs.mjs` 等）本身保留——它是 bug 任务的客观验收依据，属于基准设计的一部分。
 5. **B 组人工门自动批准路径尚未在真模型闭环中验证**：它与 `tools/admin.js` 走同一个 `engine.approveGate`，代码路径一致，但首次真跑前仍应先用 `--owner manual` 或小任务试点确认。
+7. **长驻服务会挂起 headless**：若项目自动探测出 `commands.run`（如 `spring-boot:run`），B 组模型可能在 S5 尝试执行它并阻塞；用 `--no-run` 把 B 组 run 命令覆盖为 `none`（A 组不受影响，普通风险 G5 不强制运行证据）。
 6. **B 组隔离 profile 的安装依赖本机 DSH/pnpm**：脚本用 `dsh plugin add link:` 安装本地插件；不同 DSH RC 版本的 CLI 参数若变化，先在 `--dry-run` 后的真实运行前用 `dsh --help` 核对。
 7. **headless 组合的 preset 行是 pending 状态**：精简 headless 没有 `agentPresets`/`subagents` 服务，插件包里的三个 `preset-flowgate*` 行会 pending（不影响 `/flow`、守卫与工具，见 `docs/impl/host-integration.md`）；脚本只用 `--dump-config` 校验 `dsh-flowgate` 插件行，`--dump-config-schema` 在该组合可能因 preset 嵌套行报错，属既有限制。
 

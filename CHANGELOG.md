@@ -18,6 +18,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - T6.2 加固：`test/fault-injection/host-resilience.test.ts`（4 例：账本篡改锁定、守卫抛错 fail-closed、宿主服务缺失降级、配置损坏报错）、`scripts/measure-startup.mjs`（启动增量 +14.2ms，验收线 200ms）与 `scripts/verify-uninstall.mjs`（隔离 profile 安装/卸载干净度），结果录入 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md) 与 [docs/compat/startup.md](docs/compat/startup.md)。
 - 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
 - 核心工具单测补齐：`test/core/util/util.test.ts` 覆盖 paths/glob/hash/time/markdown（11 例：路径归一、** glob 与重叠、哈希/HMAC/稳定 JSON/密钥脱敏、时间格式与过期、围栏/表格/章节/列表解析）；核心覆盖率升至语句 83.0% / 分支 68.4%。
+- 评测脚本新增 `--no-run`：B 组把 `commands.run` 覆盖为 `none`，避免 Spring Boot 这类长驻服务命令在 headless 一次性运行里挂起（A 组不受影响；普通风险 G5 本就不强制运行证据）。
 - 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
 
