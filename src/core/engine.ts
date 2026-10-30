@@ -1286,7 +1286,10 @@ export class FlowEngine {
       return decision
     }
 
-    const task = this.getTask(this.activeTask()?.id ?? '')
+    // 并行批次里多个执行者同时活跃：优先用 caller 的派发上下文定位任务卡，
+    // 否则会拿全局 activeTask（可能是另一个并行任务）做范围判定，导致误拒
+    //（2026-10-31 真机发现：T2 写自己 new_files 里的文件被 T1 的 scope 拒绝）。
+    const task = this.getTask(caller.dispatch?.taskId ?? this.activeTask()?.id ?? '')
     const decision = evaluateRules({
       action,
       caller,

@@ -198,6 +198,32 @@ describe('FlowEngine pipeline', () => {
     expect(next.changeId).toBe('C-002')
   })
 
+  it('并行派发执行者按 caller.dispatch.taskId 取任务卡（不被另一个任务的 scope 误拒）', async () => {
+    const { engine, fs } = harness
+    await engine.init()
+    const created = await engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    await writeArtifacts(fs, created.changeId)
+    await engine.submitGate('G1')
+    await engine.approveGate('G1')
+    await engine.submitGate('G2')
+    const g3 = await engine.submitGate('G3')
+    expect(g3.awaiting).toBe('owner')
+    await engine.approveGate('G3')
+    // T1 是全局 activeTask；T2 的执行者写 T2 的 new_files 时必须按 T2 判定。
+    await engine.taskStart('T1')
+    const t2Caller = {
+      tool: 'write',
+      agentRole: 'executor',
+      dispatch: { changeId: created.changeId, taskId: 'T2' },
+    } as never
+    const allowed = await engine.evaluateAction({ kind: 'write', tool: 'write', path: 'src/extra/new.ts' }, t2Caller)
+    expect(allowed.effect).toBe('allow')
+    // 主会话仍按 activeTask（T1）判定，同一路径被拒。
+    const mainCaller = { tool: 'write', agentRole: 'main' } as never
+    const denied = await engine.evaluateAction({ kind: 'write', tool: 'write', path: 'src/extra/new.ts' }, mainCaller)
+    expect(denied.effect).toBe('deny')
+  })
+
   it('S1 阶段写源码被规则拒绝，单次放行只生效一次', async () => {
     const { engine, fs } = harness
     await engine.init()

@@ -199,6 +199,12 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - 两个执行者子 agent 在各自 worktree 内启动并执行；账本有 `rule.denied`（R-SCOPE/旧版 R-PROTECTED）与 `scope.requested SC-1/SC-2` 记录——这是子 agent 越界后的正确转人工路径，但也暴露调度侧缺口：**并行批次里 scope 变更请求需要负责人审批**，host 目前只把 pending 留在状态里，没有自动通知/审批者（交互式会话里由负责人处理；E2E 用 `admin pending <id> approve`）。
 - **本轮未完成**：C-004 的 worktree 合并、集成检查点与任务门结算使用修复前的 lib 运行，因此只验证到"worktree 创建 + 子 agent 启动 + 结构化回填"；用修复后 lib 的完整结算复验（C-005）留下一轮。
 
+**C-006 / C-007（单任务 worktree 结算，第三轮）**
+
+- C-006：`worktree.created` 账本事件、子 agent 在 worktree 内写入 `RenewalPageSizeLimit` + 测试、`turn.continued`（agent 宣布完成但无新鲜 GREEN 回执时插件会继续推一轮）、`verify.receipt` E-0029 65/65、**`review.reported` RV-1（coverageOk=true）**、`task.done`；批次进入 `checkpoint` 状态，但一次性 headless 在主进程退出前未完成 worktree 合并与集成检查点。
+- C-007（保持主会话轮询 211s 后仍是同样结果）：worktree + 子 agent + 测试 + **review RV-1 verdict=pass / coverageOk=true** + task.done 全部通过；批次仍停在 `checkpoint`。结论：headless 一次性运行无法可靠等待"子 agent finalize → 合并 → 集成命令"的后台链路，需要交互式/常驻宿主会话复验。
+- **缺陷 C：并行执行者的范围判定用全局 activeTask**。C-005 里 T2 写自己 `new_files` 中的文件被 T1 的 scope 拒绝（`rule.denied R-SCOPE target=RenewalSummaryText.java`）。已修：`Engine.evaluateAction` 优先用 `caller.dispatch.taskId` 定位任务卡，再回退 activeTask；新增 engine 集成回归测试（T2 执行者允许、主会话按 T1 拒绝）。
+- 并行批次内的 `scope.requested`（SC-n）仍需负责人审批；headless 下拉不到审批通知，交互式会话可在面板处理，E2E 用 `admin pending <id> approve`。
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |
@@ -206,7 +212,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 | 1 | ~~浏览器端交互未在真实 DSH web/desktop 会话里跑过~~（已 2026-10-30 实测，见 §3.1） | 剩余：人工按钮点击流程（Remote 兜底）、低复杂度确认卡、误判反馈截图 | 用桌面会话补做 |
 | 2 | 三个 preset 已在真实 web 宿主的预设菜单出现（§3.3）；headless 用 overlay 补 `@deepseek-ai/dsh-agent-preset-registry` 后可激活（§3.5 实测），但**会话内切换**仍未验证 | 工程模式/执行者/只读 preset 的运行时行为仍需确认 | 桌面/Web 会话切换实测；overlay 写法已记入 host-integration |
 | 3 | 有 / 无插件对照评测未执行（M6 T6.1）；评测脚本 `scripts/run-evaluation.mjs` 与 greenfield 空仓库已就绪并通过 dry-run | 无法给出 M-15/M-18 实测数字 | 按 [evaluation.md](../evaluation.md) 跑 9 任务 × 2 条件 |
-| 4 | 审查子 agent 真机跑通（§3.5）；派发/worktree 真机已验证 worktree 创建、分支命名、子 agent 启动与 data 回填（§3.7）；合并/集成检查点结算需用修复后 lib 复验（C-005）；并行批次内子 agent 的 scope 变更请求需要负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 下一轮跑 C-005 完整结算；交互式会话验证审批通知 |
+| 4 | 审查子 agent 真机跑通（§3.5/§3.7，RV-1 verdict=pass + coverageOk）；派发/worktree 真机已验证创建、分支命名、子 agent 启动、data 回填、任务门/审查/task.done（C-006/C-007）；**worktree 合并 + 集成检查点**因 headless 一次性运行在后台 finalize 前退出而未完成，且无专门单测；scope 变更请求需负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式/常驻宿主会话复验合并+集成检查点；补 maybeCheckpoint 单测 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
 | 7 | 覆盖率分支 67.8% 低于 80% 目标（语句 82.5% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
@@ -223,7 +229,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 
 ## 6. 下一步（按优先级）
 
-1. **派发/并行 worktree 完整结算复验（C-005）**：用已修复 lib 跑一次并行批次，确认子 agent 结算 → 任务门/审查 → worktree 合并 + 集成检查点；交互式会话里补验 scope 变更的审批通知。
+1. **派发/并行 worktree 收尾**：在交互式会话里复验 worktree 合并 + 集成检查点（headless 一次性运行会提前退出）；补 `maybeCheckpoint` 单测与 scope 变更审批通知；交互式会话验证审批。
 2. **M6 对照评测**：pilot 1/9 已完成（ts-todo-api/fix-bug A/B）；继续跑剩余 8 任务 × 2 条件、从 0 开发（greenfield）演练与并行对照，填入 [evaluation.md](../evaluation.md) §6.2。
 3. 真实会话里切换三个 preset；更新 `cordis.patch.yml` 的"待实测"注释（当前已刷新为实际剩余项）。
 4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；Desktop 宿主人工走查（启动耗时/卸载干净度已完成，见 §3.6）。
