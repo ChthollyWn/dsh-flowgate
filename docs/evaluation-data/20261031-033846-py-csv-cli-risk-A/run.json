@@ -1,0 +1,144 @@
+{
+  "runId": "20261031-033846-py-csv-cli-risk-A",
+  "startedAt": "2026-10-30T19:38:46.317Z",
+  "finishedAt": "2026-10-30T19:42:49.925Z",
+  "durationMs": 243608,
+  "status": "completed",
+  "error": null,
+  "repo": "py-csv-cli",
+  "repoPath": "examples/py-csv-cli",
+  "stack": "Python ≥ 3.10 / stdlib unittest",
+  "task": "risk",
+  "taskLabel": "R3 导出手机号脱敏",
+  "prompt": "导出的 CSV 里有用户手机号，合规要求脱敏，帮我改一下。",
+  "condition": "A",
+  "conditionLabel": "DSH 标准模式",
+  "dsh": {
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+    "profile": "eval-standard",
+    "isolatedDshHome": true,
+    "keySource": "DEEPSEEK_API_KEY 环境变量（未落盘）"
+  },
+  "environment": {
+    "node": "v23.11.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "workspace": {
+    "baselineCommit": "f173f06f068628fc843bfee2eca4123c54c24652",
+    "readmeSanitized": true,
+    "readmeHiddenSectionsRemoved": 16,
+    "copiedWithSkips": {
+      "skippedEntries": 2
+    },
+    "kept": false
+  },
+  "flowgate": {
+    "root": "/Users/chtholly/Developer/WorkSpace/dsh-flowgate",
+    "initialized": false,
+    "pluginLoaded": false,
+    "pluginInstallSteps": [
+      {
+        "step": "create-profile",
+        "command": "dsh --profile eval-standard --from-default-profile headless --help",
+        "exitCode": 0,
+        "timedOut": false,
+        "stderrTail": ""
+      },
+      {
+        "step": "dump-config",
+        "command": "dsh --profile eval-standard --dump-config",
+        "exitCode": 0,
+        "timedOut": false
+      }
+    ],
+    "configOverrides": null
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "durationMs": 242623,
+      "exitCode": 0,
+      "timedOut": false,
+      "sessionId": "session-b661c2cc-1594-4d35-9994-41bd37105b97",
+      "events": {
+        "session": 1,
+        "status": 44,
+        "thinking": 21,
+        "text": 5,
+        "tool_call": 37,
+        "tool_result": 37,
+        "final": 1
+      },
+      "stdoutFile": "rounds/round-1.stdout.jsonl",
+      "stderrFile": "rounds/round-1.stderr.log",
+      "finalTextTail": "已按合规要求改好导出逻辑。\n\n**改动内容**\n- `csvtool/export.py`：导出前自动脱敏手机号，保留前 3 位和后 4 位，中间用 `****` 代替。\n  - 支持 `13800138000` → `138****8000`\n  - 支持 `+86 137 0000 1122` → `+86 137****1122`\n  - 支持 `0086-139-1234-5678`、空格/短横线分隔等写法\n  - 按表头识别 `phone`、`mobile`、`手机号`、`联系电话` 等列，其他列保持原样\n  - 代码中不记录、不打印手机号原值\n- `csvtool/cli.py`：更新 `export` 的帮助说明。\n- `tests/test_cli.py`：原测试断言“保留原手机号”，已改为断言脱敏结果。\n- 新增 `tests/test_export.py`，覆盖脱敏规则、国家码、非手机号列、文件导出等场景。\n\n**验证情况**\n当前环境的 shell 被沙箱后端阻断，无法实际执行测试；已做静态检查。你可以在本地运行：\n\n```bash\npython3 -m unittest discover -s tests -p 'test_*.py' -v\n```\n\n预期默认测试全部通过。"
+    }
+  ],
+  "ownerActions": [],
+  "artifacts": {
+    "metricsSets": 0,
+    "reports": [],
+    "flowgateFiles": [],
+    "archive": [],
+    "flowgateUnexpected": false,
+    "git": {
+      "baselineCommit": "f173f06f068628fc843bfee2eca4123c54c24652",
+      "statusEntries": 5,
+      "changedFiles": 4,
+      "changedFileList": [
+        "README.md",
+        "csvtool/cli.py",
+        "csvtool/export.py",
+        "tests/test_cli.py"
+      ],
+      "insertions": 134,
+      "deletions": 10,
+      "untrackedFiles": 1,
+      "untrackedFileList": [
+        "tests/test_export.py"
+      ],
+      "commitsSinceBaseline": 0,
+      "patchSaved": true,
+      "patchBytes": 7276,
+      "files": {
+        "status": "git/status.txt",
+        "diffStat": "git/diff-stat.txt",
+        "diffNumstat": "git/diff-numstat.txt",
+        "untracked": "git/untracked.txt",
+        "log": "git/log.txt"
+      }
+    }
+  },
+  "verification": {
+    "generatedAt": "2026-10-30T19:42:49.754Z",
+    "repo": "py-csv-cli",
+    "task": "risk",
+    "condition": "A",
+    "rounds": 1,
+    "skipped": false,
+    "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+    "results": [
+      {
+        "kind": "regression",
+        "label": "默认测试套件（回归，基线 13/13）",
+        "command": "python3 -m unittest discover -s tests -p test_*.py",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 314,
+        "expected": "green",
+        "parsed": {
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "passed": 22,
+          "verdict": "green"
+        },
+        "status": "green",
+        "outputTail": "\n......................\n----------------------------------------------------------------------\nRan 22 tests in 0.005s\n\nOK\n"
+      }
+    ]
+  },
+  "metrics": null,
+  "notes": []
+}

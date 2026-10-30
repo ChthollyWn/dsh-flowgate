@@ -1,0 +1,213 @@
+diff --git a/README.md b/README.md
+index d4709c9..3bd2ff9 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@
+ 
+ - Python ≥ 3.10（开发用 3.13）；零运行时依赖。
+ - 测试用 `unittest` 原生可跑，同时完全兼容 pytest（测试都是 `unittest.TestCase`）。
+-- 默认测试：13 个用例，应全绿。
++- 默认测试：22 个用例，应全绿。
+ 
+ ## 快速开始
+ 
+diff --git a/csvtool/cli.py b/csvtool/cli.py
+index d27cef1..e58eccf 100644
+--- a/csvtool/cli.py
++++ b/csvtool/cli.py
+@@ -2,7 +2,7 @@
+ 
+ 子命令：
+   stats  统计行数、列名、空单元格
+-  export 原样导出 CSV（基准任务 R3 会要求加手机号脱敏）
++  export 导出 CSV，并自动对手机号列脱敏
+ 
+ 基准任务 R1（CSV 去重）还没有对应子命令，需要新增 `dedupe`。
+ """
+@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
+     stats = sub.add_parser("stats", help="统计 CSV 基本信息")
+     stats.add_argument("file", help="输入 CSV 路径")
+ 
+-    exp = sub.add_parser("export", help="导出 CSV（当前不脱敏）")
++    exp = sub.add_parser("export", help="导出 CSV（手机号自动脱敏）")
+     exp.add_argument("file", help="输入 CSV 路径")
+     exp.add_argument("--out", default=None, help="输出路径；省略则打印到标准输出")
+ 
+diff --git a/csvtool/export.py b/csvtool/export.py
+index 9d0c8ba..0dbe5e1 100644
+--- a/csvtool/export.py
++++ b/csvtool/export.py
+@@ -1,19 +1,140 @@
+-"""导出功能：当前原样导出 CSV。
++"""导出功能：导出时对手机号做脱敏。
+ 
+-基准任务 R3（合规：导出手机号脱敏）会要求加入手机号脱敏，
+-并且日志里也不能出现原值。当前实现完全没有脱敏。
++脱敏规则：手机号保留前 3 位和后 4 位，中间统一替换为 ``****``。
++兼容 ``+86`` / ``0086`` 国家码，以及空格、短横线分隔的写法。
++优先按表头识别手机号列，其他列保持原样；表头无法识别时兜底扫描所有单元格。
++本模块不会记录手机号原值。
+ """
+ from __future__ import annotations
+ 
++import re
+ from pathlib import Path
+ 
+ from .csvio import read_rows, write_rows
+ 
++# 中国大陆手机号：1 开头、第二位 3-9，共 11 位；允许数字之间用空格或短横线分隔。
++_MOBILE_RE = re.compile(
++    r"(?<!\d)"
++    r"(?P<prefix>(?:(?:\+|00)\s*86|86)[\s\-]?)?"
++    r"(?P<body>1[3-9](?:[\s\-]?\d){9})"
++    r"(?!\d)"
++)
++
++# 归一化（去空白/分隔符、转小写）后的表头名称。
++_PHONE_HEADERS = {
++    "phone",
++    "phonenumber",
++    "phonenum",
++    "phoneno",
++    "mobile",
++    "mobilenumber",
++    "mobilenum",
++    "mobileno",
++    "mobilephone",
++    "cell",
++    "cellphone",
++    "cellnumber",
++    "tel",
++    "telephone",
++    "telno",
++    "telnumber",
++    "contactphone",
++    "contactnumber",
++    "contacttel",
++    "officetel",
++    "hometel",
++    "worktel",
++    "联系方式",
++    "联系电话",
++    "电话号码",
++    "电话",
++    "手机",
++    "手机号",
++    "手机号码",
++    "移动电话",
++    "联络电话",
++}
++
++_PHONE_HEADER_TOKENS = ("phone", "mobile", "手机", "电话")
++
++
++def _normalise_header(name: str) -> str:
++    """把表头归一化，便于识别 phone / mobile / 手机号 等写法。"""
++    text = name.lstrip("\ufeff").strip().lower()
++    return re.sub(r"[\s_\-./()（）]+", "", text)
++
++
++def is_phone_header(name: str) -> bool:
++    """判断某一列是否为手机号列。"""
++    normalised = _normalise_header(name)
++    if not normalised:
++        return False
++    if normalised in _PHONE_HEADERS:
++        return True
++    return any(token in normalised for token in _PHONE_HEADER_TOKENS)
++
++
++def mask_phone(value: str) -> str:
++    """脱敏一个单元格里的手机号，保留前 3 位和后 4 位。
++
++    不是手机号的内容原样返回；已经脱敏的内容不会被再次处理。
++    """
++
++    def replace(match: re.Match[str]) -> str:
++        digits = re.sub(r"[^0-9]", "", match.group("body"))
++        if len(digits) != 11:
++            return match.group(0)
++        masked = f"{digits[:3]}****{digits[-4:]}"
++        prefix = match.group("prefix") or ""
++        if not prefix:
++            return masked
++        # 保留国家码写法以及原有的分隔方式（空格 / 短横线）。
++        prefix_core = re.sub(r"[\s\-]+$", "", prefix)
++        if prefix[-1].isspace():
++            separator = " "
++        elif prefix.endswith("-"):
++            separator = "-"
++        else:
++            separator = ""
++        return f"{prefix_core}{separator}{masked}"
++
++    return _MOBILE_RE.sub(replace, value)
++
++
++def mask_rows(rows: list[list[str]]) -> list[list[str]]:
++    """对表格中的手机号列脱敏，返回新的行列表（不修改入参）。"""
++    if not rows:
++        return []
++
++    header = rows[0]
++    phone_columns = [
++        index for index, name in enumerate(header) if is_phone_header(name)
++    ]
++    # 表头无法识别时，兜底扫描所有单元格，避免漏掉手机号（含无表头文件）。
++    scan_all = not phone_columns
++
++    if scan_all:
++        masked_rows = [[mask_phone(cell) for cell in header]]
++    else:
++        masked_rows = [list(header)]
++    for row in rows[1:]:
++        masked_row = list(row)
++        if scan_all:
++            masked_row = [mask_phone(cell) for cell in masked_row]
++        else:
++            for index in phone_columns:
++                if index < len(masked_row):
++                    masked_row[index] = mask_phone(masked_row[index])
++        masked_rows.append(masked_row)
++    return masked_rows
++
+ 
+ def export_rows(path: str | Path) -> list[list[str]]:
+-    return read_rows(path)
++    """读取 CSV 并返回脱敏后的行，供导出使用。"""
++    return mask_rows(read_rows(path))
+ 
+ 
+ def export(path: str | Path, out: str | Path | None = None) -> str | None:
++    """导出 CSV；写出前对手机号脱敏。"""
+     rows = export_rows(path)
+     return write_rows(rows, out)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index a4bad2d..fee9a57 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -24,11 +24,12 @@ class CliTest(unittest.TestCase):
+         self.assertEqual(code, 0)
+         self.assertIn('"rows": 4', output)
+ 
+-    def test_export_to_stdout_keeps_original_phone(self):
+-        # 基准任务 R3 之前，导出保持原样（脱敏是待实现需求）。
++    def test_export_to_stdout_masks_phone(self):
+         code, output = run_cli(["export", str(DATA / "members.csv")])
+         self.assertEqual(code, 0)
+-        self.assertIn("13800138000", output)
++        self.assertIn("138****8000", output)
++        self.assertNotIn("13800138000", output)
++        self.assertNotIn("13912345678", output)
+         self.assertIn("id,name,phone", output)
+ 
+     def test_export_to_file(self):
+@@ -38,6 +39,8 @@ class CliTest(unittest.TestCase):
+             self.assertEqual(code, 0)
+             text = out.read_text(encoding="utf-8")
+             self.assertIn("张伟", text)
++            self.assertIn("138****8000", text)
++            self.assertNotIn("13800138000", text)
+ 
+     def test_unknown_command_exits_nonzero(self):
+         with self.assertRaises(SystemExit) as ctx:

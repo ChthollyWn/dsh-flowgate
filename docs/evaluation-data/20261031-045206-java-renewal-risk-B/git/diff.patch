@@ -1,0 +1,731 @@
+diff --git a/src/main/java/com/acme/member/renewal/RenewalController.java b/src/main/java/com/acme/member/renewal/RenewalController.java
+index 78da837..965bce5 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalController.java
++++ b/src/main/java/com/acme/member/renewal/RenewalController.java
+@@ -32,7 +32,8 @@ public class RenewalController {
+                     request.memberId(),
+                     request.months(),
+                     request.amountCents(),
+-                    request.signature()
++                    request.signature(),
++                    request.timestamp()
+             ));
+             return ResponseEntity.ok(Map.of(
+                     "code", 0,
+@@ -62,6 +63,16 @@ public class RenewalController {
+                 .toList();
+     }
+ 
+-    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    /**
++     * 回调请求体。{@code timestamp} 为 UTC epoch 秒，可选：旧 5 字段报文反序列化为 {@code null}。
++     */
++    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents,
++                                  String signature, Long timestamp) {
++
++        /** 兼容旧调用方与旧 5 字段报文：不带时间戳，固定走旧协议。 */
++        public CallbackRequest(String externalTxnId, String memberId, int months, long amountCents,
++                               String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
+     }
+ }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalService.java b/src/main/java/com/acme/member/renewal/RenewalService.java
+index ff327e1..fd7794e 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalService.java
++++ b/src/main/java/com/acme/member/renewal/RenewalService.java
+@@ -46,7 +46,8 @@ public class RenewalService {
+     }
+ 
+     public CallbackResult handleCallback(CallbackCommand command) {
+-        if (!signatureVerifier.verify(command.externalTxnId(), command.amountCents(), command.signature())) {
++        if (!signatureVerifier.verify(command.externalTxnId(), command.amountCents(),
++                command.timestamp(), command.signature())) {
+             throw new InvalidSignatureException();
+         }
+         // 幂等：同一流水号直接返回已处理，不再顺延到期日。
+@@ -73,8 +74,17 @@ public class RenewalService {
+         return signatureVerifier.verify(externalTxnId, amountCents, signature);
+     }
+ 
+-    /** 回调命令。 */
+-    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    /**
++     * 回调命令。{@code timestamp} 为 UTC epoch 秒，旧 MD5 回调与旧 5 参构造传 {@code null}。
++     */
++    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents,
++                                  String signature, Long timestamp) {
++
++        /** 兼容旧调用方：不带时间戳，固定走旧协议。 */
++        public CallbackCommand(String externalTxnId, String memberId, int months, long amountCents,
++                               String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
+     }
+ 
+     /** 处理结果：duplicate 表示命中幂等。 */
+diff --git a/src/main/java/com/acme/member/renewal/SignatureVerifier.java b/src/main/java/com/acme/member/renewal/SignatureVerifier.java
+index 22aed79..c18213d 100644
+--- a/src/main/java/com/acme/member/renewal/SignatureVerifier.java
++++ b/src/main/java/com/acme/member/renewal/SignatureVerifier.java
+@@ -1,43 +1,182 @@
+ package com.acme.member.renewal;
+ 
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
+ 
++import javax.crypto.Mac;
++import javax.crypto.spec.SecretKeySpec;
+ import java.nio.charset.StandardCharsets;
++import java.security.GeneralSecurityException;
+ import java.security.MessageDigest;
+ import java.security.NoSuchAlgorithmException;
++import java.time.Clock;
++import java.time.Instant;
++import java.util.Locale;
+ 
+ /**
+  * 支付回调验签。
+  *
+- * <p>当前实现是 MD5(流水号 + 金额 + 硬编码密钥)，存在三个已知安全问题：
+- * 摘要算法过弱、密钥硬编码、没有时间戳（可被重放）。
+- * 基准任务 R3（风险改造）要求改成 HMAC-SHA256 + 时间戳 + 外部密钥 + 新旧签名过渡期。
++ * <p>同时支持两种协议：
++ * <ul>
++ *   <li>旧协议：{@code MD5(流水号:金额:legacy-secret)}，可由 {@code renewal.callback.legacy-enabled}
++ *       一键关闭；</li>
++ *   <li>新协议：{@code v2:} 前缀 + {@code HMAC-SHA256(流水号:金额:时间戳)}，时间戳为 UTC epoch 秒，
++ *       与服务器时间偏差不得超过 {@code renewal.callback.timestamp-tolerance-seconds}。</li>
++ * </ul>
++ *
++ * <p>密钥全部来自配置，代码中不再包含生产密钥；签名比较统一走常量时间比较。
++ * 新协议验签失败不会回退到旧协议，避免攻击者用坏时间戳触发降级。
+  */
+ @Component
+ public class SignatureVerifier {
+ 
+-    private static final String SECRET = "dev-secret-do-not-use-in-prod";
++    /** 仅用于本地开发/测试的默认值，生产必须通过环境变量覆盖。 */
++    static final String DEVELOPMENT_SECRET = "dev-secret-do-not-use-in-prod";
++
++    private static final String V2_PREFIX = "v2:";
++    private static final String HMAC_ALGORITHM = "HmacSHA256";
++    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
++
++    private Clock clock = Clock.systemUTC();
++
++    @Value("${renewal.callback.secret:" + DEVELOPMENT_SECRET + "}")
++    private String secret = DEVELOPMENT_SECRET;
++
++    @Value("${renewal.callback.legacy-secret:" + DEVELOPMENT_SECRET + "}")
++    private String legacySecret = DEVELOPMENT_SECRET;
++
++    @Value("${renewal.callback.legacy-enabled:true}")
++    private boolean legacyEnabled = true;
++
++    @Value("${renewal.callback.timestamp-tolerance-seconds:300}")
++    private long timestampToleranceSeconds = 300L;
+ 
++    public SignatureVerifier() {
++    }
++
++    /**
++     * 包级构造供纯 JUnit 测试注入固定时钟与测试密钥，不启动 Spring。
++     */
++    SignatureVerifier(Clock clock, String secret, String legacySecret,
++                      boolean legacyEnabled, long timestampToleranceSeconds) {
++        this.clock = clock == null ? Clock.systemUTC() : clock;
++        this.secret = secret;
++        this.legacySecret = legacySecret;
++        this.legacyEnabled = legacyEnabled;
++        this.timestampToleranceSeconds = timestampToleranceSeconds;
++    }
++
++    @Autowired(required = false)
++    void setClock(Clock clock) {
++        if (clock != null) {
++            this.clock = clock;
++        }
++    }
++
++    /**
++     * 旧入口：固定按旧 MD5 协议校验，保持历史调用方语义不变。
++     */
+     public boolean verify(String externalTxnId, long amountCents, String signature) {
+         if (signature == null || signature.isBlank()) {
+             return false;
+         }
+-        return sign(externalTxnId, amountCents).equalsIgnoreCase(signature);
++        return verifyLegacy(externalTxnId, amountCents, signature);
++    }
++
++    /**
++     * 新入口：按 {@code v2:} 前缀分流，新协议失败不回退旧协议。
++     */
++    public boolean verify(String externalTxnId, long amountCents, Long timestamp, String signature) {
++        if (signature == null || signature.isBlank()) {
++            return false;
++        }
++        if (signature.startsWith(V2_PREFIX)) {
++            return verifyV2(externalTxnId, amountCents, timestamp,
++                    signature.substring(V2_PREFIX.length()));
++        }
++        return verifyLegacy(externalTxnId, amountCents, signature);
+     }
+ 
++    /**
++     * 旧协议签名：{@code MD5(流水号:金额:legacy-secret)}，输出小写 hex。
++     */
+     public String sign(String externalTxnId, long amountCents) {
+-        String payload = externalTxnId + ":" + amountCents + ":" + SECRET;
++        return md5Hex(legacyPayload(externalTxnId, amountCents));
++    }
++
++    /**
++     * 新协议签名：{@code v2:} 前缀 + HMAC-SHA256(流水号:金额:时间戳)，输出小写 hex。
++     */
++    public String signV2(String externalTxnId, long amountCents, long timestamp) {
++        return V2_PREFIX + hmacHex(secret, v2Payload(externalTxnId, amountCents, timestamp));
++    }
++
++    private boolean verifyV2(String externalTxnId, long amountCents, Long timestamp, String providedHex) {
++        if (timestamp == null || isBlank(secret)) {
++            return false;
++        }
++        long now = Instant.now(clock).getEpochSecond();
++        long tolerance = Math.max(0L, timestampToleranceSeconds);
++        if (timestamp > now + tolerance || timestamp < now - tolerance) {
++            return false;
++        }
++        String expected = hmacHex(secret, v2Payload(externalTxnId, amountCents, timestamp));
++        return constantTimeHexEquals(expected, providedHex);
++    }
++
++    private boolean verifyLegacy(String externalTxnId, long amountCents, String providedHex) {
++        if (!legacyEnabled || isBlank(legacySecret)) {
++            return false;
++        }
++        String expected = md5Hex(legacyPayload(externalTxnId, amountCents));
++        return constantTimeHexEquals(expected, providedHex);
++    }
++
++    private String legacyPayload(String externalTxnId, long amountCents) {
++        return externalTxnId + ":" + amountCents + ":" + legacySecret;
++    }
++
++    private static String v2Payload(String externalTxnId, long amountCents, long timestamp) {
++        return externalTxnId + ":" + amountCents + ":" + timestamp;
++    }
++
++    private static boolean constantTimeHexEquals(String expectedLowerHex, String providedHex) {
++        byte[] expected = expectedLowerHex.getBytes(StandardCharsets.US_ASCII);
++        byte[] provided = providedHex.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII);
++        return MessageDigest.isEqual(expected, provided);
++    }
++
++    private static String md5Hex(String payload) {
+         try {
+             MessageDigest digest = MessageDigest.getInstance("MD5");
+-            byte[] hashed = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+-            StringBuilder builder = new StringBuilder(hashed.length * 2);
+-            for (byte value : hashed) {
+-                builder.append(Character.forDigit((value >> 4) & 0xF, 16));
+-                builder.append(Character.forDigit(value & 0xF, 16));
+-            }
+-            return builder.toString();
++            return toHex(digest.digest(payload.getBytes(StandardCharsets.UTF_8)));
+         } catch (NoSuchAlgorithmException exception) {
+             throw new IllegalStateException("MD5 不可用", exception);
+         }
+     }
++
++    private static String hmacHex(String key, String payload) {
++        try {
++            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
++            mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), HMAC_ALGORITHM));
++            return toHex(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
++        } catch (GeneralSecurityException exception) {
++            throw new IllegalStateException("HMAC-SHA256 不可用", exception);
++        }
++    }
++
++    private static String toHex(byte[] bytes) {
++        char[] chars = new char[bytes.length * 2];
++        for (int i = 0; i < bytes.length; i++) {
++            int value = bytes[i] & 0xFF;
++            chars[i * 2] = HEX_DIGITS[value >>> 4];
++            chars[i * 2 + 1] = HEX_DIGITS[value & 0x0F];
++        }
++        return new String(chars);
++    }
++
++    private static boolean isBlank(String value) {
++        return value == null || value.isBlank();
++    }
+ }
+diff --git a/src/main/resources/application.yml b/src/main/resources/application.yml
+index 22cc6f4..a6d0fb6 100644
+--- a/src/main/resources/application.yml
++++ b/src/main/resources/application.yml
+@@ -3,9 +3,14 @@ server:
+ 
+ renewal:
+   callback:
+-    # 基准任务 R3（风险改造）会要求把密钥移到配置/环境变量，
+-    # 当前实现把它硬编码在 SignatureVerifier 里，是待改造的安全问题。
+-    secret: dev-secret-do-not-use-in-prod
++    # 新协议 HMAC-SHA256 密钥；生产通过 RENEWAL_CALLBACK_SECRET 注入。
++    secret: ${RENEWAL_CALLBACK_SECRET:dev-secret-do-not-use-in-prod}
++    # 旧协议 MD5 密钥；过渡期默认保持现网可用，生产通过 RENEWAL_CALLBACK_LEGACY_SECRET 注入。
++    legacy-secret: ${RENEWAL_CALLBACK_LEGACY_SECRET:dev-secret-do-not-use-in-prod}
++    # 旧协议过渡开关：false 时立即拒绝所有 32 位 MD5 旧签名。
++    legacy-enabled: ${RENEWAL_CALLBACK_LEGACY_ENABLED:true}
++    # 新协议时间戳容差（秒）：服务器时间与时间戳绝对差超过该值即拒绝。
++    timestamp-tolerance-seconds: ${RENEWAL_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS:300}
+   timezone: Asia/Shanghai
+ 
+ logging:
+diff --git a/src/test/java/com/acme/member/renewal/RenewalCallbackHttpTest.java b/src/test/java/com/acme/member/renewal/RenewalCallbackHttpTest.java
+new file mode 100644
+index 0000000..c83ece9
+--- /dev/null
++++ b/src/test/java/com/acme/member/renewal/RenewalCallbackHttpTest.java
+@@ -0,0 +1,170 @@
++package com.acme.member.renewal;
++
++import com.acme.member.member.Member;
++import com.acme.member.member.MemberRepository;
++import com.acme.member.member.MemberService;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.springframework.http.ResponseEntity;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDateTime;
++import java.time.ZoneId;
++import java.util.Map;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertNull;
++
++/**
++ * 控制器 HTTP 契约：可选 timestamp、旧报文兼容、401/404/200 映射与响应不泄密。
++ *
++ * <p>直接调用控制器，不启动 Spring；固定服务器时间 2025-12-01T00:00:00Z。
++ */
++class RenewalCallbackHttpTest {
++
++    private static final Clock FIXED_CLOCK =
++            Clock.fixed(Instant.parse("2025-12-01T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
++    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
++    private static final long NOW = 1764547200L;
++    private static final long TOLERANCE = 300L;
++    private static final String SECRET = "test-secret-A";
++    private static final String LEGACY_SECRET = "dev-secret-do-not-use-in-prod";
++
++    private MemberRepository memberRepository;
++    private MemberService memberService;
++    private RenewalRepository renewalRepository;
++    private SignatureVerifier signatureVerifier;
++    private RenewalController controller;
++    private Member member;
++
++    @BeforeEach
++    void setUp() {
++        memberRepository = new MemberRepository();
++        renewalRepository = new RenewalRepository();
++        memberService = new MemberService(memberRepository, FIXED_CLOCK, ZONE);
++        signatureVerifier = new SignatureVerifier(FIXED_CLOCK, SECRET, LEGACY_SECRET, true, TOLERANCE);
++        RenewalService renewalService =
++                new RenewalService(renewalRepository, memberService, signatureVerifier, FIXED_CLOCK, ZONE);
++        controller = new RenewalController(renewalService, renewalRepository);
++        member = memberService.register("张伟", "13800138000", LocalDateTime.parse("2026-01-15T00:00:00"));
++    }
++
++    @Test
++    void acceptsValidV2Callback() {
++        ResponseEntity<Map<String, Object>> response = controller.callback(v2Request("TXN-100", 9900L, NOW));
++
++        assertEquals(200, response.getStatusCode().value());
++        assertEquals(0, response.getBody().get("code"));
++        assertEquals(Boolean.FALSE, response.getBody().get("duplicate"));
++        assertEquals(1, renewalRepository.count());
++    }
++
++    @Test
++    void rejectsTamperedAmount() {
++        String signature = signatureVerifier.signV2("TXN-100", 9900L, NOW);
++        RenewalController.CallbackRequest tampered = new RenewalController.CallbackRequest(
++                "TXN-100", member.getId(), 1, 9901L, signature, NOW);
++
++        ResponseEntity<Map<String, Object>> response = controller.callback(tampered);
++
++        assertEquals(401, response.getStatusCode().value());
++        assertEquals(401, response.getBody().get("code"));
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void rejectsV2CallbackWithoutTimestamp() {
++        String signature = signatureVerifier.signV2("TXN-100", 9900L, NOW);
++        RenewalController.CallbackRequest request = new RenewalController.CallbackRequest(
++                "TXN-100", member.getId(), 1, 9900L, signature, null);
++
++        ResponseEntity<Map<String, Object>> response = controller.callback(request);
++
++        assertEquals(401, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void acceptsLegacyMd5CallbackDuringTransition() {
++        RenewalController.CallbackRequest legacy = new RenewalController.CallbackRequest(
++                "TXN-LEGACY", member.getId(), 1, 9900L, signatureVerifier.sign("TXN-LEGACY", 9900L));
++
++        ResponseEntity<Map<String, Object>> response = controller.callback(legacy);
++
++        assertEquals(200, response.getStatusCode().value());
++        assertEquals(1, renewalRepository.count());
++    }
++
++    @Test
++    void unknownMemberReturns404ForValidLegacySignature() {
++        RenewalController.CallbackRequest request = new RenewalController.CallbackRequest(
++                "TXN-MISSING", "no-such-member", 1, 9900L, signatureVerifier.sign("TXN-MISSING", 9900L));
++
++        ResponseEntity<Map<String, Object>> response = controller.callback(request);
++
++        assertEquals(404, response.getStatusCode().value());
++        assertEquals(404, response.getBody().get("code"));
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void responseDoesNotLeakSecret() {
++        ResponseEntity<Map<String, Object>> response = controller.callback(v2Request("TXN-100", 9900L, NOW));
++        String body = String.valueOf(response.getBody());
++
++        assertFalse(body.contains(SECRET));
++        assertFalse(body.contains(LEGACY_SECRET));
++        assertFalse(body.toLowerCase().contains("secret"));
++    }
++
++    @Test
++    void legacyFiveFieldJsonStillDeserializes() throws Exception {
++        String legacySignature = signLegacy("TXN-JSON-LEGACY", 9900L);
++        String json = "{"
++                + "\"externalTxnId\":\"TXN-JSON-LEGACY\","
++                + "\"memberId\":\"" + member.getId() + "\","
++                + "\"months\":1,"
++                + "\"amountCents\":9900,"
++                + "\"signature\":\"" + legacySignature + "\""
++                + "}";
++
++        RenewalController.CallbackRequest request =
++                new ObjectMapper().readValue(json, RenewalController.CallbackRequest.class);
++
++        assertNull(request.timestamp());
++        assertEquals(200, controller.callback(request).getStatusCode().value());
++    }
++
++    @Test
++    void v2JsonWithTimestampDeserializes() throws Exception {
++        String signature = signatureVerifier.signV2("TXN-JSON-V2", 9900L, NOW);
++        String json = "{"
++                + "\"externalTxnId\":\"TXN-JSON-V2\","
++                + "\"memberId\":\"" + member.getId() + "\","
++                + "\"months\":1,"
++                + "\"amountCents\":9900,"
++                + "\"signature\":\"" + signature + "\","
++                + "\"timestamp\":" + NOW
++                + "}";
++
++        RenewalController.CallbackRequest request =
++                new ObjectMapper().readValue(json, RenewalController.CallbackRequest.class);
++
++        assertEquals(NOW, request.timestamp());
++        assertEquals(200, controller.callback(request).getStatusCode().value());
++    }
++
++    private RenewalController.CallbackRequest v2Request(String externalTxnId, long amountCents, long timestamp) {
++        String signature = signatureVerifier.signV2(externalTxnId, amountCents, timestamp);
++        return new RenewalController.CallbackRequest(
++                externalTxnId, member.getId(), 1, amountCents, signature, timestamp);
++    }
++
++    private static String signLegacy(String externalTxnId, long amountCents) {
++        return new SignatureVerifier(FIXED_CLOCK, SECRET, LEGACY_SECRET, true, TOLERANCE)
++                .sign(externalTxnId, amountCents);
++    }
++}
+diff --git a/src/test/java/com/acme/member/renewal/RenewalCallbackTimestampTest.java b/src/test/java/com/acme/member/renewal/RenewalCallbackTimestampTest.java
+new file mode 100644
+index 0000000..5485ae8
+--- /dev/null
++++ b/src/test/java/com/acme/member/renewal/RenewalCallbackTimestampTest.java
+@@ -0,0 +1,113 @@
++package com.acme.member.renewal;
++
++import com.acme.member.member.Member;
++import com.acme.member.member.MemberRepository;
++import com.acme.member.member.MemberService;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDateTime;
++import java.time.ZoneId;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * 服务层时间戳透传与幂等契约。
++ *
++ * <p>固定服务器时间 2025-12-01T00:00:00Z（epoch 1764547200），容差 300 秒；
++ * 验签器使用 {@code test-secret-A}，覆盖 R2.S1/R2.S2/R2.S3 与 R5.S2。
++ */
++class RenewalCallbackTimestampTest {
++
++    private static final Clock FIXED_CLOCK =
++            Clock.fixed(Instant.parse("2025-12-01T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
++    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
++    private static final long NOW = 1764547200L;
++    private static final long TOLERANCE = 300L;
++    private static final String SECRET = "test-secret-A";
++    private static final String LEGACY_SECRET = "dev-secret-do-not-use-in-prod";
++
++    private MemberRepository memberRepository;
++    private MemberService memberService;
++    private RenewalRepository renewalRepository;
++    private SignatureVerifier signatureVerifier;
++    private RenewalService renewalService;
++
++    @BeforeEach
++    void setUp() {
++        memberRepository = new MemberRepository();
++        renewalRepository = new RenewalRepository();
++        memberService = new MemberService(memberRepository, FIXED_CLOCK, ZONE);
++        signatureVerifier = new SignatureVerifier(FIXED_CLOCK, SECRET, LEGACY_SECRET, true, TOLERANCE);
++        renewalService = new RenewalService(renewalRepository, memberService, signatureVerifier, FIXED_CLOCK, ZONE);
++    }
++
++    @Test
++    void rejectsTimestampOutsideTolerance() {
++        Member member = registerMember();
++
++        for (long timestamp : new long[]{NOW - TOLERANCE - 1, NOW + TOLERANCE + 1}) {
++            RenewalService.CallbackCommand command =
++                    v2Command("TXN-TS-1", member.getId(), timestamp);
++            assertThrows(RenewalService.InvalidSignatureException.class,
++                    () -> renewalService.handleCallback(command));
++        }
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void rejectsV2CallbackWithoutTimestamp() {
++        Member member = registerMember();
++        String signature = signatureVerifier.signV2("TXN-TS-2", 9900L, NOW);
++        RenewalService.CallbackCommand command = new RenewalService.CallbackCommand(
++                "TXN-TS-2", member.getId(), 1, 9900L, signature, null);
++
++        assertThrows(RenewalService.InvalidSignatureException.class,
++                () -> renewalService.handleCallback(command));
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void acceptsTimestampExactlyOnToleranceBoundary() {
++        Member member = registerMember();
++        LocalDateTime before = member.getExpireAt();
++
++        RenewalService.CallbackResult result = renewalService.handleCallback(
++                v2Command("TXN-TS-3", member.getId(), NOW - TOLERANCE));
++
++        assertFalse(result.duplicate());
++        assertEquals(1, renewalRepository.count());
++        assertTrue(memberService.getMember(member.getId()).getExpireAt().isAfter(before));
++    }
++
++    @Test
++    void duplicateV2CallbackIsIdempotent() {
++        Member member = registerMember();
++        RenewalService.CallbackCommand command = v2Command("TXN-TS-4", member.getId(), NOW);
++
++        RenewalService.CallbackResult first = renewalService.handleCallback(command);
++        LocalDateTime afterFirst = memberService.getMember(member.getId()).getExpireAt();
++        RenewalService.CallbackResult second = renewalService.handleCallback(command);
++
++        assertFalse(first.duplicate());
++        assertTrue(second.duplicate());
++        assertEquals(1, renewalRepository.count());
++        assertEquals("TXN-TS-4", second.order().getExternalTxnId());
++        assertEquals(afterFirst, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    private Member registerMember() {
++        return memberService.register("张伟", "13800138000", LocalDateTime.parse("2026-01-15T00:00:00"));
++    }
++
++    private RenewalService.CallbackCommand v2Command(String externalTxnId, String memberId, long timestamp) {
++        String signature = signatureVerifier.signV2(externalTxnId, 9900L, timestamp);
++        return new RenewalService.CallbackCommand(
++                externalTxnId, memberId, 1, 9900L, signature, timestamp);
++    }
++}
+diff --git a/src/test/java/com/acme/member/renewal/SignatureV2Test.java b/src/test/java/com/acme/member/renewal/SignatureV2Test.java
+new file mode 100644
+index 0000000..0da8626
+--- /dev/null
++++ b/src/test/java/com/acme/member/renewal/SignatureV2Test.java
+@@ -0,0 +1,142 @@
++package com.acme.member.renewal;
++
++import org.junit.jupiter.api.Test;
++
++import java.nio.charset.StandardCharsets;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.time.Clock;
++import java.time.Instant;
++import java.time.ZoneOffset;
++import java.util.Locale;
++
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * 新验签契约：HMAC-SHA256 + 时间戳 + 外部密钥 + 新旧双验。
++ *
++ * <p>固定服务器时间为 2025-12-01T00:00:00Z（epoch 1764547200），容差 300 秒。
++ * 通过包级构造注入固定时钟与 test-secret-A，不启动 Spring。
++ */
++class SignatureV2Test {
++
++    private static final String NEW_SECRET = "test-secret-A";
++    private static final String LEGACY_SECRET = "dev-secret-do-not-use-in-prod";
++    private static final long NOW = 1764547200L;
++    private static final long TOLERANCE = 300L;
++
++    private static final Clock FIXED_CLOCK =
++            Clock.fixed(Instant.parse("2025-12-01T00:00:00Z"), ZoneOffset.UTC);
++
++    private final SignatureVerifier verifier =
++            new SignatureVerifier(FIXED_CLOCK, NEW_SECRET, LEGACY_SECRET, true, TOLERANCE);
++
++    private final SignatureVerifier legacyDisabled =
++            new SignatureVerifier(FIXED_CLOCK, NEW_SECRET, LEGACY_SECRET, false, TOLERANCE);
++
++    @Test
++    void acceptsValidV2Signature() {
++        String signature = verifier.signV2("TXN-100", 9900L, NOW);
++        assertTrue(verifier.verify("TXN-100", 9900L, NOW, signature));
++    }
++
++    @Test
++    void acceptsV2SignatureWithUppercaseHex() {
++        String signature = verifier.signV2("TXN-100", 9900L, NOW);
++        String uppercaseHex = "v2:" + signature.substring(3).toUpperCase(Locale.ROOT);
++        assertTrue(verifier.verify("TXN-100", 9900L, NOW, uppercaseHex));
++    }
++
++    @Test
++    void rejectsTamperedAmount() {
++        String signature = verifier.signV2("TXN-100", 9900L, NOW);
++        assertFalse(verifier.verify("TXN-100", 9901L, NOW, signature));
++    }
++
++    @Test
++    void rejectsTamperedTransactionId() {
++        String signature = verifier.signV2("TXN-100", 9900L, NOW);
++        assertFalse(verifier.verify("TXN-101", 9900L, NOW, signature));
++    }
++
++    @Test
++    void rejectsTimestampOutsideTolerance() {
++        long tooEarly = NOW - TOLERANCE - 1;
++        long tooLate = NOW + TOLERANCE + 1;
++        assertFalse(verifier.verify("TXN-100", 9900L, tooEarly,
++                verifier.signV2("TXN-100", 9900L, tooEarly)));
++        assertFalse(verifier.verify("TXN-100", 9900L, tooLate,
++                verifier.signV2("TXN-100", 9900L, tooLate)));
++    }
++
++    @Test
++    void acceptsTimestampExactlyOnToleranceBoundary() {
++        long earliest = NOW - TOLERANCE;
++        long latest = NOW + TOLERANCE;
++        assertTrue(verifier.verify("TXN-100", 9900L, earliest,
++                verifier.signV2("TXN-100", 9900L, earliest)));
++        assertTrue(verifier.verify("TXN-100", 9900L, latest,
++                verifier.signV2("TXN-100", 9900L, latest)));
++    }
++
++    @Test
++    void rejectsMissingTimestampForV2Signature() {
++        String signature = verifier.signV2("TXN-100", 9900L, NOW);
++        assertFalse(verifier.verify("TXN-100", 9900L, null, signature));
++    }
++
++    @Test
++    void rejectsBlankSignature() {
++        assertFalse(verifier.verify("TXN-100", 9900L, NOW, null));
++        assertFalse(verifier.verify("TXN-100", 9900L, NOW, ""));
++        assertFalse(verifier.verify("TXN-100", 9900L, NOW, "   "));
++        assertFalse(verifier.verify("TXN-100", 9900L, null));
++    }
++
++    @Test
++    void acceptsLegacyMd5WhileTransitionEnabled() {
++        String legacySignature = signLegacy("TXN-100", 9900L);
++        assertTrue(verifier.verify("TXN-100", 9900L, legacySignature));
++        assertTrue(verifier.verify("TXN-100", 9900L, legacySignature.toUpperCase(Locale.ROOT)));
++    }
++
++    @Test
++    void rejectsLegacyMd5WhenTransitionDisabled() {
++        String legacySignature = signLegacy("TXN-100", 9900L);
++        assertFalse(legacyDisabled.verify("TXN-100", 9900L, legacySignature));
++    }
++
++    @Test
++    void configuredSecretReplacesHardcodedKey() {
++        // 用当前开发密钥（旧硬编码值）生成的 v2 签名，在 test-secret-A 下必须失败。
++        SignatureVerifier withOldSecret =
++                new SignatureVerifier(FIXED_CLOCK, LEGACY_SECRET, LEGACY_SECRET, true, TOLERANCE);
++        String signedWithOldSecret = withOldSecret.signV2("TXN-100", 9900L, NOW);
++        assertFalse(verifier.verify("TXN-100", 9900L, NOW, signedWithOldSecret));
++        assertTrue(verifier.verify("TXN-100", 9900L, NOW,
++                verifier.signV2("TXN-100", 9900L, NOW)));
++    }
++
++    @Test
++    void legacyEntryPointDoesNotAcceptV2Signature() {
++        String v2Signature = verifier.signV2("TXN-100", 9900L, NOW);
++        assertFalse(verifier.verify("TXN-100", 9900L, v2Signature));
++    }
++
++    private static String signLegacy(String externalTxnId, long amountCents) {
++        String payload = externalTxnId + ":" + amountCents + ":" + LEGACY_SECRET;
++        try {
++            byte[] hashed = MessageDigest.getInstance("MD5")
++                    .digest(payload.getBytes(StandardCharsets.UTF_8));
++            StringBuilder builder = new StringBuilder(hashed.length * 2);
++            for (byte value : hashed) {
++                builder.append(Character.forDigit((value >> 4) & 0xF, 16));
++                builder.append(Character.forDigit(value & 0xF, 16));
++            }
++            return builder.toString();
++        } catch (NoSuchAlgorithmException exception) {
++            throw new IllegalStateException("MD5 不可用", exception);
++        }
++    }
++}

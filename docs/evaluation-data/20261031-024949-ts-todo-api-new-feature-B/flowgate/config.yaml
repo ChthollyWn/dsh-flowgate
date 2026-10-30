@@ -1,0 +1,67 @@
+levels:
+  complexity: auto
+  risk: auto
+learning: detail
+dispatch: inline
+commands:
+  test: pnpm test
+  run: pnpm start
+limits:
+  task_max_files: 5
+  change_max_tasks: 12
+  clarify_max_rounds: 4
+  turn_continue_max: 2
+  test_output_summary_tokens: 400
+  context_warn_ratio: 0.6
+  token_budget:
+    low: 200000
+    medium: 600000
+    high: 1200000
+    ultra: 2000000
+parallel:
+  max_agents: 3
+  setup: null
+  hotspots_extra: []
+session:
+  lease_minutes: 10
+git:
+  change_branch: true
+  auto_commit: true
+  commit_flowgate: false
+review:
+  enabled: false
+  model: null
+  requireForTaskGate: true
+ignore: []
+rules: []
+triggers:
+  sensitive_paths:
+    - "**/auth/**"
+    - "**/security/**"
+    - "**/payment*/**"
+    - "**/migration*/**"
+    - "**/*.sql"
+    - "**/db/changelog/**"
+    - Dockerfile
+    - .github/workflows/**
+    - "**/k8s/**"
+    - "**/application-prod*.*"
+  sensitive_paths_extra: []
+  dependency_files:
+    - package.json
+    - pom.xml
+    - build.gradle*
+    - requirements*.txt
+    - pyproject.toml
+    - go.mod
+    - Cargo.toml
+  protected_paths:
+    - .flowgate/**
+    - .git/**
+    - "**/*.pem"
+    - "**/*.key"
+    - .env
+    - .env.*
+  secret_patterns: builtin
+  max_scope_new_files: 3
+  consecutive_failure_limit: 3

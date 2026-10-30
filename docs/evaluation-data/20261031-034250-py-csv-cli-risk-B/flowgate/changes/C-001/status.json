@@ -1,0 +1,370 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "导出 CSV 手机号脱敏",
+  "summary": "合规要求：export 子命令导出的 CSV 中不得出现用户手机号原值，需按统一规则脱敏；同时保证日志/标准输出不泄露原值，stats 等既有功能不变。",
+  "complexity": "low",
+  "risk": "high",
+  "stage": "S4",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-FMwcSK/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 low · 风险 high"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T03:43:07+08:00",
+      "passedAt": "2026-10-31T03:43:07+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 6,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不修改 `stats`、`read_rows` 的 UTF-8/GBK/BOM 行为（属 R2 范围）。；不实现 CSV 去重（属 R1 范围）。；不提供 `--no-mask` 等关闭脱敏的开关。；不清洗源文件、数据库或历史导出物。；不引入任何第三方运行时依赖。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 6 个 · 场景 8 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T03:45:33+08:00",
+      "approvedAt": "2026-10-31T03:54:04+08:00"
+    },
+    "G2": {
+      "state": "passed",
+      "attempts": 3,
+      "items": [
+        {
+          "item": "g2.projectCommands",
+          "label": "project.md 命令可执行",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "test: pytest -q"
+          ]
+        },
+        {
+          "item": "g2.baseline",
+          "label": "基线已记录",
+          "passed": false,
+          "hint": "测试输出未能解析出测试数量：检查测试命令是否输出摘要，或使用插件识别的工具链。",
+          "priority": "P0",
+          "details": [
+            "pytest -q"
+          ]
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T03:46:28+08:00",
+      "passedAt": "2026-10-31T03:52:02+08:00"
+    },
+    "G3": {
+      "state": "passed",
+      "attempts": 4,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不修改 `stats`、`read_rows` 的 UTF-8/GBK/BOM 行为（属 R2 范围）。；不实现 CSV 去重（属 R1 范围）。；不提供 `--no-mask` 等关闭脱敏的开关。；不清洗源文件、数据库或历史导出物。；不引入任何第三方运行时依赖。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 6 个 · 场景 8 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        },
+        {
+          "item": "g3.taskCards",
+          "label": "任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 2 个"
+          ]
+        },
+        {
+          "item": "g3.traceability",
+          "label": "追溯矩阵无未覆盖场景",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "场景 8 个全部有归属"
+          ]
+        },
+        {
+          "item": "g3.taskCount",
+          "label": "任务数不超过上限",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 2 个"
+          ]
+        },
+        {
+          "item": "g3.newFiles",
+          "label": "new_files 落在 scope 内且不是根级通配",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.verifyCommands",
+          "label": "每个任务都有合法的验证命令",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        },
+        {
+          "item": "g3.cleanWorktree",
+          "label": "工作区没有未提交的改动",
+          "passed": true,
+          "priority": "P0"
+        }
+      ],
+      "submittedAt": "2026-10-31T03:53:59+08:00",
+      "approvedAt": "2026-10-31T03:54:04+08:00"
+    }
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "mode": "sequential",
+      "status": "pending",
+      "tasks": []
+    },
+    {
+      "id": "B2",
+      "mode": "sequential",
+      "status": "pending",
+      "tasks": []
+    }
+  ],
+  "tasks": {
+    "T1": {
+      "id": "T1",
+      "batch": "",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    },
+    "T2": {
+      "id": "T2",
+      "batch": "",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    }
+  },
+  "evidenceIds": [],
+  "pending": [
+    {
+      "id": "PC-1",
+      "kind": "plan",
+      "changeId": "C-001",
+      "title": "计划修订申请",
+      "detail": "G3 已通过并冻结，但进入 S4 后执行图是空的：status.plan.batches 的 B1/B2 都没有任务，status.tasks 里 T1/T2 的 batch 为空，导致 flow_task_start 报「当前没有可领取的任务」，无法按执行图开工。tasks.md 末尾的执行计划写的是 `batches: [[T1],[T2]]`，说明计划在解析/生成执行图时丢失了任务归属。现申请把 tasks.md 中已评审通过的两张任务卡重新纳入执行计划（T1 → B1，T2 → B2，T2 依赖 T1），不改任务范围与验收标准。",
+      "status": "open",
+      "createdAt": "2026-10-31T03:54:47+08:00",
+      "data": {
+        "add": [
+          "## T1 脱敏纯函数与单元测试\n\n### 元数据\n\n```yaml\nid: T1\ntitle: 新增 csvtool/mask.py 纯函数并配套单测\ncovers: [R2.S1, R2.S2, R3.S1, R4.S1]\nnew_files: [csvtool/mask.py, tests/test_mask.py]\nscope: [csvtool/mask.py, tests/test_mask.py]\ndepends_on: []\nverify:\n  - group: T1\n    command: PYTHONPATH=/Users/chtholly/.cache/uv/archive-v0/UUP9qNaPZUffOhCkMvzo3:/Users/chtholly/.cache/uv/archive-v0/xiVtDYdwUlpmi71RrMbq7:/Users/chtholly/.cache/uv/archive-v0/W-A2oBHBEdD0AXNqY6jGg:/Users/chtholly/.cache/uv/archive-v0/9xBDdMA5Ri8YskBwqADX4:/Users/chtholly/.cache/uv/archive-v0/5Cerk31vjD-4n9XmmQfDy python3 -m pytest tests/test_mask.py -o addopts=\n    inputs: [csvtool/mask.py, tests/test_mask.py]\n```\n\n### 实现要点\n\n- `normalize_header` / `is_phone_header`：去 BOM、trim、lower、删空格/下划线/连字符；命中 `phone`、`mobile`、`tel`、`telephone`、`手机号`、`手机`、`电话`、`联系电话`。\n- `mask_cell(value, is_phone_column)`：空值原样、含 `*` 原样、剥离 `+86`/`0086`、取数字、`<7` 位原样、兜底严格 11 位 `1[3-9]`、输出前 3 + `****` + 后 4；带国家码输出 `+86 ` 前缀。\n- `mask_rows(rows)`：表头原样保留；按列掩码逐行处理；短行不越界、长行多余列走兜底；返回新列表，不修改入参。\n- 纯函数：无 `print`、无 `logging`、无 I/O、无第三方 import。\n\n### 完成标准\n\n- `tests/test_mask.py` 覆盖：8 个表头变体、BOM 表头、空/空白、含 `*`、`+86`/`0086`/空格/短横线、`<7` 位、10 位座机、`12345678901`、`id=1`/邮箱、表头保留、短行/长行、二次导出幂等。\n- `flow_verify(\"T1\")` 产出 GREEN 回执（run>0, failed=0）。\n- 改动仅限 `csvtool/mask.py`、`tests/test_mask.py`。",
+          "## T2 导出接入、CLI 文案与回归\n\n### 元数据\n\n```yaml\nid: T2\ntitle: export_rows 接入脱敏，翻转旧 CLI 契约并更新文档\ncovers: [R1.S1, R1.S2, R3.S1, R5.S1, R6.S1]\nnew_files: []\nscope: [csvtool/export.py, csvtool/cli.py, tests/test_cli.py, README.md]\ndepends_on: [T1]\nverify:\n  - group: T2\n    command: PYTHONPATH=/Users/chtholly/.cache/uv/archive-v0/UUP9qNaPZUffOhCkMvzo3:/Users/chtholly/.cache/uv/archive-v0/xiVtDYdwUlpmi71RrMbq7:/Users/chtholly/.cache/uv/archive-v0/W-A2oBHBEdD0AXNqY6jGg:/Users/chtholly/.cache/uv/archive-v0/9xBDdMA5Ri8YskBwqADX4:/Users/chtholly/.cache/uv/archive-v0/5Cerk31vjD-4n9XmmQfDy python3 -m pytest -o addopts=\n    inputs: [csvtool/**, tests/**, README.md]\n```\n\n### 实现要点\n\n- `export_rows`：`return mask_rows(read_rows(path))`；`export` 签名与返回语义不变。\n- `cli.py`：仅把 `export` help 从\"当前不脱敏\"改为\"导出 CSV（手机号默认脱敏）\"，参数与流程不动。\n- `tests/test_cli.py`：翻转 `test_export_to_stdout_keeps_original_phone` 为脱敏断言；新增 stdout 与 `--out` 逐字符一致、输出不含原值、help 不含\"不脱敏\"。\n- `README.md`：说明 `export` 默认脱敏、规则、不可关闭、`read_rows`/`stats` 不变。\n\n### 完成标准\n\n- `python3 -m csvtool export data/members.csv` 含 `138****8000`、`139****5678`、`150****1111`，不含 3 个原值。\n- 省略 `--out` 与指定 `--out` 的内容逐字符相同。\n- `read_rows(data/members.csv)[1][2] == \"13800138000\"`；`stats` 的 `rows=4`、`columns` 不变。\n- `flow_verify(\"T2\")` 产出 GREEN 回执（run>0, failed=0）。\n- 改动仅限 `csvtool/export.py`、`csvtool/cli.py`、`tests/test_cli.py`、`README.md`；`csvtool/csvio.py`、`csvtool/stats.py` 零 diff。"
+        ],
+        "reorder": []
+      }
+    }
+  ],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T03:43:07+08:00",
+  "updatedAt": "2026-10-31T03:56:19+08:00",
+  "clarifyRounds": 0,
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T03:43:07+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T03:56:19+08:00"
+  },
+  "baseline": {
+    "commit": "6928a28bc854e478c6c2f881182f8b8eb2534f11",
+    "summary": {
+      "parser": "pytest-console",
+      "parsed": true,
+      "run": 13,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recordedAt": "2026-10-31T03:51:56+08:00",
+    "receiptId": "E-0015"
+  },
+  "plan": {
+    "batches": [
+      {
+        "batch": "B1",
+        "mode": "sequential",
+        "tasks": [],
+        "why": ""
+      },
+      {
+        "batch": "B2",
+        "mode": "sequential",
+        "tasks": [],
+        "why": ""
+      }
+    ]
+  },
+  "branch": "flowgate/C-001"
+}

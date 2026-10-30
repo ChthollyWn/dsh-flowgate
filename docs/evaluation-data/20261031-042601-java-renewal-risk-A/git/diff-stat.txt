@@ -1,0 +1,5 @@
+ .../com/acme/member/renewal/RenewalController.java |  18 +-
+ .../com/acme/member/renewal/RenewalService.java    |  22 +-
+ .../com/acme/member/renewal/SignatureVerifier.java | 312 ++++++++++++++++++++-
+ src/main/resources/application.yml                 |  11 +-
+ 4 files changed, 340 insertions(+), 23 deletions(-)

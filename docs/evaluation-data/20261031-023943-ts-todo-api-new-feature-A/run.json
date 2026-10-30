@@ -1,0 +1,144 @@
+{
+  "runId": "20261031-023943-ts-todo-api-new-feature-A",
+  "startedAt": "2026-10-30T18:39:43.197Z",
+  "finishedAt": "2026-10-30T18:49:49.422Z",
+  "durationMs": 606225,
+  "status": "completed",
+  "error": null,
+  "repo": "ts-todo-api",
+  "repoPath": "examples/ts-todo-api",
+  "stack": "Node.js ≥ 22 / node:http / node:test",
+  "task": "new-feature",
+  "taskLabel": "R1 把待办分享给他人",
+  "prompt": "待办列表想加个分享功能，能把一条待办分享给别人一起看。",
+  "condition": "A",
+  "conditionLabel": "DSH 标准模式",
+  "dsh": {
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+    "profile": "eval-standard",
+    "isolatedDshHome": true,
+    "keySource": "DEEPSEEK_API_KEY 环境变量（未落盘）"
+  },
+  "environment": {
+    "node": "v23.11.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "workspace": {
+    "baselineCommit": "f1f4d1862d434284390f979724bd1ab11bb10175",
+    "readmeSanitized": true,
+    "readmeHiddenSectionsRemoved": 17,
+    "copiedWithSkips": {
+      "skippedEntries": 1
+    },
+    "kept": false
+  },
+  "flowgate": {
+    "root": "/Users/chtholly/Developer/WorkSpace/dsh-flowgate",
+    "initialized": false,
+    "pluginLoaded": false,
+    "pluginInstallSteps": [
+      {
+        "step": "create-profile",
+        "command": "dsh --profile eval-standard --from-default-profile headless --help",
+        "exitCode": 0,
+        "timedOut": false,
+        "stderrTail": ""
+      },
+      {
+        "step": "dump-config",
+        "command": "dsh --profile eval-standard --dump-config",
+        "exitCode": 0,
+        "timedOut": false
+      }
+    ],
+    "configOverrides": null
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "durationMs": 605086,
+      "exitCode": 0,
+      "timedOut": false,
+      "sessionId": "session-c2f2e2e2-a375-4a81-85ee-d2825aa2657f",
+      "events": {
+        "session": 1,
+        "status": 250,
+        "thinking": 124,
+        "tool_call": 138,
+        "tool_result": 138,
+        "text": 1,
+        "final": 1
+      },
+      "stdoutFile": "rounds/round-1.stdout.jsonl",
+      "stderrFile": "rounds/round-1.stderr.log",
+      "finalTextTail": "分享功能已实现，核心是“只读分享”：一条待办可以分享给已有用户，对方可以查看，但不能修改或删除。\n\n### 主要改动\n\n- 新增 `src/sharing/shares.js`\n  - `ShareStore`：分享记录、只读 token、撤销、访问判断\n  - `presentShare`：返回分享信息，但不泄露 `passwordHash`\n\n- 扩展 `src/server.js`\n  - `POST /todos/:id/share`：分享给指定用户，支持 `sharedWith` / `sharedWithId` / `userId` / 邮箱\n  - `GET /todos/:id/share(s)`：查看分享记录\n  - `DELETE /todos/:id/share(s)/:shareId`：按分享 ID 或用户 ID 撤销\n  - `GET /todos/:id?viewerId=user-2`：被分享者查看，未授权返回 403\n  - `GET /todos?viewerId=user-2`：返回自己拥有的 + 分享给自己的待办\n  - `GET /todos?sharedWith=user-2`：只返回分享给该用户的待办\n  - `GET /shares/:token`：通过只读分享链接查看，无需登录\n  - 分享/修改/删除支持通过 `actorId`、`X-User-Id` 等声明操作人；不传时保持原有匿名行为\n\n- 新增 `test/sharing.test.js`\n  - 覆盖分享、重复分享幂等、邮箱查找、权限、链接查看、列表过滤、撤销、只读限制等 23 个用例\n\n- 更新 `package.json` 的测试脚本，并补充 README 接口说明\n\n### 验证说明\n\n运行环境当前的 sandbox 后端不可用（`sandbox-exec: sandbox_apply: Operation not permitted`），因此 `pnpm test` 无法实际执行。已做静态审查：未发现语法错误，新增测试与实现逻辑一致；同时保留现有匿名 PATCH/DELETE 与默认列表行为。"
+    }
+  ],
+  "ownerActions": [],
+  "artifacts": {
+    "metricsSets": 0,
+    "reports": [],
+    "flowgateFiles": [],
+    "archive": [],
+    "flowgateUnexpected": false,
+    "git": {
+      "baselineCommit": "f1f4d1862d434284390f979724bd1ab11bb10175",
+      "statusEntries": 5,
+      "changedFiles": 3,
+      "changedFileList": [
+        "README.md",
+        "package.json",
+        "src/server.js"
+      ],
+      "insertions": 312,
+      "deletions": 10,
+      "untrackedFiles": 2,
+      "untrackedFileList": [
+        "src/sharing/shares.js",
+        "test/sharing.test.js"
+      ],
+      "commitsSinceBaseline": 0,
+      "patchSaved": true,
+      "patchBytes": 19808,
+      "files": {
+        "status": "git/status.txt",
+        "diffStat": "git/diff-stat.txt",
+        "diffNumstat": "git/diff-numstat.txt",
+        "untracked": "git/untracked.txt",
+        "log": "git/log.txt"
+      }
+    }
+  },
+  "verification": {
+    "generatedAt": "2026-10-30T18:49:49.371Z",
+    "repo": "ts-todo-api",
+    "task": "new-feature",
+    "condition": "A",
+    "rounds": 1,
+    "skipped": false,
+    "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+    "results": [
+      {
+        "kind": "regression",
+        "label": "默认测试套件（回归，基线 34/34）",
+        "command": "pnpm test",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 578,
+        "expected": "green",
+        "parsed": {
+          "tests": 57,
+          "failures": 0,
+          "errors": 0,
+          "passed": 57,
+          "verdict": "green"
+        },
+        "status": "green",
+        "outputTail": "✔ 分页参数 (2.190666ms)\n▶ 排序\n  ✔ 按 createdAt 倒序 (6.443875ms)\n  ✔ 不修改原数组 (0.171208ms)\n✔ 排序 (6.741083ms)\n▶ 分页结果\n  ✔ 第 1 页返回前 pageSize 条与总数 (0.218167ms)\n  ✔ 第 2 页与第 1 页不重叠 (0.239459ms)\n  ✔ 总数小于一页时 hasNext 为 false (0.120709ms)\n  ✔ 空列表返回空页且 total 为 0 (0.11375ms)\n  ✔ paginate 返回数组（兼容旧调用） (0.166917ms)\n✔ 分页结果 (1.001167ms)\n▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.673292ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.061875ms)\n  ✔ 完成率四舍五入到两位 (0.046834ms)\n  ✔ 完成率高时标签为 great (1.006584ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (2.27025ms)\n▶ 分享待办\n  ✔ owner 分享后返回 201、分享记录与只读链接 (14.683541ms)\n  ✔ 重复分享同一用户是幂等的 (3.658333ms)\n  ✔ 支持按邮箱分享 (1.443917ms)\n  ✔ 也支持把 userId 作为请求体里的分享目标 (4.327958ms)\n  ✔ 非 owner 通过请求体 userId 声明操作人会被拒绝 (0.968792ms)\n  ✔ 分享对象不存在返回 404 (0.795666ms)\n  ✔ 缺少分享对象返回 400 (1.029417ms)\n  ✔ 不能分享给自己 (1.058209ms)\n  ✔ 非 owner 不能分享 (1.715791ms)\n  ✔ 不存在的待办不能分享 (0.4925ms)\n✔ 分享待办 (33.279458ms)\n▶ 被分享者查看\n  ✔ 被分享者可以通过 viewerId 查看，owner 仍是 owner 权限 (1.516583ms)\n  ✔ 未被分享的用户查看返回 403 (0.537917ms)\n  ✔ 不带 viewerId 时保持原有匿名查看行为 (0.515792ms)\n  ✔ 分享链接不需要登录即可查看 (0.878833ms)\n  ✔ 也可以通过 shareToken 查询参数查看 (0.784666ms)\n  ✔ viewerId 列表包含自己拥有的与被分享的待办 (6.8075ms)\n  ✔ sharedWith 列表只包含分享给该用户的待办 (0.864542ms)\n  ✔ 被分享者不能修改或删除待办 (1.966375ms)\n✔ 被分享者查看 (14.010833ms)\n▶ 撤销分享\n  ✔ owner 可以按用户撤销，撤销后链接与查看权限失效 (1.220708ms)\n  ✔ owner 可以按 shareId 撤销 (0.959209ms)\n  ✔ 非 owner 不能撤销 (0.765125ms)\n✔ 撤销分享 (3.0075ms)\n▶ ShareStore\n  ✔ 创建幂等、撤销与访问判断 (0.083541ms)\n  ✔ presentShare 只暴露公开用户字段 (0.048875ms)\n✔ ShareStore (0.169416ms)\nℹ tests 57\nℹ suites 15\nℹ pass 57\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 170.271375\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js test/sharing.test.js\n"
+      }
+    ]
+  },
+  "metrics": null,
+  "notes": []
+}

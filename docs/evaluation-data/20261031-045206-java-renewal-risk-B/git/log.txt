@@ -1,0 +1,3 @@
+aceb814 flowgate(C-001/T3): 控制器入口新增可选 timestamp 与 HTTP 行为
+11a39fb flowgate(C-001/T2): 服务层透传时间戳并保持幂等
+250b7fd flowgate(C-001/T1): 验签器双算法、时间窗与外部密钥

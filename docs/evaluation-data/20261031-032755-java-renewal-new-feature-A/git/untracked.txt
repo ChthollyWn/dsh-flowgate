@@ -1,0 +1,17 @@
+src/main/java/com/acme/member/coupon/Coupon.java
+src/main/java/com/acme/member/coupon/CouponController.java
+src/main/java/com/acme/member/coupon/CouponDefaults.java
+src/main/java/com/acme/member/coupon/CouponDemoSeeder.java
+src/main/java/com/acme/member/coupon/CouponException.java
+src/main/java/com/acme/member/coupon/CouponExpiredException.java
+src/main/java/com/acme/member/coupon/CouponNotApplicableException.java
+src/main/java/com/acme/member/coupon/CouponNotFoundException.java
+src/main/java/com/acme/member/coupon/CouponRepository.java
+src/main/java/com/acme/member/coupon/CouponService.java
+src/main/java/com/acme/member/coupon/CouponType.java
+src/main/java/com/acme/member/coupon/CouponUsageLimitException.java
+src/main/java/com/acme/member/coupon/DiscountResult.java
+src/main/java/com/acme/member/coupon/DiscountType.java
+src/main/java/com/acme/member/coupon/InvalidCouponException.java
+src/test/java/com/acme/member/coupon/CouponServiceTest.java
+src/test/java/com/acme/member/renewal/RenewalCouponTest.java

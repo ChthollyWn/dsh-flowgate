@@ -1,0 +1,336 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "升级登录密码哈希参数（PBKDF2 迭代次数）",
+  "summary": "登录密码当前使用 PBKDF2-HMAC-SHA256、100000 次迭代（src/auth/passwords.js:9），低于 OWASP 对 PBKDF2-SHA256 的 600000 次建议。目标：把默认迭代次数提升到 600000，同时保持旧哈希可登录，并在登录成功后自动迁移到新参数；不改变登录语义与错误响应。涉及 src/auth/passwords.js、可能调整 test/auth.test.js 的固定断言。",
+  "complexity": "low",
+  "risk": "high",
+  "stage": "S4",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-0vr4Td/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 low · 风险 high"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T03:00:12+08:00",
+      "passedAt": "2026-10-31T03:00:12+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 6,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不更换为 Argon2/bcrypt/scrypt，不引入任何新依赖。；不改变盐长度、派生密钥长度、哈希字符串格式与常量时间比较方式。；不修改 `/auth/login` 的协议、错误文案、权限模型，不改 `UserStore` 结构。；不做离线批量重算、不强制用户重置密码、不新增管理端迁移任务。；不改动分页、报表、通知、待办等其他模块。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 2 个 · 场景 6 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T03:01:42+08:00",
+      "approvedAt": "2026-10-31T03:03:50+08:00"
+    },
+    "G2": {
+      "state": "passed",
+      "attempts": 1,
+      "passedAt": "2026-10-31T03:02:29+08:00"
+    },
+    "G3": {
+      "state": "passed",
+      "attempts": 2,
+      "submittedAt": "2026-10-31T03:03:46+08:00",
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不更换为 Argon2/bcrypt/scrypt，不引入任何新依赖。；不改变盐长度、派生密钥长度、哈希字符串格式与常量时间比较方式。；不修改 `/auth/login` 的协议、错误文案、权限模型，不改 `UserStore` 结构。；不做离线批量重算、不强制用户重置密码、不新增管理端迁移任务。；不改动分页、报表、通知、待办等其他模块。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 2 个 · 场景 6 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        },
+        {
+          "item": "g3.taskCards",
+          "label": "任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 1 个"
+          ]
+        },
+        {
+          "item": "g3.traceability",
+          "label": "追溯矩阵无未覆盖场景",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "场景 6 个全部有归属"
+          ]
+        },
+        {
+          "item": "g3.taskCount",
+          "label": "任务数不超过上限",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 1 个"
+          ]
+        },
+        {
+          "item": "g3.newFiles",
+          "label": "new_files 落在 scope 内且不是根级通配",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.verifyCommands",
+          "label": "每个任务都有合法的验证命令",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        },
+        {
+          "item": "g3.cleanWorktree",
+          "label": "工作区没有未提交的改动",
+          "passed": true,
+          "priority": "P0"
+        }
+      ],
+      "approvedAt": "2026-10-31T03:03:50+08:00"
+    }
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "mode": "sequential",
+      "status": "running",
+      "tasks": [
+        "T1"
+      ],
+      "startedAt": "2026-10-31T03:03:53+08:00"
+    }
+  ],
+  "tasks": {
+    "T1": {
+      "id": "T1",
+      "batch": "B1",
+      "status": "interrupted",
+      "tdd": "red",
+      "evidenceIds": [
+        "E-0002",
+        "E-0003"
+      ],
+      "reviewIds": [],
+      "startedAt": "2026-10-31T03:05:12+08:00",
+      "redObserved": true,
+      "failureCount": 2,
+      "interruptedAt": "2026-10-31T03:05:54+08:00"
+    }
+  },
+  "evidenceIds": [],
+  "pending": [
+    {
+      "id": "RK-1",
+      "kind": "risk",
+      "changeId": "C-001",
+      "title": "T-SENSITIVE-PATH：src/auth/passwords.js",
+      "detail": "write src/auth/passwords.js\n目标路径位于敏感区域（鉴权、支付、迁移、基础设施、CI、生产配置）：按内置触发器转人工确认。\n解锁：让负责人在面板确认本次修改（/flow risk approve <RK-n>）；确认后只对该动作和路径单次放行。",
+      "status": "open",
+      "createdAt": "2026-10-31T03:04:09+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-SENSITIVE-PATH",
+        "actionFingerprint": "sha256:627b2f12aa35798295e61d1a036354022560409c195db57d23c2a312e2b337d7"
+      },
+      "data": {
+        "ruleId": "T-SENSITIVE-PATH",
+        "stage": "S4",
+        "target": "src/auth/passwords.js",
+        "tool": "edit"
+      }
+    }
+  ],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T03:00:12+08:00",
+  "updatedAt": "2026-10-31T03:05:54+08:00",
+  "clarifyRounds": 0,
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T03:00:12+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T03:05:54+08:00"
+  },
+  "baseline": {
+    "commit": "85bb8e4c8c7eded88b4687c3c6a24435dcfeb5e4",
+    "summary": {
+      "parser": "node-test",
+      "parsed": true,
+      "run": 34,
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 161
+    },
+    "recordedAt": "2026-10-31T03:02:29+08:00",
+    "receiptId": "E-0001"
+  },
+  "plan": {
+    "batches": [
+      {
+        "batch": "B1",
+        "mode": "sequential",
+        "tasks": [
+          "T1"
+        ],
+        "why": "只有一张任务卡；源码默认值与测试断言必须同一批次一起完成，且测试文件与源码改动存在 TDD 先后依赖，不能并行"
+      }
+    ]
+  },
+  "branch": "flowgate/C-001"
+}

@@ -1,0 +1,52 @@
+diff --git a/src/auth/passwords.js b/src/auth/passwords.js
+index a4482b1..c04c885 100644
+--- a/src/auth/passwords.js
++++ b/src/auth/passwords.js
+@@ -3,10 +3,10 @@ import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto'
+ /**
+  * 密码哈希（PBKDF2-SHA256，格式自带参数，便于以后升级迭代次数）。
+  *
+- * 基准任务 R3（风险改造）会要求把迭代次数从 100000 提到 600000，
+- * 并保证旧哈希仍能登录、登录成功后自动迁移。注意这是一个安全敏感路径。
++ * 迭代次数已从 100000 提升到 600000。哈希格式自带参数，
++ * 因此旧哈希仍可校验，并在登录成功后自动迁移到当前参数。注意这是一个安全敏感路径。
+  */
+-export const DEFAULT_ITERATIONS = 100_000
++export const DEFAULT_ITERATIONS = 600_000
+ const KEY_LENGTH = 32
+ const DIGEST = 'sha256'
+ 
+@@ -31,5 +31,9 @@ export function verifyPassword(password, stored) {
+ export function needsRehash(stored, iterations = DEFAULT_ITERATIONS) {
+   const parts = String(stored).split('$')
+   if (parts.length !== 5) return true
+-  return Number.parseInt(parts[2], 10) < iterations
++  const [scheme, digest, iterationsRaw] = parts
++  if (scheme !== 'pbkdf2' || digest !== DIGEST) return true
++  const parsed = Number.parseInt(iterationsRaw, 10)
++  if (!Number.isFinite(parsed) || parsed <= 0) return true
++  return parsed < iterations
+ }
+diff --git a/test/auth.test.js b/test/auth.test.js
+index 7060c16..c1c5bae 100644
+--- a/test/auth.test.js
++++ b/test/auth.test.js
+@@ -33,11 +33,17 @@ async function login(body) {
+ describe('密码哈希', () => {
+   test('哈希格式包含参数，可校验', () => {
+     const stored = hashPassword('secret', { salt: 'fixed-salt' })
+-    assert.match(stored, /^pbkdf2\$sha256\$100000\$fixed-salt\$/)
++    assert.match(stored, /^pbkdf2\$sha256\$600000\$fixed-salt\$/)
+     assert.equal(verifyPassword('secret', stored), true)
+     assert.equal(verifyPassword('wrong', stored), false)
+   })
+ 
++  test('旧 100000 次迭代哈希仍可校验，并会被标记为需要迁移', () => {
++    const legacy = hashPassword('secret', { iterations: 100_000, salt: 'legacy-salt' })
++    assert.equal(verifyPassword('secret', legacy), true)
++    assert.equal(needsRehash(legacy), true)
++  })
++
+   test('篡改或格式错误的哈希校验失败', () => {
+     assert.equal(verifyPassword('secret', 'not-a-hash'), false)
+     assert.equal(verifyPassword('secret', 'pbkdf2$sha256$100000$salt$dGFtcGVy'), false)

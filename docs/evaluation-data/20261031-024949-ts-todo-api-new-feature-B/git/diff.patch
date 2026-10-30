@@ -1,0 +1,506 @@
+diff --git a/src/server.js b/src/server.js
+index 1735fd1..bb00f31 100644
+--- a/src/server.js
++++ b/src/server.js
+@@ -1,6 +1,7 @@
+ import http from 'node:http'
+ import { pathToFileURL } from 'node:url'
+ import { TodoStore } from './store.js'
++import { ShareStore } from './shares.js'
+ import { buildPage } from './pagination.js'
+ import { summary } from './reports/legacy-summary.js'
+ import { dueReminders } from './notifications/reminders.js'
+@@ -56,6 +57,7 @@ function validateTodoInput(body) {
+  * `node src/server.js` 启动演示服务。
+  */
+ export function createApp(store = new TodoStore(), users = seedUsers()) {
++  const shares = store.shares ?? new ShareStore()
+   return async function handler(req, res) {
+     try {
+       const url = new URL(req.url, 'http://localhost')
+@@ -115,6 +117,63 @@ export function createApp(store = new TodoStore(), users = seedUsers()) {
+         }
+       }
+ 
++      if (parts[0] === 'todos' && parts[2] === 'shares' && parts.length === 3) {
++        if (req.method === 'POST' || req.method === 'GET') {
++          const todo = store.get(parts[1])
++          if (!todo) return send(res, 404, { error: '待办不存在', hint: '确认 id 是否正确' })
++
++          let ownerId
++          if (req.method === 'POST') {
++            const body = await readJson(req)
++            ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : ''
++          } else {
++            ownerId = (url.searchParams.get('ownerId') ?? '').trim()
++          }
++          if (!ownerId) return send(res, 400, { error: 'ownerId 不能为空', hint: '传入创建者 id，例如 user-1' })
++          if (ownerId !== todo.ownerId) {
++            return send(res, 403, { error: '无权管理该待办的分享', hint: '只有待办创建者可以创建、查看或撤销分享' })
++          }
++
++          if (req.method === 'POST') return send(res, 201, { share: shares.create(todo.id) })
++          return send(res, 200, { shares: shares.listByTodo(todo.id) })
++        }
++      }
++
++      if (parts[0] === 'todos' && parts[2] === 'shares' && parts.length === 4 && req.method === 'DELETE') {
++        const todo = store.get(parts[1])
++        if (!todo) return send(res, 404, { error: '待办不存在', hint: '确认 id 是否正确' })
++
++        const ownerId = (url.searchParams.get('ownerId') ?? '').trim()
++        if (!ownerId) return send(res, 400, { error: 'ownerId 不能为空', hint: '传入创建者 id，例如 user-1' })
++        if (ownerId !== todo.ownerId) {
++          return send(res, 403, { error: '无权管理该待办的分享', hint: '只有待办创建者可以创建、查看或撤销分享' })
++        }
++
++        if (!shares.revoke(todo.id, parts[3])) {
++          return send(res, 404, { error: '分享不存在或已失效', hint: '确认链接是否完整或该分享已被撤销' })
++        }
++        res.writeHead(204).end()
++        return
++      }
++
++      if (parts[0] === 'shared' && parts.length === 2 && req.method === 'GET') {
++        // 匿名只读视图：显式白名单字段，绝不泄露 ownerId。
++        const share = shares.get(parts[1])
++        const todo = share ? store.get(share.todoId) : undefined
++        if (!share || !todo) {
++          return send(res, 404, { error: '分享不存在或已失效', hint: '确认链接是否完整或该分享已被撤销' })
++        }
++        return send(res, 200, {
++          todo: {
++            id: todo.id,
++            title: todo.title,
++            completed: todo.completed,
++            createdAt: todo.createdAt,
++            updatedAt: todo.updatedAt,
++          },
++        })
++      }
++
+       if (req.method === 'GET' && url.pathname === '/reports/summary') {
+         return send(res, 200, summary(store.list({ ownerId: url.searchParams.get('ownerId') ?? undefined })))
+       }
+diff --git a/src/shares.js b/src/shares.js
+new file mode 100644
+index 0000000..4457c2f
+--- /dev/null
++++ b/src/shares.js
+@@ -0,0 +1,73 @@
++import { randomBytes } from 'node:crypto'
++
++const TOKEN_BYTES = 24
++
++/**
++ * 分享存储。主索引 token → 记录，次索引 todoId → token 集合，
++ * 两者必须同步增删，保证按 token 查询与按待办级联撤销都是常数/线性开销。
++ */
++export class ShareStore {
++  constructor({ now = () => new Date().toISOString() } = {}) {
++    this.now = now
++    this.byToken = new Map()
++    this.byTodo = new Map()
++  }
++
++  /** 创建分享；token 冲突时重抽，保证全局唯一。 */
++  create(todoId) {
++    let token = randomBytes(TOKEN_BYTES).toString('base64url')
++    while (this.byToken.has(token)) {
++      token = randomBytes(TOKEN_BYTES).toString('base64url')
++    }
++    const share = { token, todoId, createdAt: this.now() }
++    this.byToken.set(token, share)
++    let tokens = this.byTodo.get(todoId)
++    if (!tokens) {
++      tokens = new Set()
++      this.byTodo.set(todoId, tokens)
++    }
++    tokens.add(token)
++    return share
++  }
++
++  get(token) {
++    return this.byToken.get(token)
++  }
++
++  /** 仅返回未撤销的分享，按创建顺序。 */
++  listByTodo(todoId) {
++    const tokens = this.byTodo.get(todoId)
++    if (!tokens) return []
++    const shares = []
++    for (const token of tokens) {
++      const share = this.byToken.get(token)
++      if (share) shares.push(share)
++    }
++    return shares
++  }
++
++  /** token 不存在或不属于该待办时返回 false，且不产生任何变更。 */
++  revoke(todoId, token) {
++    const share = this.byToken.get(token)
++    if (!share || share.todoId !== todoId) return false
++    this.byToken.delete(token)
++    const tokens = this.byTodo.get(todoId)
++    if (tokens) {
++      tokens.delete(token)
++      if (tokens.size === 0) this.byTodo.delete(todoId)
++    }
++    return true
++  }
++
++  /** 级联撤销某待办的全部分享，返回实际删除数量。 */
++  revokeAllForTodo(todoId) {
++    const tokens = this.byTodo.get(todoId)
++    if (!tokens) return 0
++    let removed = 0
++    for (const token of tokens) {
++      if (this.byToken.delete(token)) removed += 1
++    }
++    this.byTodo.delete(todoId)
++    return removed
++  }
++}
+diff --git a/src/store.js b/src/store.js
+index a7a7f41..677e646 100644
+--- a/src/store.js
++++ b/src/store.js
+@@ -1,12 +1,14 @@
+ import { randomUUID } from 'node:crypto'
++import { ShareStore } from './shares.js'
+ 
+ /**
+  * 内存待办存储。真实项目里这里会是数据库访问层；
+  * 基准仓库保持零依赖，用 Map 模拟持久化。
+  */
+ export class TodoStore {
+-  constructor({ now = () => new Date().toISOString() } = {}) {
++  constructor({ now = () => new Date().toISOString(), shares } = {}) {
+     this.now = now
++    this.shares = shares ?? new ShareStore({ now })
+     this.items = new Map()
+   }
+ 
+@@ -45,7 +47,9 @@ export class TodoStore {
+   }
+ 
+   remove(id) {
+-    return this.items.delete(id)
++    const deleted = this.items.delete(id)
++    this.shares?.revokeAllForTodo(id)
++    return deleted
+   }
+ }
+ 
+diff --git a/test/shares.test.js b/test/shares.test.js
+new file mode 100644
+index 0000000..26f6f65
+--- /dev/null
++++ b/test/shares.test.js
+@@ -0,0 +1,306 @@
++import { test, describe, before, after } from 'node:test'
++import assert from 'node:assert/strict'
++import { ShareStore } from '../src/shares.js'
++import { TodoStore } from '../src/store.js'
++import { createServer } from '../src/server.js'
++
++const FIXED_NOW = '2026-02-01T10:00:00.000Z'
++const TOKEN_SHAPE = /^[A-Za-z0-9_-]{32}$/
++
++function freshShareStore() {
++  return new ShareStore({ now: () => FIXED_NOW })
++}
++
++describe('ShareStore.create', () => {
++  test('生成 32 字符 base64url token，并记录 todoId 与 createdAt', () => {
++    const shares = freshShareStore()
++    const share = shares.create('todo-1')
++    assert.match(share.token, TOKEN_SHAPE)
++    assert.equal(share.token.length, 32)
++    assert.equal(share.todoId, 'todo-1')
++    assert.equal(share.createdAt, FIXED_NOW)
++  })
++
++  test('同一待办多次创建 token 互不相同', () => {
++    const shares = freshShareStore()
++    const tokens = new Set()
++    for (let i = 0; i < 50; i += 1) {
++      tokens.add(shares.create('todo-1').token)
++    }
++    assert.equal(tokens.size, 50)
++  })
++})
++
++describe('ShareStore.get / listByTodo', () => {
++  test('get 按 token 命中，未知 token 返回 undefined', () => {
++    const shares = freshShareStore()
++    const share = shares.create('todo-1')
++    assert.deepEqual(shares.get(share.token), share)
++    assert.equal(shares.get('not-a-token'), undefined)
++  })
++
++  test('listByTodo 只返回该待办的分享，保持创建顺序', () => {
++    const shares = freshShareStore()
++    const first = shares.create('todo-1')
++    const second = shares.create('todo-1')
++    shares.create('todo-2')
++    assert.deepEqual(shares.listByTodo('todo-1'), [first, second])
++    assert.deepEqual(shares.listByTodo('todo-missing'), [])
++  })
++})
++
++describe('ShareStore.revoke', () => {
++  test('撤销存在的分享返回 true，并从两个索引移除', () => {
++    const shares = freshShareStore()
++    const share = shares.create('todo-1')
++    assert.equal(shares.revoke('todo-1', share.token), true)
++    assert.equal(shares.get(share.token), undefined)
++    assert.deepEqual(shares.listByTodo('todo-1'), [])
++  })
++
++  test('重复撤销返回 false（幂等语义为 404）', () => {
++    const shares = freshShareStore()
++    const share = shares.create('todo-1')
++    assert.equal(shares.revoke('todo-1', share.token), true)
++    assert.equal(shares.revoke('todo-1', share.token), false)
++  })
++
++  test('token 不属于该待办时返回 false 且不删除记录', () => {
++    const shares = freshShareStore()
++    const share = shares.create('todo-1')
++    assert.equal(shares.revoke('todo-2', share.token), false)
++    assert.deepEqual(shares.get(share.token), share)
++    assert.deepEqual(shares.listByTodo('todo-1'), [share])
++    assert.deepEqual(shares.listByTodo('todo-2'), [])
++  })
++
++  test('未知 token 返回 false', () => {
++    const shares = freshShareStore()
++    assert.equal(shares.revoke('todo-1', 'missing'), false)
++  })
++})
++
++describe('ShareStore.revokeAllForTodo', () => {
++  test('级联撤销该待办全部分享并返回删除数量', () => {
++    const shares = freshShareStore()
++    const a = shares.create('todo-1')
++    const b = shares.create('todo-1')
++    const other = shares.create('todo-2')
++    assert.equal(shares.revokeAllForTodo('todo-1'), 2)
++    assert.equal(shares.get(a.token), undefined)
++    assert.equal(shares.get(b.token), undefined)
++    assert.deepEqual(shares.listByTodo('todo-1'), [])
++    assert.deepEqual(shares.get(other.token), other)
++  })
++
++  test('未知待办返回 0', () => {
++    const shares = freshShareStore()
++    assert.equal(shares.revokeAllForTodo('todo-missing'), 0)
++  })
++})
++
++describe('TodoStore 与 ShareStore 集成', () => {
++  test('注入的 shares 被暴露，删除待办后级联失效', () => {
++    const shares = freshShareStore()
++    const store = new TodoStore({ now: () => FIXED_NOW, shares })
++    assert.equal(store.shares, shares)
++    const todo = store.create({ title: '分享我', ownerId: 'user-1' })
++    const share = shares.create(todo.id)
++    assert.equal(store.remove(todo.id), true)
++    assert.equal(shares.get(share.token), undefined)
++    assert.equal(store.get(todo.id), undefined)
++  })
++
++  test('删除待办不影响其他待办的分享', () => {
++    const shares = freshShareStore()
++    const store = new TodoStore({ now: () => FIXED_NOW, shares })
++    const a = store.create({ title: '甲', ownerId: 'user-1' })
++    const b = store.create({ title: '乙', ownerId: 'user-1' })
++    const shareB = shares.create(b.id)
++    store.remove(a.id)
++    assert.deepEqual(shares.get(shareB.token), shareB)
++  })
++
++  test('删除不存在的待办返回 false 且不影响分享', () => {
++    const shares = freshShareStore()
++    const store = new TodoStore({ now: () => FIXED_NOW, shares })
++    const share = shares.create('todo-1')
++    assert.equal(store.remove('todo-missing'), false)
++    assert.deepEqual(shares.get(share.token), share)
++  })
++
++  test('不传 shares 时保留既有 TodoStore 行为', () => {
++    const store = new TodoStore({ now: () => FIXED_NOW })
++    const todo = store.create({ title: '无分享', ownerId: 'user-1' })
++    assert.equal(todo.completed, false)
++    assert.equal(store.remove(todo.id), true)
++    assert.equal(store.remove(todo.id), false)
++  })
++})
++
++describe('分享 HTTP 接口', () => {
++  let server
++  let baseUrl
++  let store
++
++  before(async () => {
++    store = new TodoStore({ now: () => FIXED_NOW })
++    server = createServer(store)
++    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
++    baseUrl = `http://127.0.0.1:${server.address().port}`
++  })
++
++  after(async () => {
++    server.closeAllConnections()
++    await new Promise((resolve) => server.close(resolve))
++  })
++
++  async function request(path, options = {}) {
++    const response = await fetch(`${baseUrl}${path}`, {
++      ...options,
++      headers: { 'content-type': 'application/json', ...(options.headers ?? {}) },
++    })
++    const text = await response.text()
++    return { status: response.status, body: text ? JSON.parse(text) : null }
++  }
++
++  async function createTodo(title = '分享目标', ownerId = 'user-1') {
++    const res = await request('/todos', { method: 'POST', body: JSON.stringify({ title, ownerId }) })
++    return res.body.todo
++  }
++
++  async function createShare(todoId, ownerId = 'user-1') {
++    const res = await request(`/todos/${todoId}/shares`, {
++      method: 'POST',
++      body: JSON.stringify({ ownerId }),
++    })
++    return res.body.share
++  }
++
++  test('R1.S1 创建者创建分享返回 201 与 32 字符 base64url token', async () => {
++    const todo = await createTodo()
++    const res = await request(`/todos/${todo.id}/shares`, {
++      method: 'POST',
++      body: JSON.stringify({ ownerId: 'user-1' }),
++    })
++    assert.equal(res.status, 201)
++    assert.match(res.body.share.token, /^[A-Za-z0-9_-]{32}$/)
++    assert.equal(res.body.share.todoId, todo.id)
++    assert.equal(typeof res.body.share.createdAt, 'string')
++  })
++
++  test('R1.S2 非创建者创建分享返回 403 且不产生记录', async () => {
++    const todo = await createTodo()
++    const res = await request(`/todos/${todo.id}/shares`, {
++      method: 'POST',
++      body: JSON.stringify({ ownerId: 'user-2' }),
++    })
++    assert.equal(res.status, 403)
++    assert.ok(res.body.error)
++    assert.ok(res.body.hint)
++    assert.deepEqual(store.shares.listByTodo(todo.id), [])
++  })
++
++  test('R1.S3 待办不存在时创建分享返回 404', async () => {
++    const res = await request('/todos/not-exist/shares', {
++      method: 'POST',
++      body: JSON.stringify({ ownerId: 'user-1' }),
++    })
++    assert.equal(res.status, 404)
++  })
++
++  test('创建分享缺少 ownerId 返回 400', async () => {
++    const todo = await createTodo()
++    const res = await request(`/todos/${todo.id}/shares`, { method: 'POST', body: JSON.stringify({}) })
++    assert.equal(res.status, 400)
++    assert.deepEqual(store.shares.listByTodo(todo.id), [])
++  })
++
++  test('R2.S1 持有效 token 匿名查看，且响应不含 ownerId', async () => {
++    const todo = await createTodo('匿名可见')
++    const share = await createShare(todo.id)
++    const res = await request(`/shared/${share.token}`)
++    assert.equal(res.status, 200)
++    assert.equal(res.body.todo.title, '匿名可见')
++    assert.equal(res.body.todo.id, todo.id)
++    assert.equal('ownerId' in res.body.todo, false)
++  })
++
++  test('R2.S2 不存在的 token 返回 404 与固定 error', async () => {
++    const res = await request('/shared/unknown-token')
++    assert.equal(res.status, 404)
++    assert.equal(res.body.error, '分享不存在或已失效')
++  })
++
++  test('R3.S1 创建者撤销分享返回 204，随后匿名查看 404', async () => {
++    const todo = await createTodo()
++    const share = await createShare(todo.id)
++    const revoked = await request(`/todos/${todo.id}/shares/${share.token}?ownerId=user-1`, {
++      method: 'DELETE',
++    })
++    assert.equal(revoked.status, 204)
++    assert.equal(revoked.body, null)
++    const res = await request(`/shared/${share.token}`)
++    assert.equal(res.status, 404)
++  })
++
++  test('R3.S2 非创建者撤销返回 403，分享仍有效', async () => {
++    const todo = await createTodo()
++    const share = await createShare(todo.id)
++    const revoked = await request(`/todos/${todo.id}/shares/${share.token}?ownerId=user-2`, {
++      method: 'DELETE',
++    })
++    assert.equal(revoked.status, 403)
++    const res = await request(`/shared/${share.token}`)
++    assert.equal(res.status, 200)
++  })
++
++  test('R3.S3 重复撤销同一 token 返回 404', async () => {
++    const todo = await createTodo()
++    const share = await createShare(todo.id)
++    const path = `/todos/${todo.id}/shares/${share.token}?ownerId=user-1`
++    assert.equal((await request(path, { method: 'DELETE' })).status, 204)
++    assert.equal((await request(path, { method: 'DELETE' })).status, 404)
++  })
++
++  test('R4.S1 创建者列出未撤销分享，按创建顺序', async () => {
++    const todo = await createTodo()
++    const s1 = await createShare(todo.id)
++    const s2 = await createShare(todo.id)
++    await request(`/todos/${todo.id}/shares/${s2.token}?ownerId=user-1`, { method: 'DELETE' })
++    const res = await request(`/todos/${todo.id}/shares?ownerId=user-1`)
++    assert.equal(res.status, 200)
++    assert.deepEqual(res.body.shares.map((share) => share.token), [s1.token])
++  })
++
++  test('R4.S2 非创建者列出分享返回 403', async () => {
++    const todo = await createTodo()
++    const res = await request(`/todos/${todo.id}/shares?ownerId=user-2`)
++    assert.equal(res.status, 403)
++  })
++
++  test('列出分享缺少 ownerId 返回 400', async () => {
++    const todo = await createTodo()
++    const res = await request(`/todos/${todo.id}/shares`)
++    assert.equal(res.status, 400)
++  })
++
++  test('R6.S1 PATCH /shared/:token 落兜底 404 且不改待办', async () => {
++    const todo = await createTodo()
++    const share = await createShare(todo.id)
++    const res = await request(`/shared/${share.token}`, {
++      method: 'PATCH',
++      body: JSON.stringify({ completed: true }),
++    })
++    assert.equal(res.status, 404)
++    assert.equal(store.get(todo.id).completed, false)
++  })
++
++  test('删除待办后分享 token 立即失效（HTTP 级联）', async () => {
++    const todo = await createTodo()
++    const share = await createShare(todo.id)
++    const removed = await request(`/todos/${todo.id}`, { method: 'DELETE' })
++    assert.equal(removed.status, 204)
++    assert.equal((await request(`/shared/${share.token}`)).status, 404)
++  })
++})

@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-30T19:21:09.459Z",
+  "repo": "py-csv-cli",
+  "task": "new-feature",
+  "condition": "B",
+  "rounds": 4,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 13/13）",
+      "command": "python3 -m unittest discover -s tests -p test_*.py",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 42,
+      "expected": "green",
+      "parsed": {
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "passed": 13,
+        "verdict": "green"
+      },
+      "status": "green",
+      "outputTail": "\n.............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+    }
+  ]
+}

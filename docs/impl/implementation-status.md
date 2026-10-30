@@ -167,6 +167,8 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 
 **host 单测补齐**：新增 `test/host/dispatch.test.ts`（11 例）、`test/host/review.test.ts`（14 例）与 `test/host/node-git.test.ts`（2 例，自动提交参数回归）；`test/host` 85 → 112 例，全仓 63 files/944 tests → **67 files/976 tests**（另含 TDD 测试路径回归 1 例、故障注入 4 例）。
 
+**对照评测完整矩阵（2026-10-31）**：9 任务 × A/B 共 **18/18 run** 已跑完（双流并行、真实模型、隔离 headless），原始数据在 `docs/evaluation-data/`，结果表与结论见 [evaluation.md](../evaluation.md) §6.2/§6.4。诚实结论：B 组回归通过数与 A 相同（7/9），验收 2/3 vs A 3/3，但多 2–20 倍耗时与 1–3 次人工门；有 2 个 B 更差的反例、2 个两者都红；本机 sandbox 不可用使 A 组无法自测，正式结论需在可执行 sandbox 重跑并人工补 4 项主观指标。
+
 **对照评测 pilot（2026-10-31）**：用 `scripts/run-evaluation.mjs` 在 `ts-todo-api / fix-bug` 上跑 A/B 各 1 次：A 26s/0 门/1 轮，B 363s/3 次人工门/3 轮；两种条件回归 34/34、验收 4/4 全绿。pilot 同时发现基准 fixture 断言错误（R2 期望值与倒序契约矛盾）与 git 自动提交 bug，均已修复。原始数据与局限见 [evaluation.md](../evaluation.md) §6.1。
 
 **本轮未完成**：派发/并行 worktree 的完整真机结算（headless 一次性运行在子 agent 结算前退出，需要交互式会话或常驻宿主）；有/无插件完整 9 任务 × 2 条件对照评测与从 0 开发演练（pilot 1/9 已完成，见 §6）。审查链路已真机跑通并产出结构化 findings。
@@ -231,7 +233,7 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 ## 6. 下一步（按优先级）
 
 1. **派发/并行 worktree 收尾**：在交互式会话里复验 worktree 合并 + 集成检查点（headless 一次性运行会提前退出）；补 `maybeCheckpoint` 单测与 scope 变更审批通知；交互式会话验证审批。
-2. **M6 对照评测**：pilot 1/9 已完成（ts-todo-api/fix-bug A/B）；继续跑剩余 8 任务 × 2 条件、从 0 开发（greenfield）演练与并行对照，填入 [evaluation.md](../evaluation.md) §6.2。
+2. **M6 对照评测收尾**：18/18 run 已完成；下一步人工复盘 18 组事件流补齐隐藏需求遗漏/越界/虚假完成/验收覆盖 4 项主观指标，在可执行 sandbox 宿主重跑，并做从 0 开发与并行对照。
 3. 真实会话里切换三个 preset；更新 `cordis.patch.yml` 的"待实测"注释（当前已刷新为实际剩余项）。
 4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；Desktop 宿主人工走查（启动耗时/卸载干净度已完成，见 §3.6）。
 5. 发布：提交发布物料，配置 `NODE_AUTH_TOKEN` 后重打 tag / npm publish / GitHub Release；README 演示动图与 awesome-dsh-plugin 收录申请。

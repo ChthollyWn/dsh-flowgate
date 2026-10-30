@@ -1,0 +1,93 @@
+diff --git a/csvtool/csvio.py b/csvtool/csvio.py
+index 977c99e..a6b006b 100644
+--- a/csvtool/csvio.py
++++ b/csvtool/csvio.py
+@@ -1,7 +1,7 @@
+ """CSV 读写工具。
+ 
+-基准任务 R2（GBK 乱码）的目标文件：当前实现只按 UTF-8 读取，
+-遇到 GBK 编码或带 BOM 的文件会报 UnicodeDecodeError 或把 BOM 带进首列。
++读取层自动适配 UTF-8（含 UTF-8 BOM）与 GBK/GB18030 编码；
++写出仍保持 UTF-8。
+ """
+ from __future__ import annotations
+ 
+@@ -10,14 +10,29 @@ import io
+ from pathlib import Path
+ 
+ 
+-def read_rows(path: str | Path) -> list[list[str]]:
+-    """按 UTF-8 读取整个 CSV，返回行列表。
++def _decode_csv(raw: bytes) -> str:
++    """按 UTF-8（含 BOM）→ GB18030 的顺序解码整份 CSV 字节。
+ 
+-    已知缺陷：没有编码探测，GBK 文件会直接抛 UnicodeDecodeError；
+-    UTF-8 BOM 会残留在第一个表头字段里（"\\ufeffid"）。
++    `utf-8-sig` 对无 BOM 的 UTF-8 透明，并会在解码时剥离 UTF-8 BOM；
++    `gb18030` 是 GBK/GB2312 的超集，用于客户提供的 GBK 文件。
++    两种候选编码都失败时，再用 `utf-8-sig` 解码一次，让
++    `UnicodeDecodeError` 带明确的位置信息向上抛出。
+     """
+-    with open(path, "r", encoding="utf-8", newline="") as handle:
+-        return [row for row in csv.reader(handle)]
++    try:
++        return raw.decode("utf-8-sig")
++    except UnicodeDecodeError:
++        pass
++    try:
++        return raw.decode("gb18030")
++    except UnicodeDecodeError:
++        return raw.decode("utf-8-sig")
++
++
++def read_rows(path: str | Path) -> list[list[str]]:
++    """读取整个 CSV，自动适配 UTF-8（含 BOM）与 GBK/GB18030。"""
++    raw = Path(path).read_bytes()
++    text = _decode_csv(raw)
++    return [row for row in csv.reader(io.StringIO(text, newline=""))]
+ 
+ 
+ def write_rows(rows: list[list[str]], path: str | Path | None = None) -> str | None:
+diff --git a/tests/test_csvio.py b/tests/test_csvio.py
+index 8afcd75..8088312 100644
+--- a/tests/test_csvio.py
++++ b/tests/test_csvio.py
+@@ -4,6 +4,7 @@ import tempfile
+ import unittest
+ from pathlib import Path
+ 
++from csvtool.cli import main
+ from csvtool.csvio import read_header, read_rows, write_rows
+ 
+ DATA = Path(__file__).resolve().parent.parent / "data"
+@@ -36,6 +37,30 @@ class CsvIoTest(unittest.TestCase):
+             self.assertEqual(read_rows(empty), [])
+             self.assertEqual(read_header(empty), [])
+ 
++    def test_read_gbk_file(self):
++        rows = read_rows(DATA / "members-gbk.csv")
++        self.assertEqual(rows[0], ["id", "name", "phone", "email", "city"])
++        self.assertEqual(rows[1][1], "张伟")
++        self.assertEqual(len(rows), 5)
++
++    def test_read_gbk_file_keeps_chinese_text(self):
++        rows = read_rows(DATA / "members-gbk.csv")
++        self.assertEqual([row[1] for row in rows[1:]], ["张伟", "李娜", "王芳", "Bob"])
++
++    def test_read_header_strips_utf8_bom(self):
++        header = read_header(DATA / "members-bom.csv")
++        self.assertEqual(header[0], "id")
++        self.assertNotIn("\ufeff", "".join(header))
++
++    def test_export_gbk_file_as_readable_utf8(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = Path(tmp) / "exported.csv"
++            self.assertEqual(
++                main(["export", str(DATA / "members-gbk.csv"), "--out", str(out)]),
++                0,
++            )
++            self.assertIn("张伟", out.read_text(encoding="utf-8"))
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

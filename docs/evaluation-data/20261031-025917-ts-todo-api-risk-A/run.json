@@ -1,0 +1,140 @@
+{
+  "runId": "20261031-025917-ts-todo-api-risk-A",
+  "startedAt": "2026-10-30T18:59:17.450Z",
+  "finishedAt": "2026-10-30T18:59:52.144Z",
+  "durationMs": 34694,
+  "status": "completed",
+  "error": null,
+  "repo": "ts-todo-api",
+  "repoPath": "examples/ts-todo-api",
+  "stack": "Node.js ≥ 22 / node:http / node:test",
+  "task": "risk",
+  "taskLabel": "R3 密码哈希参数升级",
+  "prompt": "登录的密码哈希参数是不是太低了？帮我升级一下。",
+  "condition": "A",
+  "conditionLabel": "DSH 标准模式",
+  "dsh": {
+    "cli": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+    "profile": "eval-standard",
+    "isolatedDshHome": true,
+    "keySource": "DEEPSEEK_API_KEY 环境变量（未落盘）"
+  },
+  "environment": {
+    "node": "v23.11.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "workspace": {
+    "baselineCommit": "02392f4b6130e03eb3c117d3800734fd7bfc875a",
+    "readmeSanitized": true,
+    "readmeHiddenSectionsRemoved": 17,
+    "copiedWithSkips": {
+      "skippedEntries": 1
+    },
+    "kept": false
+  },
+  "flowgate": {
+    "root": "/Users/chtholly/Developer/WorkSpace/dsh-flowgate",
+    "initialized": false,
+    "pluginLoaded": false,
+    "pluginInstallSteps": [
+      {
+        "step": "create-profile",
+        "command": "dsh --profile eval-standard --from-default-profile headless --help",
+        "exitCode": 0,
+        "timedOut": false,
+        "stderrTail": ""
+      },
+      {
+        "step": "dump-config",
+        "command": "dsh --profile eval-standard --dump-config",
+        "exitCode": 0,
+        "timedOut": false
+      }
+    ],
+    "configOverrides": null
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "durationMs": 33190,
+      "exitCode": 0,
+      "timedOut": false,
+      "sessionId": "session-35b06a83-68c4-420d-ac05-112aec2c5147",
+      "events": {
+        "session": 1,
+        "status": 16,
+        "thinking": 7,
+        "text": 3,
+        "tool_call": 16,
+        "tool_result": 16,
+        "final": 1
+      },
+      "stdoutFile": "rounds/round-1.stdout.jsonl",
+      "stderrFile": "rounds/round-1.stderr.log",
+      "finalTextTail": "已按“兼容旧哈希 + 登录后自动迁移”的方式完成升级。\n\n## 改动内容\n\n**`src/auth/passwords.js`**\n- `DEFAULT_ITERATIONS`：`100_000` → `600_000`（PBKDF2-SHA256，符合 OWASP 当前建议）\n- 新注册/迁移生成的哈希会写入 `pbkdf2$sha256$600000$...`\n- `verifyPassword` 仍按哈希中保存的迭代次数校验，所以旧的 100000 次哈希可以继续登录\n- 加固 `needsRehash`：\n  - 非 `pbkdf2`、非 `sha256`、格式错误、非法迭代次数都会触发重新哈希\n  - 迭代次数低于当前默认值（600000）时触发迁移，不会把更高参数的哈希降级\n\n**`test/auth.test.js`**\n- 哈希格式断言更新为 600000\n- 新增旧 100000 次迭代哈希“仍可校验且需要迁移”的回归用例\n\n登录接口原本已有迁移逻辑（`src/server.js` 中登录成功且 `needsRehash` 为真时重新哈希），因此旧用户首次成功登录后会自动升级到 600000，无需额外迁移脚本。\n\n## 验证说明\n\n尝试运行测试时，当前主机的沙箱后端不可用：\n\n```text\nsandbox-exec: sandbox_apply: Operation not permitted\n```\n\n而升级到 `danger-full-access` 又没有可用的审批通道，因此本环境无法实际执行 `pnpm test`。代码已完成静态检查；在正常环境请运行：\n\n```bash\npnpm test\n```"
+    }
+  ],
+  "ownerActions": [],
+  "artifacts": {
+    "metricsSets": 0,
+    "reports": [],
+    "flowgateFiles": [],
+    "archive": [],
+    "flowgateUnexpected": false,
+    "git": {
+      "baselineCommit": "02392f4b6130e03eb3c117d3800734fd7bfc875a",
+      "statusEntries": 2,
+      "changedFiles": 2,
+      "changedFileList": [
+        "src/auth/passwords.js",
+        "test/auth.test.js"
+      ],
+      "insertions": 15,
+      "deletions": 5,
+      "untrackedFiles": 0,
+      "untrackedFileList": [],
+      "commitsSinceBaseline": 0,
+      "patchSaved": true,
+      "patchBytes": 2507,
+      "files": {
+        "status": "git/status.txt",
+        "diffStat": "git/diff-stat.txt",
+        "diffNumstat": "git/diff-numstat.txt",
+        "untracked": "git/untracked.txt",
+        "log": "git/log.txt"
+      }
+    }
+  },
+  "verification": {
+    "generatedAt": "2026-10-30T18:59:52.099Z",
+    "repo": "ts-todo-api",
+    "task": "risk",
+    "condition": "A",
+    "rounds": 1,
+    "skipped": false,
+    "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+    "results": [
+      {
+        "kind": "regression",
+        "label": "默认测试套件（回归，基线 34/34）",
+        "command": "pnpm test",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationMs": 940,
+        "expected": "green",
+        "parsed": {
+          "tests": 35,
+          "failures": 0,
+          "errors": 0,
+          "passed": 35,
+          "verdict": "green"
+        },
+        "status": "green",
+        "outputTail": "✔ 待办列表与分页 (13.843083ms)\n▶ 创建与更新\n  ✔ 创建返回 201 与生成的 id (2.061959ms)\n  ✔ title 为空返回 400 与 hint (0.950458ms)\n  ✔ 更新完成状态返回 200 (1.484083ms)\n  ✔ 更新不存在的待办返回 404 (0.5895ms)\n  ✔ completed 非布尔返回 400 (1.04075ms)\n✔ 创建与更新 (6.338334ms)\n▶ 错误处理\n  ✔ 未知路由返回 404 (0.402709ms)\n  ✔ 非法 JSON 返回 400 (0.399ms)\n✔ 错误处理 (0.848333ms)\n▶ 密码哈希\n  ✔ 哈希格式包含参数，可校验 (139.125709ms)\n  ✔ 旧 100000 次迭代哈希仍可校验，并会被标记为需要迁移 (15.354375ms)\n  ✔ 篡改或格式错误的哈希校验失败 (7.651209ms)\n  ✔ needsRehash 识别较低迭代次数 (46.187875ms)\n✔ 密码哈希 (210.675667ms)\n▶ 登录接口\n  ✔ 正确邮箱密码返回 200 与用户信息 (55.660334ms)\n  ✔ 密码错误返回 401，且不区分具体原因 (47.63375ms)\n  ✔ 旧参数哈希在登录成功后自动迁移到当前参数 (92.210667ms)\n✔ 登录接口 (195.699ms)\n▶ 提醒模块（相邻模块，基准任务不涉及）\n  ✔ 只提醒未完成且超过 24 小时的条目 (1.607375ms)\n  ✔ createdAt 非法的条目被跳过 (0.057042ms)\n✔ 提醒模块（相邻模块，基准任务不涉及） (2.083833ms)\n▶ 分页参数\n  ✔ 缺省与非法值回落到默认 (1.359625ms)\n  ✔ pageSize 有上限 (0.063459ms)\n  ✔ 接受字符串数字 (0.047667ms)\n✔ 分页参数 (1.886375ms)\n▶ 排序\n  ✔ 按 createdAt 倒序 (5.880917ms)\n  ✔ 不修改原数组 (0.126583ms)\n✔ 排序 (6.112875ms)\n▶ 分页结果\n  ✔ 第 1 页返回前 pageSize 条与总数 (0.182542ms)\n  ✔ 第 2 页与第 1 页不重叠 (0.226208ms)\n  ✔ 总数小于一页时 hasNext 为 false (0.115834ms)\n  ✔ 空列表返回空页且 total 为 0 (0.111625ms)\n  ✔ paginate 返回数组（兼容旧调用） (0.160333ms)\n✔ 分页结果 (0.932875ms)\n▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.752583ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.067334ms)\n  ✔ 完成率四舍五入到两位 (0.050417ms)\n  ✔ 完成率高时标签为 great (0.72ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (2.061792ms)\nℹ tests 35\nℹ suites 11\nℹ pass 35\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 544.165\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js\n"
+      }
+    ]
+  },
+  "metrics": null,
+  "notes": []
+}

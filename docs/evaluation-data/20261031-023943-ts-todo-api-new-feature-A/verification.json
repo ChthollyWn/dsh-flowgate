@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-30T18:49:49.371Z",
+  "repo": "ts-todo-api",
+  "task": "new-feature",
+  "condition": "A",
+  "rounds": 1,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 34/34）",
+      "command": "pnpm test",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 578,
+      "expected": "green",
+      "parsed": {
+        "tests": 57,
+        "failures": 0,
+        "errors": 0,
+        "passed": 57,
+        "verdict": "green"
+      },
+      "status": "green",
+      "outputTail": "✔ 分页参数 (2.190666ms)\n▶ 排序\n  ✔ 按 createdAt 倒序 (6.443875ms)\n  ✔ 不修改原数组 (0.171208ms)\n✔ 排序 (6.741083ms)\n▶ 分页结果\n  ✔ 第 1 页返回前 pageSize 条与总数 (0.218167ms)\n  ✔ 第 2 页与第 1 页不重叠 (0.239459ms)\n  ✔ 总数小于一页时 hasNext 为 false (0.120709ms)\n  ✔ 空列表返回空页且 total 为 0 (0.11375ms)\n  ✔ paginate 返回数组（兼容旧调用） (0.166917ms)\n✔ 分页结果 (1.001167ms)\n▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.673292ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.061875ms)\n  ✔ 完成率四舍五入到两位 (0.046834ms)\n  ✔ 完成率高时标签为 great (1.006584ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (2.27025ms)\n▶ 分享待办\n  ✔ owner 分享后返回 201、分享记录与只读链接 (14.683541ms)\n  ✔ 重复分享同一用户是幂等的 (3.658333ms)\n  ✔ 支持按邮箱分享 (1.443917ms)\n  ✔ 也支持把 userId 作为请求体里的分享目标 (4.327958ms)\n  ✔ 非 owner 通过请求体 userId 声明操作人会被拒绝 (0.968792ms)\n  ✔ 分享对象不存在返回 404 (0.795666ms)\n  ✔ 缺少分享对象返回 400 (1.029417ms)\n  ✔ 不能分享给自己 (1.058209ms)\n  ✔ 非 owner 不能分享 (1.715791ms)\n  ✔ 不存在的待办不能分享 (0.4925ms)\n✔ 分享待办 (33.279458ms)\n▶ 被分享者查看\n  ✔ 被分享者可以通过 viewerId 查看，owner 仍是 owner 权限 (1.516583ms)\n  ✔ 未被分享的用户查看返回 403 (0.537917ms)\n  ✔ 不带 viewerId 时保持原有匿名查看行为 (0.515792ms)\n  ✔ 分享链接不需要登录即可查看 (0.878833ms)\n  ✔ 也可以通过 shareToken 查询参数查看 (0.784666ms)\n  ✔ viewerId 列表包含自己拥有的与被分享的待办 (6.8075ms)\n  ✔ sharedWith 列表只包含分享给该用户的待办 (0.864542ms)\n  ✔ 被分享者不能修改或删除待办 (1.966375ms)\n✔ 被分享者查看 (14.010833ms)\n▶ 撤销分享\n  ✔ owner 可以按用户撤销，撤销后链接与查看权限失效 (1.220708ms)\n  ✔ owner 可以按 shareId 撤销 (0.959209ms)\n  ✔ 非 owner 不能撤销 (0.765125ms)\n✔ 撤销分享 (3.0075ms)\n▶ ShareStore\n  ✔ 创建幂等、撤销与访问判断 (0.083541ms)\n  ✔ presentShare 只暴露公开用户字段 (0.048875ms)\n✔ ShareStore (0.169416ms)\nℹ tests 57\nℹ suites 15\nℹ pass 57\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 170.271375\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js test/sharing.test.js\n"
+    }
+  ]
+}

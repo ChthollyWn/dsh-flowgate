@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-30T18:59:17.361Z",
+  "repo": "ts-todo-api",
+  "task": "new-feature",
+  "condition": "B",
+  "rounds": 5,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 34/34）",
+      "command": "pnpm test",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 352,
+      "expected": "green",
+      "parsed": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "passed": 34,
+        "verdict": "green"
+      },
+      "status": "green",
+      "outputTail": "  ✔ 按完成状态过滤 (3.609125ms)\n✔ 待办列表与分页 (13.90075ms)\n▶ 创建与更新\n  ✔ 创建返回 201 与生成的 id (1.997417ms)\n  ✔ title 为空返回 400 与 hint (0.970916ms)\n  ✔ 更新完成状态返回 200 (1.504291ms)\n  ✔ 更新不存在的待办返回 404 (0.589875ms)\n  ✔ completed 非布尔返回 400 (0.976958ms)\n✔ 创建与更新 (6.257833ms)\n▶ 错误处理\n  ✔ 未知路由返回 404 (0.367333ms)\n  ✔ 非法 JSON 返回 400 (0.367417ms)\n✔ 错误处理 (0.780083ms)\n▶ 密码哈希\n  ✔ 哈希格式包含参数，可校验 (23.1155ms)\n  ✔ 篡改或格式错误的哈希校验失败 (8.233417ms)\n  ✔ needsRehash 识别较低迭代次数 (7.596833ms)\n✔ 密码哈希 (41.341167ms)\n▶ 登录接口\n  ✔ 正确邮箱密码返回 200 与用户信息 (17.508541ms)\n  ✔ 密码错误返回 401，且不区分具体原因 (10.580791ms)\n  ✔ 旧参数哈希在登录成功后自动迁移到当前参数 (17.796833ms)\n✔ 登录接口 (46.058959ms)\n▶ 提醒模块（相邻模块，基准任务不涉及）\n  ✔ 只提醒未完成且超过 24 小时的条目 (1.419958ms)\n  ✔ createdAt 非法的条目被跳过 (0.059334ms)\n✔ 提醒模块（相邻模块，基准任务不涉及） (1.86275ms)\n▶ 分页参数\n  ✔ 缺省与非法值回落到默认 (1.257333ms)\n  ✔ pageSize 有上限 (0.070958ms)\n  ✔ 接受字符串数字 (0.054291ms)\n✔ 分页参数 (1.793083ms)\n▶ 排序\n  ✔ 按 createdAt 倒序 (6.178667ms)\n  ✔ 不修改原数组 (0.150875ms)\n✔ 排序 (6.44775ms)\n▶ 分页结果\n  ✔ 第 1 页返回前 pageSize 条与总数 (0.212666ms)\n  ✔ 第 2 页与第 1 页不重叠 (0.235959ms)\n  ✔ 总数小于一页时 hasNext 为 false (0.1185ms)\n  ✔ 空列表返回空页且 total 为 0 (0.114667ms)\n  ✔ paginate 返回数组（兼容旧调用） (0.163875ms)\n✔ 分页结果 (0.983833ms)\n▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.654917ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.058542ms)\n  ✔ 完成率四舍五入到两位 (0.045125ms)\n  ✔ 完成率高时标签为 great (0.760542ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (1.913291ms)\nℹ tests 34\nℹ suites 11\nℹ pass 34\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 157.353583\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js\n"
+    }
+  ]
+}

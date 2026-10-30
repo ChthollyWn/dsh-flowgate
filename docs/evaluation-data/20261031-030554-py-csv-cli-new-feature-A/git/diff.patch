@@ -1,0 +1,145 @@
+diff --git a/README.md b/README.md
+index d4709c9..34e016d 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@
+ 
+ - Python ≥ 3.10（开发用 3.13）；零运行时依赖。
+ - 测试用 `unittest` 原生可跑，同时完全兼容 pytest（测试都是 `unittest.TestCase`）。
+-- 默认测试：13 个用例，应全绿。
++- 默认测试：27 个用例，应全绿。
+ 
+ ## 快速开始
+ 
+@@ -22,6 +22,8 @@ python3 -m venv .venv
+ # CLI 冒烟
+ python3 -m csvtool stats data/members.csv
+ python3 -m csvtool export data/members.csv --out /tmp/members-out.csv
++python3 -m csvtool dedupe data/duplicates.csv --out /tmp/unique.csv
++python3 -m csvtool dedupe data/duplicates.csv --key name,phone
+ ```
+ 
+ > 本仓库**刻意不包含** `.flowgate/`。评测前先在仓库根执行 `/flow init`，让插件生成 `.flowgate/project.md` 等；初始化前后的对比也是评测内容。
+@@ -33,10 +35,12 @@ py-csv-cli/
+   csvtool/
+     __init__.py
+     __main__.py        # python -m csvtool
++    dedupe.py          # CSV 去重（默认整行；可用 --key 指定列）
+   tests/
+     test_csvio.py      # 默认测试：UTF-8 读写
+     test_stats.py      # 默认测试：统计
+     test_cli.py        # 默认测试：CLI 行为
++    test_dedupe.py     # 去重功能测试
+   data/
+     members.csv        # UTF-8 样例
+   pyproject.toml       # pytest 配置
+@@ -51,6 +55,15 @@ py-csv-cli/
+ 
+ > "这个工具加一个去重功能吧，数据里有重复行，导出去重后的结果。"
+ 
++实现方式：新增 `dedupe` 子命令，默认按整行内容判断重复（表头保留，数据行保留首次出现的顺序）：
++
++```bash
++python3 -m csvtool dedupe data/duplicates.csv --out /tmp/unique.csv
++# 若“重复”指某几列相同，可指定列名（或下标）：
++python3 -m csvtool dedupe data/duplicates.csv --key name,phone
++# 其他选项：--ignore-case（忽略大小写）、--keep first|last（保留首次/末次）
++```
++
+ ### R2 修 bug：GBK 文件乱码
+ 
+ 模糊描述：
+diff --git a/csvtool/cli.py b/csvtool/cli.py
+index d27cef1..f49260e 100644
+--- a/csvtool/cli.py
++++ b/csvtool/cli.py
+@@ -3,14 +3,14 @@
+ 子命令：
+   stats  统计行数、列名、空单元格
+   export 原样导出 CSV（基准任务 R3 会要求加手机号脱敏）
+-
+-基准任务 R1（CSV 去重）还没有对应子命令，需要新增 `dedupe`。
++  dedupe 去重后导出 CSV（默认按整行内容判断重复）
+ """
+ from __future__ import annotations
+ 
+ import argparse
+ import sys
+ 
++from .dedupe import dedupe
+ from .export import export
+ from .stats import summary_json
+ 
+@@ -26,9 +26,49 @@ def build_parser() -> argparse.ArgumentParser:
+     exp.add_argument("file", help="输入 CSV 路径")
+     exp.add_argument("--out", default=None, help="输出路径；省略则打印到标准输出")
+ 
++    ded = sub.add_parser("dedupe", help="去重 CSV 并导出（保留表头）")
++    ded.add_argument("file", help="输入 CSV 路径")
++    ded.add_argument(
++        "-o",
++        "--out",
++        "--output",
++        dest="out",
++        default=None,
++        help="输出路径；省略则打印到标准输出",
++    )
++    ded.add_argument(
++        "-k",
++        "--key",
++        "--keys",
++        "--columns",
++        "--by",
++        dest="key",
++        action="append",
++        metavar="COLS",
++        help="按指定列判断重复（列名或下标，可重复或用逗号分隔）；省略则按整行判断",
++    )
++    ded.add_argument("--ignore-case", action="store_true", help="比较时忽略大小写")
++    ded.add_argument(
++        "--keep",
++        choices=("first", "last"),
++        default="first",
++        help="重复行保留第一次还是最后一次出现（默认 first）",
++    )
++
+     return parser
+ 
+ 
++def _parse_key_columns(parser: argparse.ArgumentParser, values: list[str] | None):
++    if not values:
++        return None
++    columns: list[str] = []
++    for value in values:
++        columns.extend(part.strip() for part in value.split(",") if part.strip())
++    if not columns:
++        parser.error("--key 不能为空")
++    return columns
++
++
+ def main(argv: list[str] | None = None) -> int:
+     parser = build_parser()
+     args = parser.parse_args(argv)
+@@ -43,6 +83,22 @@ def main(argv: list[str] | None = None) -> int:
+             print(result, end="")
+         return 0
+ 
++    if args.command == "dedupe":
++        key_columns = _parse_key_columns(parser, args.key)
++        try:
++            result = dedupe(
++                args.file,
++                args.out,
++                key_columns,
++                ignore_case=args.ignore_case,
++                keep=args.keep,
++            )
++        except ValueError as exc:
++            parser.error(str(exc))
++        if result is not None:
++            print(result, end="")
++        return 0
++
+     parser.error("未知命令")
+     return 2
+ 

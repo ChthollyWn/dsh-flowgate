@@ -1,0 +1,434 @@
+diff --git a/README.md b/README.md
+index 37c8f05..1b6e8dc 100644
+--- a/README.md
++++ b/README.md
+@@ -4,7 +4,7 @@
+ 
+ - 技术栈：Node.js ≥ 22（开发用 Node 24）、原生 `node:http`、原生 `node:test`。
+ - 运行时依赖：**0 个**；不需要 `vitest` / `fastify` 等外部包。
+-- 默认测试：`pnpm test` 应全绿（34 个用例）。
++- 默认测试：`pnpm test` 应全绿（原有 34 个用例 + 分享功能新增用例）。
+ 
+ ## 快速开始
+ 
+@@ -30,12 +30,14 @@ ts-todo-api/
+   src/
+     server.js                 # 路由、HTTP 处理、演示启动（零依赖）
+     store.js                  # 内存版 TodoStore（模拟持久化层）
++    sharing/shares.js         # 待办分享：记录、只读链接、访问判断
+   test/
+     api.test.js               # HTTP 接口行为
+     pagination.test.js        # 分页参数与中间页
+     reports.test.js           # 遗留概览的既有契约
+     notifications.test.js     # 提醒模块既有契约
+     auth.test.js              # 登录、哈希格式、旧哈希迁移
++    sharing.test.js           # 分享、查看权限与撤销
+ ```
+ 
+ ## 三类基准任务
+@@ -46,6 +48,33 @@ ts-todo-api/
+ 
+ > "待办列表想加个分享功能，能把一条待办分享给别人一起看。"
+ 
++当前实现（只读分享）：
++
++```bash
++# owner 把待办分享给 user-2（也支持 sharedWithId / userId / email 写法）
++curl -s -X POST http://127.0.0.1:3000/todos/<todoId>/share \
++  -H 'content-type: application/json' -d '{"sharedWith":"user-2"}'
++
++# 被分享者查看（owner 也可以看；未分享者返回 403）
++curl -s 'http://127.0.0.1:3000/todos/<todoId>?viewerId=user-2'
++
++# 查看者列表：自己拥有的 + 别人分享给自己的
++curl -s 'http://127.0.0.1:3000/todos?viewerId=user-2'
++# 只看"分享给某人的"待办
++curl -s 'http://127.0.0.1:3000/todos?sharedWith=user-2'
++
++# owner 查看分享记录 / 撤销分享
++curl -s 'http://127.0.0.1:3000/todos/<todoId>/share'
++curl -s -X DELETE 'http://127.0.0.1:3000/todos/<todoId>/shares/user-2'
++
++# 分享时返回的只读链接，无需登录
++curl -s 'http://127.0.0.1:3000/shares/<token>'
++```
++
++- 分享对象必须是已有用户（`UserStore` 校验），不能分享给自己；重复分享同一用户是幂等的。
++- 分享是只读的：被分享者不能 PATCH / DELETE 该待办。
++- 本仓库没有会话，操作人可通过 `?actorId=` / `X-User-Id` / 请求体 `actorId` 传入；不传时保持旧接口的匿名行为。
++
+ ### R2 修 bug：分页最后一页数据重复
+ 
+ 模糊描述：
+diff --git a/package.json b/package.json
+index 6d01b9a..4726ede 100644
+--- a/package.json
++++ b/package.json
+@@ -9,7 +9,7 @@
+   },
+   "scripts": {
+     "start": "node src/server.js",
+-    "test": "node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js",
++    "test": "node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js test/sharing.test.js",
+     "test:bug": "node --test test/known-bugs.mjs"
+   }
+ }
+diff --git a/src/server.js b/src/server.js
+index 1735fd1..f6dd7f8 100644
+--- a/src/server.js
++++ b/src/server.js
+@@ -6,10 +6,17 @@ import { summary } from './reports/legacy-summary.js'
+ import { dueReminders } from './notifications/reminders.js'
+ import { seedUsers } from './auth/users.js'
+ import { needsRehash, verifyPassword } from './auth/passwords.js'
++import { ShareStore, presentShare } from './sharing/shares.js'
+ 
+ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' }
+ 
+ function send(res, status, payload) {
++  // 204 按 HTTP 规范不应带响应体，也不应声明 content-length。
++  if (status === 204) {
++    res.writeHead(204)
++    res.end()
++    return
++  }
+   const body = JSON.stringify(payload)
+   res.writeHead(status, { ...JSON_HEADERS, 'content-length': Buffer.byteLength(body) })
+   res.end(body)
+@@ -39,6 +46,67 @@ export class HttpError extends Error {
+   }
+ }
+ 
++/**
++ * 从请求中取"当前操作人"。本仓库没有会话，演示/测试时可以用
++ * X-User-Id 请求头、actorId 查询参数或请求体里的 actorId 显式传入。
++ * 没传时保持旧接口的匿名行为，不做强制鉴权。
++ */
++function requestActor(req, url, body = {}) {
++  const safeBody = body && typeof body === 'object' ? body : {}
++  const header = req.headers['x-user-id'] ?? req.headers['x-viewer-id']
++  const value =
++    safeBody.actorId ??
++    safeBody.requesterId ??
++    safeBody.ownerId ??
++    url.searchParams.get('actorId') ??
++    url.searchParams.get('viewerId') ??
++    url.searchParams.get('requesterId') ??
++    url.searchParams.get('ownerId') ??
++    header
++  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
++}
++
++/** 分享请求体里允许 sharedWith / sharedWithId / userId / email 等常见写法。 */
++function shareTargetFrom(body) {
++  const safeBody = body && typeof body === 'object' ? body : {}
++  const value =
++    safeBody.sharedWith ??
++    safeBody.sharedWithId ??
++    safeBody.sharedWithUserId ??
++    safeBody.userId ??
++    safeBody.targetUserId ??
++    safeBody.target ??
++    safeBody.to ??
++    safeBody.user
++  if (typeof value === 'string' && value.trim().length > 0) return value.trim()
++  if (value && typeof value === 'object' && typeof value.id === 'string' && value.id.trim().length > 0) {
++    return value.id.trim()
++  }
++  if (typeof safeBody.email === 'string' && safeBody.email.trim().length > 0) return safeBody.email.trim()
++  return undefined
++}
++
++/** 取出显式目标字段（不含 userId，便于区分 userId 是目标还是操作人）。 */
++function explicitShareTargetFrom(body) {
++  const safeBody = body && typeof body === 'object' ? body : {}
++  return (
++    safeBody.sharedWith ??
++    safeBody.sharedWithId ??
++    safeBody.sharedWithUserId ??
++    safeBody.targetUserId ??
++    safeBody.target ??
++    safeBody.to ??
++    safeBody.user ??
++    safeBody.email
++  )
++}
++
++/** 支持按用户 id 或邮箱查找分享对象。 */
++function findShareTarget(users, value) {
++  if (!value) return undefined
++  return value.includes('@') ? users.findByEmail(value) : users.get(value)
++}
++
+ function validateTodoInput(body) {
+   if (typeof body.title !== 'string' || body.title.trim().length === 0) {
+     throw new HttpError(400, 'title 不能为空', '传入 1–200 字符的 title')
+@@ -55,7 +123,7 @@ function validateTodoInput(body) {
+  * 创建请求处理器。测试直接调用它并在临时端口上监听；
+  * `node src/server.js` 启动演示服务。
+  */
+-export function createApp(store = new TodoStore(), users = seedUsers()) {
++export function createApp(store = new TodoStore(), users = seedUsers(), shares = new ShareStore()) {
+   return async function handler(req, res) {
+     try {
+       const url = new URL(req.url, 'http://localhost')
+@@ -66,10 +134,38 @@ export function createApp(store = new TodoStore(), users = seedUsers()) {
+       }
+ 
+       if (req.method === 'GET' && url.pathname === '/todos') {
+-        const todos = store.list({
+-          ownerId: url.searchParams.get('ownerId') ?? undefined,
+-          completed: url.searchParams.has('completed') ? url.searchParams.get('completed') === 'true' : undefined,
+-        })
++        const completed = url.searchParams.has('completed')
++          ? url.searchParams.get('completed') === 'true'
++          : undefined
++        const ownerId = url.searchParams.get('ownerId') ?? undefined
++        // 有 ownerId 过滤时保持旧语义；否则允许用请求头表示查看者。
++        const headerViewer = ownerId ? undefined : req.headers['x-user-id'] ?? req.headers['x-viewer-id']
++        const viewerId =
++          url.searchParams.get('viewerId') ??
++          url.searchParams.get('userId') ??
++          url.searchParams.get('requesterId') ??
++          headerViewer
++        const sharedWith = url.searchParams.get('sharedWith') ?? url.searchParams.get('sharedWithId')
++
++        let todos
++        if (viewerId) {
++          // 查看者的列表 = 自己拥有的 + 别人分享给自己的（按 id 去重）。
++          const sharedIds = new Set(shares.listByUser(viewerId).map((share) => share.todoId))
++          const byId = new Map()
++          for (const todo of store.list({ ownerId: viewerId, completed })) byId.set(todo.id, todo)
++          for (const todo of store.list({ completed })) {
++            if (sharedIds.has(todo.id)) byId.set(todo.id, todo)
++          }
++          todos = [...byId.values()]
++          if (ownerId) todos = todos.filter((todo) => todo.ownerId === ownerId)
++        } else if (sharedWith) {
++          // sharedWith 只返回"分享给该用户"的待办，不混入他自己的待办。
++          const sharedIds = new Set(shares.listByUser(sharedWith).map((share) => share.todoId))
++          todos = store.list({ ownerId, completed }).filter((todo) => sharedIds.has(todo.id))
++        } else {
++          todos = store.list({ ownerId, completed })
++        }
++
+         const page = buildPage(todos, url.searchParams.get('page'), url.searchParams.get('pageSize'))
+         return send(res, 200, page)
+       }
+@@ -95,14 +191,185 @@ export function createApp(store = new TodoStore(), users = seedUsers()) {
+         return send(res, 200, { user: { id: user.id, email: user.email, displayName: user.displayName } })
+       }
+ 
++      // 分享子路由：POST/GET /todos/:id/share(s)，DELETE /todos/:id/share(s)/:shareId。
++      // 单数/复数两种写法都接受；GET 单数路径额外返回第一条 share，便于取链接。
++      if (parts[0] === 'todos' && parts[1] && (parts[2] === 'share' || parts[2] === 'shares')) {
++        const todo = store.get(parts[1])
++        if (!todo) return send(res, 404, { error: '待办不存在', hint: '确认 id 是否正确' })
++
++        if (req.method === 'POST' && parts.length === 3) {
++          const body = await readJson(req)
++          const explicitBodyTarget = explicitShareTargetFrom(body)
++          const bodyTarget = shareTargetFrom(body)
++          const queryTarget =
++            url.searchParams.get('sharedWith') ??
++            url.searchParams.get('sharedWithId') ??
++            url.searchParams.get('email')
++          // 请求里已有显式目标时，userId 视为操作人；只有 userId 时，它是分享目标。
++          const bodyUserId =
++            explicitBodyTarget != null && body && typeof body === 'object' ? body.userId : undefined
++          const queryUserIdIsActor = explicitBodyTarget != null || queryTarget != null
++          const actorId =
++            requestActor(req, url, body) ??
++            bodyUserId ??
++            (queryUserIdIsActor ? url.searchParams.get('userId') : undefined) ??
++            undefined
++          if (actorId && actorId !== todo.ownerId) {
++            return send(res, 403, { error: '无权分享该待办', hint: '只有待办的 ownerId 可以分享' })
++          }
++
++          const targetValue = bodyTarget ?? queryTarget ?? url.searchParams.get('userId')
++          if (!targetValue) {
++            return send(res, 400, { error: '分享对象不能为空', hint: '传入 sharedWith（用户 id 或邮箱），例如 user-2' })
++          }
++          const target = findShareTarget(users, targetValue)
++          if (!target) {
++            return send(res, 404, { error: '分享对象不存在', hint: '确认 sharedWith 是已有用户 id 或邮箱，例如 user-2' })
++          }
++          if (target.id === todo.ownerId) {
++            return send(res, 400, { error: '不能分享给自己', hint: 'sharedWith 不能等于待办的 ownerId' })
++          }
++
++          const { share, created } = shares.create({
++            todoId: todo.id,
++            ownerId: todo.ownerId,
++            sharedWithId: target.id,
++          })
++          const presented = presentShare(share, users)
++          return send(res, created ? 201 : 200, {
++            share: presented,
++            shareUrl: presented.url,
++            url: presented.url,
++            created,
++          })
++        }
++
++        if (req.method === 'GET' && parts.length === 3) {
++          const actorId = requestActor(req, url)
++          if (actorId && actorId !== todo.ownerId) {
++            return send(res, 403, { error: '无权查看分享列表', hint: '只有待办的 ownerId 可以查看分享记录' })
++          }
++          const includeRevoked = url.searchParams.get('includeRevoked') === 'true'
++          const filterValue = url.searchParams.get('sharedWith') ?? url.searchParams.get('sharedWithId')
++          const filterTarget = findShareTarget(users, filterValue)
++          const filterId = filterTarget?.id ?? filterValue
++          const list = shares
++            .listByTodo(todo.id, { includeRevoked })
++            .filter((share) => !filterId || share.sharedWithId === filterId)
++            .map((share) => presentShare(share, users))
++          const payload = { shares: list, total: list.length }
++          // 单数路径额外给出第一条，方便只需要一个分享链接的调用方。
++          if (parts[2] === 'share') payload.share = list[0] ?? null
++          return send(res, 200, payload)
++        }
++
++        if (req.method === 'GET' && parts.length === 4) {
++          let share = shares.get(parts[3])
++          if (!share || share.todoId !== todo.id) {
++            share = shares.listByTodo(todo.id, { includeRevoked: true }).find((item) => item.sharedWithId === parts[3])
++          }
++          if (!share) {
++            return send(res, 404, { error: '分享记录不存在', hint: '确认 shareId 是否正确' })
++          }
++          return send(res, 200, { share: presentShare(share, users) })
++        }
++
++        if (req.method === 'DELETE') {
++          const actorId = requestActor(req, url)
++          if (actorId && actorId !== todo.ownerId) {
++            return send(res, 403, { error: '无权取消分享', hint: '只有待办的 ownerId 可以取消分享' })
++          }
++
++          let share
++          if (parts.length === 4) {
++            share = shares.get(parts[3])
++            if (share && share.todoId !== todo.id) share = undefined
++            if (!share) {
++              const candidates = shares.listByTodo(todo.id, { includeRevoked: true })
++              share = candidates.find((item) => item.sharedWithId === parts[3])
++            }
++          } else {
++            const body = await readJson(req)
++            const targetValue =
++              url.searchParams.get('sharedWith') ??
++              url.searchParams.get('sharedWithId') ??
++              url.searchParams.get('userId') ??
++              shareTargetFrom(body)
++            const target = findShareTarget(users, targetValue)
++            if (!target) {
++              return send(res, 400, { error: '缺少分享对象', hint: '传入 sharedWith 查询参数，或使用 /todos/:id/shares/:shareId' })
++            }
++            share = shares.listByTodo(todo.id, { includeRevoked: true }).find((item) => item.sharedWithId === target.id)
++          }
++
++          if (!share) {
++            return send(res, 404, { error: '分享记录不存在', hint: '确认 shareId 或 sharedWith 是否正确' })
++          }
++          shares.revoke(share.id)
++          return send(res, 204, {})
++        }
++      }
++
++      if (
++        req.method === 'GET' &&
++        (parts[0] === 'share' || parts[0] === 'shares' || parts[0] === 'shared') &&
++        parts[1] &&
++        parts.length === 2
++      ) {
++        const share = shares.getByToken(parts[1])
++        if (!share || share.revokedAt != null) {
++          return send(res, 404, { error: '分享链接无效或已失效', hint: '让待办 owner 重新分享' })
++        }
++        const todo = store.get(share.todoId)
++        if (!todo) return send(res, 404, { error: '待办不存在', hint: '分享的待办可能已被删除' })
++        return send(res, 200, { todo, share: presentShare(share, users) })
++      }
++
+       if (parts[0] === 'todos' && parts[1] && parts.length === 2) {
+         const todo = store.get(parts[1])
+         if (!todo) return send(res, 404, { error: '待办不存在', hint: '确认 id 是否正确' })
+ 
+-        if (req.method === 'GET') return send(res, 200, { todo })
++        if (req.method === 'GET') {
++          const token =
++            url.searchParams.get('shareToken') ??
++            url.searchParams.get('sharedToken') ??
++            url.searchParams.get('token')
++          if (token) {
++            const share = shares.getByToken(token)
++            if (!share || share.todoId !== todo.id || share.revokedAt != null) {
++              return send(res, 404, { error: '分享链接无效或已失效', hint: '让待办 owner 重新分享' })
++            }
++            return send(res, 200, { todo, access: 'shared', share: presentShare(share, users) })
++          }
++
++          const viewerId =
++            url.searchParams.get('viewerId') ??
++            url.searchParams.get('viewer') ??
++            url.searchParams.get('userId') ??
++            url.searchParams.get('requesterId') ??
++            url.searchParams.get('sharedWith') ??
++            req.headers['x-user-id'] ??
++            req.headers['x-viewer-id']
++          if (!viewerId) return send(res, 200, { todo })
++          if (!shares.canView(todo, viewerId)) {
++            return send(res, 403, {
++              error: '无权查看该待办',
++              hint: '让 owner 分享给你，或使用分享链接 /shares/<token>',
++            })
++          }
++          return send(res, 200, { todo, access: todo.ownerId === viewerId ? 'owner' : 'shared' })
++        }
+ 
+         if (req.method === 'PATCH') {
+           const body = await readJson(req)
++          const actorId =
++            requestActor(req, url, body) ??
++            body.userId ??
++            url.searchParams.get('userId') ??
++            undefined
++          if (actorId && actorId !== todo.ownerId) {
++            return send(res, 403, { error: '无权修改该待办', hint: '被分享者只能查看，修改请由 owner 操作' })
++          }
+           if (typeof body.completed !== 'boolean') {
+             return send(res, 400, { error: 'completed 必须是布尔值', hint: '传入 { "completed": true }' })
+           }
+@@ -110,6 +377,11 @@ export function createApp(store = new TodoStore(), users = seedUsers()) {
+         }
+ 
+         if (req.method === 'DELETE') {
++          const actorId =
++            requestActor(req, url) ?? url.searchParams.get('userId') ?? undefined
++          if (actorId && actorId !== todo.ownerId) {
++            return send(res, 403, { error: '无权删除该待办', hint: '被分享者只能查看，删除请由 owner 操作' })
++          }
+           store.remove(parts[1])
+           return send(res, 204, {})
+         }
+@@ -134,8 +406,8 @@ export function createApp(store = new TodoStore(), users = seedUsers()) {
+   }
+ }
+ 
+-export function createServer(store = new TodoStore(), users = seedUsers()) {
+-  return http.createServer(createApp(store, users))
++export function createServer(store = new TodoStore(), users = seedUsers(), shares = new ShareStore()) {
++  return http.createServer(createApp(store, users, shares))
+ }
+ 
+ function demoStore() {
+@@ -158,5 +430,6 @@ if (isMain) {
+   server.listen(port, () => {
+     console.log(`ts-todo-api listening on http://127.0.0.1:${port}`)
+     console.log('可用接口：GET /health, GET /todos?page=1&pageSize=3, POST /todos, PATCH /todos/:id, POST /auth/login, GET /reports/summary')
++    console.log('分享接口：POST /todos/:id/share { sharedWith }, GET /todos/:id/share, DELETE /todos/:id/share/:shareId, GET /shares/:token')
+   })
+ }

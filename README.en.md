@@ -214,9 +214,9 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ rendered in a real DSH web host (11 screenshots); remaining: panel button Remote fallback, low-complexity confirmation card |
 | HTML delivery report, cross-session dashboard | ✅ done (single-file, offline, samples in test/fixtures) |
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
-| With / without plugin evaluation report | 🟡 pilot 1/9 done (`ts-todo-api/fix-bug`, one A + one B run, both fixed correctly; B took 2 extra rounds, ~13x wall time, 3 human gates); 8 tasks + greenfield rehearsal remain — see [docs/evaluation.md](docs/evaluation.md) §6.1 |
+| With / without plugin evaluation report | 🟡 **18/18 runs done** (9 tasks × A/B, real model + headless): B matched A on regression (7/9) but 2/3 vs 3/3 on acceptance, with much higher time and human-gate cost; includes B-worse counterexamples and sandbox caveats — see [docs/evaluation.md](docs/evaluation.md) §6.4 |
 
-**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (69 files / 995 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has a 1/9-task pilot (A/B) and the full 9x2 matrix is pending — see [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
+**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (69 files / 995 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs (9 tasks × A/B); see [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
 ## Screenshots
 

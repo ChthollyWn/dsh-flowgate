@@ -1,0 +1,5 @@
+ M src/main/java/com/acme/member/renewal/RenewalController.java
+ M src/main/java/com/acme/member/renewal/RenewalService.java
+ M src/main/java/com/acme/member/renewal/SignatureVerifier.java
+ M src/main/resources/application.yml
+?? src/test/java/com/acme/member/renewal/SignatureVerifierUpgradeTest.java

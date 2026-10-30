@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-30T19:05:54.871Z",
+  "repo": "ts-todo-api",
+  "task": "risk",
+  "condition": "B",
+  "rounds": 5,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 34/34）",
+      "command": "pnpm test",
+      "exitCode": 1,
+      "timedOut": false,
+      "durationMs": 379,
+      "expected": "green",
+      "parsed": {
+        "tests": 36,
+        "failures": 2,
+        "errors": 0,
+        "passed": 34,
+        "verdict": "red"
+      },
+      "status": "red",
+      "outputTail": "▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.743834ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.061417ms)\n  ✔ 完成率四舍五入到两位 (0.046ms)\n  ✔ 完成率高时标签为 great (0.960916ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (2.298417ms)\nℹ tests 36\nℹ suites 11\nℹ pass 34\nℹ fail 2\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 166.335791\n\n✖ failing tests:\n\ntest at test/auth.test.js:38:3\n✖ R3.S1 新哈希使用 600000 次迭代 (0.507834ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  100000 !== 600000\n  \n      at TestContext.<anonymous> (file:///private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-0vr4Td/repo/test/auth.test.js:39:12)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1047:25)\n      at Test.start (node:internal/test_runner/test:944:17)\n      at node:internal/test_runner/test:1440:71\n      at node:internal/per_context/primordials:483:82\n      at new Promise (<anonymous>)\n      at new SafePromise (node:internal/per_context/primordials:451:29)\n      at node:internal/per_context/primordials:483:9\n      at Array.map (<anonymous>) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 100000,\n    expected: 600000,\n    operator: 'strictEqual'\n  }\n\ntest at test/auth.test.js:86:3\n✖ R3.S3 旧参数哈希在登录成功后自动迁移到 600000 次迭代 (17.88925ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  100000 !== 600000\n  \n      at TestContext.<anonymous> (file:///private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-0vr4Td/repo/test/auth.test.js:105:14)\n      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n      at async Test.run (node:internal/test_runner/test:1054:7)\n      at async Suite.processPendingSubtests (node:internal/test_runner/test:744:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 100000,\n    expected: 600000,\n    operator: 'strictEqual'\n  }\n[ELIFECYCLE] Test failed. See above for more details.\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js\n"
+    }
+  ]
+}

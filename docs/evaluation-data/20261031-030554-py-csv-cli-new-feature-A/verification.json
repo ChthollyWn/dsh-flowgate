@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-10-30T19:08:05.899Z",
+  "repo": "py-csv-cli",
+  "task": "new-feature",
+  "condition": "A",
+  "rounds": 1,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 13/13）",
+      "command": "python3 -m unittest discover -s tests -p test_*.py",
+      "exitCode": 1,
+      "timedOut": false,
+      "durationMs": 85,
+      "expected": "green",
+      "parsed": {
+        "tests": 27,
+        "failures": 3,
+        "errors": 0,
+        "passed": 24,
+        "verdict": "red"
+      },
+      "status": "red",
+      "outputTail": "\n..........FFF..............\n======================================================================\nFAIL: test_dedupe_command_to_file (test_dedupe.DedupeCliTest.test_dedupe_command_to_file)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-89pGvO/repo/tests/test_dedupe.py\", line 123, in test_dedupe_command_to_file\n    self.assertEqual(len(text.splitlines()), 6)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 7 != 6\n\n======================================================================\nFAIL: test_dedupe_command_to_stdout (test_dedupe.DedupeCliTest.test_dedupe_command_to_stdout)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-89pGvO/repo/tests/test_dedupe.py\", line 104, in test_dedupe_command_to_stdout\n    self.assertEqual(len(output.splitlines()), 6)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 7 != 6\n\n======================================================================\nFAIL: test_dedupe_duplicates_file_to_string (test_dedupe.DedupeFileTest.test_dedupe_duplicates_file_to_string)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-89pGvO/repo/tests/test_dedupe.py\", line 87, in test_dedupe_duplicates_file_to_string\n    self.assertEqual(len(lines), 6)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^\nAssertionError: 7 != 6\n\n----------------------------------------------------------------------\nRan 27 tests in 0.005s\n\nFAILED (failures=3)\n"
+    }
+  ]
+}

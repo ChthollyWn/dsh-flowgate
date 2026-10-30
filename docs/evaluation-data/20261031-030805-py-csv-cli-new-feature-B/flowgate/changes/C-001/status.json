@@ -1,0 +1,195 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "CSV 去重功能（dedupe 子命令）",
+  "summary": "数据里存在重复行，需要新增去重能力并导出导出后的结果。仓库已有 data/duplicates.csv 作为样例。需要明确去重语义（整行完全一致 vs 按 key 列）、是否保留表头、输出方式（--out 或 stdout），并新增 dedupe 子命令 + 单元测试。",
+  "complexity": "low",
+  "risk": "normal",
+  "stage": "S2",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-xxcwOC/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 low · 风险 normal"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T03:08:16+08:00",
+      "passedAt": "2026-10-31T03:08:16+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 6,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做按业务键（name/phone/email 组合）的实体去重与 `--key` 参数。；不做 `--in-place` 原地覆盖。；不做编码探测/GBK/BOM 处理（基准任务 R2）。；不做手机号脱敏（基准任务 R3）。；不做流式/超大数据集优化（沿用现有整文件读入）。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 6 个 · 场景 8 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T03:10:21+08:00",
+      "approvedAt": "2026-10-31T03:10:25+08:00"
+    },
+    "G2": {
+      "state": "failed",
+      "attempts": 4,
+      "items": [
+        {
+          "item": "g2.projectCommands",
+          "label": "project.md 命令可执行",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "test: pytest -q"
+          ]
+        },
+        {
+          "item": "g2.baseline",
+          "label": "基线已记录",
+          "passed": false,
+          "hint": "测试输出未能解析出测试数量：检查测试命令是否输出摘要，或使用插件识别的工具链。",
+          "priority": "P0",
+          "details": [
+            "pytest -q"
+          ]
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T03:19:51+08:00"
+    }
+  },
+  "batches": [],
+  "tasks": {},
+  "evidenceIds": [],
+  "pending": [],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T03:08:16+08:00",
+  "updatedAt": "2026-10-31T03:21:09+08:00",
+  "clarifyRounds": 0,
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T03:08:16+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T03:21:09+08:00"
+  },
+  "baseline": {
+    "commit": "2b734f88b6886e0e9eb01d7ebe7963bf89131b9a",
+    "summary": {
+      "parser": "unknown",
+      "parsed": false,
+      "run": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recordedAt": "2026-10-31T03:20:28+08:00",
+    "receiptId": "E-0030"
+  }
+}

@@ -19,6 +19,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
 - 核心工具单测补齐：`test/core/util/util.test.ts` 覆盖 paths/glob/hash/time/markdown（11 例：路径归一、** glob 与重叠、哈希/HMAC/稳定 JSON/密钥脱敏、时间格式与过期、围栏/表格/章节/列表解析）；核心覆盖率升至语句 83.0% / 分支 68.4%。
 - **命令执行器超时挂起修复**（真机发现：`flow_verify` 跑 `spring-boot:start` 时宿主超时后永久挂起）。`NodeCommandRunner` 改为 POSIX detached 进程组、超时整组 SIGTERM/SIGKILL，并在宽限期后强制返回 `timedOut`/exit 124，避免后代进程持有管道导致 Promise 不 resolve；新增 3 个回归测试。
+- 对照评测 **18/18 run** 完成（9 任务 × A/B，真实模型 + 隔离 headless，双流并行）并提交原始数据到 `docs/evaluation-data/`（11MB）；结果表与诚实结论见 [docs/evaluation.md](docs/evaluation.md) §6.2/§6.4：B 组回归通过数与 A 相同（7/9）、验收 2/3 vs 3/3，但耗时与人工门显著增加；含 2 个 B 更差反例与 2 个两者都红；sandbox 不可用是主要限制。
 - 评测脚本新增 `--no-run`：B 组把 `commands.run` 覆盖为 `none`，避免 Spring Boot 这类长驻服务命令在 headless 一次性运行里挂起（A 组不受影响；普通风险 G5 本就不强制运行证据）。
 - 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。

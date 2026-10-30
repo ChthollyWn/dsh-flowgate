@@ -1,0 +1,7 @@
+90	0	src/main/java/com/acme/member/renewal/Coupon.java
+54	0	src/main/java/com/acme/member/renewal/CouponRepository.java
+27	10	src/main/java/com/acme/member/renewal/RenewalController.java
+29	0	src/main/java/com/acme/member/renewal/RenewalOrder.java
+116	6	src/main/java/com/acme/member/renewal/RenewalService.java
+72	0	src/test/java/com/acme/member/renewal/CouponRepositoryTest.java
+57	0	src/test/java/com/acme/member/renewal/RenewalOrderQueryTest.java

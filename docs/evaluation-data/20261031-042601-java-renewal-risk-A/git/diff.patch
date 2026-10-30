@@ -1,0 +1,449 @@
+diff --git a/src/main/java/com/acme/member/renewal/RenewalController.java b/src/main/java/com/acme/member/renewal/RenewalController.java
+index 78da837..20be3fa 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalController.java
++++ b/src/main/java/com/acme/member/renewal/RenewalController.java
+@@ -1,6 +1,7 @@
+ package com.acme.member.renewal;
+ 
+ import com.acme.member.member.MemberService;
++import com.fasterxml.jackson.annotation.JsonAlias;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.GetMapping;
+@@ -32,7 +33,8 @@ public class RenewalController {
+                     request.memberId(),
+                     request.months(),
+                     request.amountCents(),
+-                    request.signature()
++                    request.signature(),
++                    request.timestamp()
+             ));
+             return ResponseEntity.ok(Map.of(
+                     "code", 0,
+@@ -62,6 +64,18 @@ public class RenewalController {
+                 .toList();
+     }
+ 
+-    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    /**
++     * 回调报文。
++     *
++     * <p>{@code timestamp} 是可选的新字段（Unix 秒或毫秒均可）；老回调不传也兼容。
++     * 新格式签名自身已包含时间戳，这里额外携带时只要与签名内时间戳一致即可。
++     */
++    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents,
++                                  String signature, @JsonAlias({"ts", "signTimestamp"}) Long timestamp) {
++
++        /** 兼容既有五参数调用方。 */
++        public CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
+     }
+ }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalService.java b/src/main/java/com/acme/member/renewal/RenewalService.java
+index ff327e1..3b7e561 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalService.java
++++ b/src/main/java/com/acme/member/renewal/RenewalService.java
+@@ -46,7 +46,8 @@ public class RenewalService {
+     }
+ 
+     public CallbackResult handleCallback(CallbackCommand command) {
+-        if (!signatureVerifier.verify(command.externalTxnId(), command.amountCents(), command.signature())) {
++        if (!signatureVerifier.verify(
++                command.externalTxnId(), command.amountCents(), command.timestamp(), command.signature())) {
+             throw new InvalidSignatureException();
+         }
+         // 幂等：同一流水号直接返回已处理，不再顺延到期日。
+@@ -73,8 +74,23 @@ public class RenewalService {
+         return signatureVerifier.verify(externalTxnId, amountCents, signature);
+     }
+ 
+-    /** 回调命令。 */
+-    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    public boolean verifySignature(String externalTxnId, long amountCents, Long timestamp, String signature) {
++        return signatureVerifier.verify(externalTxnId, amountCents, timestamp, signature);
++    }
++
++    /**
++     * 回调命令。
++     *
++     * <p>{@code timestamp} 是新增的可选字段：新格式签名会把时间戳放在签名串里，
++     * 老回调没有该字段也不受影响。
++     */
++    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents,
++                                  String signature, Long timestamp) {
++
++        /** 兼容既有五参数调用方。 */
++        public CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
+     }
+ 
+     /** 处理结果：duplicate 表示命中幂等。 */
+diff --git a/src/main/java/com/acme/member/renewal/SignatureVerifier.java b/src/main/java/com/acme/member/renewal/SignatureVerifier.java
+index 22aed79..cbe245f 100644
+--- a/src/main/java/com/acme/member/renewal/SignatureVerifier.java
++++ b/src/main/java/com/acme/member/renewal/SignatureVerifier.java
+@@ -1,43 +1,325 @@
+ package com.acme.member.renewal;
+ 
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.stereotype.Component;
+ 
++import javax.crypto.Mac;
++import javax.crypto.spec.SecretKeySpec;
+ import java.nio.charset.StandardCharsets;
++import java.security.GeneralSecurityException;
+ import java.security.MessageDigest;
+ import java.security.NoSuchAlgorithmException;
++import java.time.Clock;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Objects;
++import java.util.Set;
+ 
+ /**
+  * 支付回调验签。
+  *
+- * <p>当前实现是 MD5(流水号 + 金额 + 硬编码密钥)，存在三个已知安全问题：
+- * 摘要算法过弱、密钥硬编码、没有时间戳（可被重放）。
+- * 基准任务 R3（风险改造）要求改成 HMAC-SHA256 + 时间戳 + 外部密钥 + 新旧签名过渡期。
++ * <p>新签名使用 HMAC-SHA256，并把 Unix 时间戳放进签名串，默认只接受
++ * {@code renewal.callback.timestamp-tolerance-seconds} 时间窗内的回调，降低重放风险。
++ * 签名格式为 {@code v2:<timestamp>:<hex-hmac>}，HMAC 的消息为
++ * {@code externalTxnId + ":" + amountCents + ":" + timestamp}。
++ *
++ * <p>为了不影响线上老回调，过渡期内仍接受旧格式
++ * {@code MD5(externalTxnId + ":" + amountCents + ":" + legacySecret)}。
++ * 老签名不包含时间戳，因此没有时间窗校验；确认老流量下线后，把
++ * {@code renewal.callback.legacy-enabled} 置为 {@code false} 即可彻底关闭。
++ *
++ * <p>密钥不再硬编码在验签逻辑里，而是来自配置/环境变量：
++ * {@code renewal.callback.secret}、{@code renewal.callback.legacy-secret}。
++ * {@code legacy-secret} 支持逗号分隔多把密钥，便于滚动轮换；当前密钥也会作为
++ * 老签名候选密钥参与校验。
+  */
+ @Component
+ public class SignatureVerifier {
+ 
+-    private static final String SECRET = "dev-secret-do-not-use-in-prod";
++    /** 仅用于本地开发和默认测试；生产必须通过环境变量/配置覆盖。 */
++    private static final String DEFAULT_DEV_SECRET = "dev-secret-do-not-use-in-prod";
++    private static final long DEFAULT_TIMESTAMP_TOLERANCE_SECONDS = 300L;
++    private static final String V2_PREFIX = "v2:";
++    private static final String MD5_PREFIX = "md5:";
++    private static final String V1_PREFIX = "v1:";
++    private static final long MILLIS_THRESHOLD = 100_000_000_000L;
++
++    private final String secret;
++    private final List<String> legacySecrets;
++    private final boolean legacyEnabled;
++    private final long timestampToleranceSeconds;
++    private final Clock clock;
++
++    /** 兼容既有单测/手工构造：使用默认开发密钥和系统时钟。 */
++    public SignatureVerifier() {
++        this(DEFAULT_DEV_SECRET, DEFAULT_DEV_SECRET, true, DEFAULT_TIMESTAMP_TOLERANCE_SECONDS, Clock.systemUTC());
++    }
++
++    /** 便于测试/嵌入式使用：只指定新密钥，老密钥与时间窗取默认值。 */
++    public SignatureVerifier(String secret) {
++        this(secret, secret, true, DEFAULT_TIMESTAMP_TOLERANCE_SECONDS, Clock.systemUTC());
++    }
++
++    /** 便于测试：指定新密钥和时钟。 */
++    public SignatureVerifier(String secret, Clock clock) {
++        this(secret, secret, true, DEFAULT_TIMESTAMP_TOLERANCE_SECONDS, clock);
++    }
++
++    @Autowired
++    public SignatureVerifier(
++            @Value("${renewal.callback.secret:dev-secret-do-not-use-in-prod}") String secret,
++            @Value("${renewal.callback.legacy-secret:dev-secret-do-not-use-in-prod}") String legacySecret,
++            @Value("${renewal.callback.legacy-enabled:true}") boolean legacyEnabled,
++            @Value("${renewal.callback.timestamp-tolerance-seconds:300}") long timestampToleranceSeconds,
++            Clock clock) {
++        if (secret == null || secret.isBlank()) {
++            throw new IllegalArgumentException("renewal.callback.secret 不能为空");
++        }
++        this.secret = secret;
++        this.legacySecrets = collectLegacySecrets(legacySecret, secret);
++        this.legacyEnabled = legacyEnabled;
++        this.timestampToleranceSeconds = Math.max(0L, timestampToleranceSeconds);
++        this.clock = Objects.requireNonNull(clock, "clock");
++    }
++
++    /**
++     * 用当前时间生成新格式签名。
++     *
++     * <p>方法签名保持不变，方便既有调用方平滑升级；返回值已从 MD5 变为
++     * {@code v2:<timestamp>:<hmac-sha256>}。
++     */
++    public String sign(String externalTxnId, long amountCents) {
++        return sign(externalTxnId, amountCents, clock.instant().getEpochSecond());
++    }
++
++    /** 用指定的 Unix 秒级时间戳生成新格式签名，便于测试和补偿任务。 */
++    public String sign(String externalTxnId, long amountCents, long timestampSeconds) {
++        Objects.requireNonNull(externalTxnId, "externalTxnId");
++        String timestampToken = Long.toString(timestampSeconds);
++        String mac = hmacSha256Hex(secret, payload(externalTxnId, amountCents, timestampToken));
++        return V2_PREFIX + timestampToken + ":" + mac;
++    }
++
++    /** 生成旧版 MD5 签名，仅用于兼容性测试或尚未升级的调用方。 */
++    public String signLegacy(String externalTxnId, long amountCents) {
++        Objects.requireNonNull(externalTxnId, "externalTxnId");
++        return md5Hex(legacySecrets.get(0), externalTxnId, amountCents);
++    }
+ 
++    /**
++     * 验签：优先识别新格式（带时间戳的 HMAC-SHA256），否则在过渡期内回退到旧 MD5。
++     */
+     public boolean verify(String externalTxnId, long amountCents, String signature) {
+-        if (signature == null || signature.isBlank()) {
++        return verify(externalTxnId, amountCents, null, signature);
++    }
++
++    /**
++     * 验签，并允许回调报文在签名串之外额外携带时间戳。
++     *
++     * <p>如果签名串本身带时间戳，{@code timestamp} 必须与之一致；如果签名串是
++     * 裸 HMAC（{@code v2:<hmac>} 或 64 位 hex），则必须提供 {@code timestamp}。
++     */
++    public boolean verify(String externalTxnId, long amountCents, Long timestamp, String signature) {
++        if (externalTxnId == null || signature == null || signature.isBlank()) {
++            return false;
++        }
++        String trimmed = signature.trim();
++
++        ParsedNewSignature parsed = parseNewSignature(trimmed, timestamp);
++        if (parsed != null) {
++            if (!isTimestampFresh(parsed.timestampSeconds())) {
++                return false;
++            }
++            String expected = hmacSha256Hex(secret, payload(externalTxnId, amountCents, parsed.timestampToken()));
++            return constantTimeEquals(expected, parsed.mac());
++        }
++
++        if (!legacyEnabled) {
+             return false;
+         }
+-        return sign(externalTxnId, amountCents).equalsIgnoreCase(signature);
++        return verifyLegacySignature(externalTxnId, amountCents, trimmed);
+     }
+ 
+-    public String sign(String externalTxnId, long amountCents) {
+-        String payload = externalTxnId + ":" + amountCents + ":" + SECRET;
++    /** 基本类型时间戳重载，避免调用方在 int/long 字面量上遭遇装箱不匹配。 */
++    public boolean verify(String externalTxnId, long amountCents, long timestamp, String signature) {
++        return verify(externalTxnId, amountCents, Long.valueOf(timestamp), signature);
++    }
++
++    /** 仅校验旧版 MD5 签名（同时受 {@code legacy-enabled} 开关控制）。 */
++    public boolean verifyLegacy(String externalTxnId, long amountCents, String signature) {
++        if (!legacyEnabled || externalTxnId == null || signature == null || signature.isBlank()) {
++            return false;
++        }
++        return verifyLegacySignature(externalTxnId, amountCents, signature.trim());
++    }
++
++    private boolean verifyLegacySignature(String externalTxnId, long amountCents, String signature) {
++        String candidate = signature;
++        if (candidate.regionMatches(true, 0, MD5_PREFIX, 0, MD5_PREFIX.length())) {
++            candidate = candidate.substring(MD5_PREFIX.length());
++        } else if (candidate.regionMatches(true, 0, V1_PREFIX, 0, V1_PREFIX.length())) {
++            candidate = candidate.substring(V1_PREFIX.length());
++        }
++        if (!isHex(candidate, 32)) {
++            return false;
++        }
++        // 兼容轮换：旧回调可能用旧密钥，也可能已经被上游切到当前密钥。
++        for (String legacySecret : legacySecrets) {
++            if (constantTimeEquals(md5Hex(legacySecret, externalTxnId, amountCents), candidate)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    private ParsedNewSignature parseNewSignature(String signature, Long outerTimestamp) {
++        String body = signature;
++        boolean hasVersion = body.regionMatches(true, 0, V2_PREFIX, 0, V2_PREFIX.length());
++        if (hasVersion) {
++            body = body.substring(V2_PREFIX.length());
++        }
++
++        String[] parts = body.split(":", -1);
++        if (parts.length == 2) {
++            if (isHex(parts[1], 64) && isTimestampToken(parts[0])) {
++                return buildParsedSignature(parts[0], parts[1], outerTimestamp);
++            }
++            if (isHex(parts[0], 64) && isTimestampToken(parts[1])) {
++                return buildParsedSignature(parts[1], parts[0], outerTimestamp);
++            }
++            return null;
++        }
++        if (parts.length == 1 && isHex(parts[0], 64) && outerTimestamp != null) {
++            return buildParsedSignature(Long.toString(outerTimestamp), parts[0], outerTimestamp);
++        }
++        return null;
++    }
++
++    private ParsedNewSignature buildParsedSignature(String timestampToken, String mac, Long outerTimestamp) {
++        Long timestampSeconds = parseTimestampSeconds(timestampToken);
++        if (timestampSeconds == null) {
++            return null;
++        }
++        if (outerTimestamp != null && normalizeTimestamp(outerTimestamp) != timestampSeconds) {
++            return null;
++        }
++        return new ParsedNewSignature(timestampToken, mac, timestampSeconds);
++    }
++
++    private boolean isTimestampFresh(long timestampSeconds) {
++        long now = clock.instant().getEpochSecond();
++        if (timestampSeconds > now) {
++            return timestampSeconds - now <= timestampToleranceSeconds;
++        }
++        return now - timestampSeconds <= timestampToleranceSeconds;
++    }
++
++    private static Long parseTimestampSeconds(String timestampToken) {
++        if (!isTimestampToken(timestampToken)) {
++            return null;
++        }
+         try {
+-            MessageDigest digest = MessageDigest.getInstance("MD5");
+-            byte[] hashed = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+-            StringBuilder builder = new StringBuilder(hashed.length * 2);
+-            for (byte value : hashed) {
+-                builder.append(Character.forDigit((value >> 4) & 0xF, 16));
+-                builder.append(Character.forDigit(value & 0xF, 16));
++            long raw = Long.parseLong(timestampToken);
++            if (raw <= 0L) {
++                return null;
++            }
++            return normalizeTimestamp(raw);
++        } catch (NumberFormatException exception) {
++            return null;
++        }
++    }
++
++    private static long normalizeTimestamp(long timestamp) {
++        return timestamp >= MILLIS_THRESHOLD ? timestamp / 1000L : timestamp;
++    }
++
++    private static boolean isTimestampToken(String token) {
++        if (token == null || token.isEmpty() || token.length() > 19) {
++            return false;
++        }
++        for (int index = 0; index < token.length(); index++) {
++            char character = token.charAt(index);
++            if (character < '0' || character > '9') {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    private static boolean isHex(String value, int expectedLength) {
++        if (value == null || value.length() != expectedLength) {
++            return false;
++        }
++        for (int index = 0; index < value.length(); index++) {
++            char character = value.charAt(index);
++            boolean digit = character >= '0' && character <= '9';
++            boolean lower = character >= 'a' && character <= 'f';
++            boolean upper = character >= 'A' && character <= 'F';
++            if (!digit && !lower && !upper) {
++                return false;
+             }
+-            return builder.toString();
++        }
++        return true;
++    }
++
++    private static boolean constantTimeEquals(String expected, String actual) {
++        if (expected == null || actual == null) {
++            return false;
++        }
++        byte[] expectedBytes = expected.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII);
++        byte[] actualBytes = actual.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.US_ASCII);
++        return MessageDigest.isEqual(expectedBytes, actualBytes);
++    }
++
++    private static String payload(String externalTxnId, long amountCents, String timestampToken) {
++        return externalTxnId + ":" + amountCents + ":" + timestampToken;
++    }
++
++    private static String hmacSha256Hex(String key, String message) {
++        try {
++            Mac mac = Mac.getInstance("HmacSHA256");
++            mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
++            return toHex(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)));
++        } catch (GeneralSecurityException exception) {
++            throw new IllegalStateException("HmacSHA256 不可用", exception);
++        }
++    }
++
++    private static String md5Hex(String key, String externalTxnId, long amountCents) {
++        String payload = externalTxnId + ":" + amountCents + ":" + key;
++        try {
++            MessageDigest digest = MessageDigest.getInstance("MD5");
++            return toHex(digest.digest(payload.getBytes(StandardCharsets.UTF_8)));
+         } catch (NoSuchAlgorithmException exception) {
+             throw new IllegalStateException("MD5 不可用", exception);
+         }
+     }
++
++    private static String toHex(byte[] bytes) {
++        StringBuilder builder = new StringBuilder(bytes.length * 2);
++        for (byte value : bytes) {
++            builder.append(Character.forDigit((value >> 4) & 0xF, 16));
++            builder.append(Character.forDigit(value & 0xF, 16));
++        }
++        return builder.toString();
++    }
++
++    private static List<String> collectLegacySecrets(String configuredSecrets, String primarySecret) {
++        Set<String> secrets = new LinkedHashSet<>();
++        if (configuredSecrets != null) {
++            for (String candidate : configuredSecrets.split(",")) {
++                String trimmed = candidate.trim();
++                if (!trimmed.isEmpty()) {
++                    secrets.add(trimmed);
++                }
++            }
++        }
++        secrets.add(primarySecret);
++        return List.copyOf(secrets);
++    }
++
++    private record ParsedNewSignature(String timestampToken, String mac, long timestampSeconds) {
++    }
+ }
+diff --git a/src/main/resources/application.yml b/src/main/resources/application.yml
+index 22cc6f4..1f74af7 100644
+--- a/src/main/resources/application.yml
++++ b/src/main/resources/application.yml
+@@ -3,9 +3,14 @@ server:
+ 
+ renewal:
+   callback:
+-    # 基准任务 R3（风险改造）会要求把密钥移到配置/环境变量，
+-    # 当前实现把它硬编码在 SignatureVerifier 里，是待改造的安全问题。
+-    secret: dev-secret-do-not-use-in-prod
++    # 新签名密钥：生产通过环境变量 RENEWAL_CALLBACK_SECRET 注入，切勿使用默认值。
++    secret: ${RENEWAL_CALLBACK_SECRET:dev-secret-do-not-use-in-prod}
++    # 过渡期开关：仍接受线上存量 MD5 老回调；确认老流量下线后置为 false。
++    legacy-enabled: ${RENEWAL_CALLBACK_LEGACY_ENABLED:true}
++    # 老回调密钥，支持逗号分隔多把以滚动轮换；当前 secret 也会作为候选参与老签名校验。
++    legacy-secret: ${RENEWAL_CALLBACK_LEGACY_SECRET:dev-secret-do-not-use-in-prod}
++    # 新签名允许的时间偏差（秒），超出即视为过期/重放。
++    timestamp-tolerance-seconds: ${RENEWAL_CALLBACK_TIMESTAMP_TOLERANCE_SECONDS:300}
+   timezone: Asia/Shanghai
+ 
+ logging:

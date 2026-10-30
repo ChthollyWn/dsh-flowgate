@@ -1,6 +1,6 @@
 # 评测方案（M6 / T6.1）
 
-> 状态：**部分执行（pilot 1/9 任务）**。2026-10-31 用 `scripts/run-evaluation.mjs` 跑通 `ts-todo-api / fix-bug` 的 A/B 对照（第 6.1 节），其余 8 个任务与从 0 开发/并行对照仍待跑。本文件其余部分是执行方案与原始数据说明。
+> 状态：**已执行 18/18 run（9 任务 × A/B，2026-10-31，真实模型 + 隔离 headless）**。结果表见 §6.2，结论与局限见 §6.4；原始数据在 `docs/evaluation-data/`。从 0 开发演练与并行对照尚未执行。
 
 ## 1. 基准仓库与任务
 
@@ -139,23 +139,53 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 | py-csv-cli / new-feature | A | 1 | 131 | 0 | red | — | [20261031-030554-py-csv-cli-new-feature-A](evaluation-data/20261031-030554-py-csv-cli-new-feature-A/) |
 | py-csv-cli / new-feature | B | 4 | 784 | 1 | green | — | [20261031-030805-py-csv-cli-new-feature-B](evaluation-data/20261031-030805-py-csv-cli-new-feature-B/) |
 | py-csv-cli / fix-bug | A | 1 | 44 | 0 | green | green | [20261031-032109-py-csv-cli-fix-bug-A](evaluation-data/20261031-032109-py-csv-cli-fix-bug-A/) |
-| py-csv-cli / fix-bug | B | — | — | — | — | — | 待跑 |
-| py-csv-cli / risk | A | — | — | — | — | — | 待跑 |
-| py-csv-cli / risk | B | — | — | — | — | — | 待跑 |
-| java-renewal / new-feature | A | — | — | — | — | — | 待跑 |
-| java-renewal / new-feature | B | — | — | — | — | — | 待跑 |
-| java-renewal / fix-bug | A | — | — | — | — | — | 待跑 |
-| java-renewal / fix-bug | B | — | — | — | — | — | 待跑 |
-| java-renewal / risk | A | — | — | — | — | — | 待跑 |
-| java-renewal / risk | B | — | — | — | — | — | 待跑 |
+| py-csv-cli / fix-bug | B | 5 | 1012 | 2 | green | green | [20261031-032154-py-csv-cli-fix-bug-B](evaluation-data/20261031-032154-py-csv-cli-fix-bug-B/) |
+| py-csv-cli / risk | A | 1 | 244 | 0 | green | — | [20261031-033846-py-csv-cli-risk-A](evaluation-data/20261031-033846-py-csv-cli-risk-A/) |
+| py-csv-cli / risk | B | 6 | 810 | 2 | green | — | [20261031-034250-py-csv-cli-risk-B](evaluation-data/20261031-034250-py-csv-cli-risk-B/) |
+| java-renewal / new-feature | A | 1 | 517 | 0 | red | — | [20261031-032755-java-renewal-new-feature-A](evaluation-data/20261031-032755-java-renewal-new-feature-A/) |
+| java-renewal / new-feature | B | 5 | 685 | 2 | red | — | [20261031-040857-java-renewal-new-feature-B](evaluation-data/20261031-040857-java-renewal-new-feature-B/) |
+| java-renewal / fix-bug | A | 1 | 29 | 0 | green | green | [20261031-042022-java-renewal-fix-bug-A](evaluation-data/20261031-042022-java-renewal-fix-bug-A/) |
+| java-renewal / fix-bug | B | 5 | 310 | 2 | green | red | [20261031-042051-java-renewal-fix-bug-B](evaluation-data/20261031-042051-java-renewal-fix-bug-B/) |
+| java-renewal / risk | A | 1 | 203 | 0 | green | — | [20261031-042601-java-renewal-risk-A](evaluation-data/20261031-042601-java-renewal-risk-A/) |
+| java-renewal / risk | B | 5 | 1070 | 2 | green | — | [20261031-045206-java-renewal-risk-B](evaluation-data/20261031-045206-java-renewal-risk-B/) |
 
-已完成 **9/18** 个 run；未跑任务显示"待跑"。A/B 条件、prompt、隔离 DSH_HOME 与人工门策略见 §2/§5。
+已完成 **18/18** 个 run；未跑任务显示"待跑"。A/B 条件、prompt、隔离 DSH_HOME 与人工门策略见 §2/§5。
 <!-- EVAL-TABLE:END -->
 
 ### 6.3 pilot 修正记录
 
 1. **R2 验收测试 fixture bug**（`examples/ts-todo-api/test/known-bugs.mjs`）：原断言"第 4 页 = `todo-010`"与 `sortTodos` 的 `createdAt` 倒序契约矛盾（正确修复后第 4 页是最早的 `todo-001`），导致 A 组正确修复也被判红；已改为 `todo-001` 并加注释。修复前 4/4 失败、修复后 4/4 通过，两态均已复验。
 2. **git 自动提交**：`NodeGit.add` 生成 `git add -- -A`，`-A` 被当 pathspec，自动提交永远失败；已修 `buildAddArgs`（选项在 `--` 前）并加 host 回归测试。
+
+## 6.4 结论（18/18 run）
+
+> 条件：同一模型（deepseek-flash）、同一句模糊需求、headless 一次性任务、隔离 `DSH_HOME`；B 组 `dispatch=inline`、`review.enabled=false`、人工门由脚本扮演负责人自动批准。每格只跑 1 次，**样本极小、自评、不能外推**。
+
+**客观结果（回归绿 / 验收绿）**
+
+| 维度 | A（标准模式） | B（FlowGate） |
+|---|---|---|
+| 回归通过 | 7/9 | 7/9 |
+| 验收通过（3 个 fix-bug 任务） | 3/3 | 2/3 |
+| 人工门动作 | 0 | 每题 1–3 次（G1/G3，部分 G6） |
+| 耗时 | 多为 28–244s（java new-feature 517s） | 多为 310–1070s（py new-feature 784s） |
+| 额外产物 | 无 | RED/GREEN 回执、门禁记录、交付报告、M-1~M-18 指标 |
+
+**逐任务差异（A → B）**
+
+- B 更好：`py-csv-cli / new-feature`（A 回归红 → B 绿）；其余 7 个任务两种条件结果相同。
+- B 更差：`ts-todo-api / risk`（A 绿 → B 红）、`java-renewal / fix-bug`（验收 A 绿 → B 红）。
+- 两者都红：`java-renewal / new-feature`（A、B 都改坏了默认测试套件）。
+
+**怎么读这组数字（诚实版）**
+
+1. **本机 `workspace-write` sandbox 不可用**：两种条件下 agent 都无法自己执行 shell/测试；A 组只能"改完自述"，B 组通过 `flow_verify` 由插件执行命令拿到回执。因此这组数据主要证明"证据链是否可执行"，而不是"模型在有 shell 时会不会自己验证"；正式结论需要在可执行 sandbox 的机器上重跑。
+2. **门禁没有让 B 组结果更好**：B 的回归/验通过数与 A 相同，且多花了 2–20 倍耗时与 1–3 次人工门。B 的价值体现在过程证据与可审计性（RED/GREEN、任务门、审查、报告），而不是本轮任务成功率。
+3. **B 也有反例**：`ts risk` 与 `java fix-bug` 在 B 下反而失败，需要逐个复盘事件流（是否被门禁打断、是否改错文件、是否把测试改成"能过"）。
+4. **隐藏需求遗漏/越界/虚假完成**尚未人工评分（脚本只收客观信号）；这四项是计划中 T6.1 的核心产物，下一轮需人工复盘 18 组事件流后补齐。
+5. **java B 组使用 `--no-run`**：headless 无法托管 Spring Boot 长驻服务，B 组把 `commands.run` 置 none；A 组无 FlowGate 配置不受影响；普通风险 G5 本就不强制运行证据。
+
+**下一步（评测）**：在可执行 sandbox 的宿主上重跑 18 组、人工补齐 4 项主观指标、做从 0 开发演练与并行（inline vs auto）对照，最后把结论写入本节。
 
 ## 7. 结论模板（跑完后写）
 

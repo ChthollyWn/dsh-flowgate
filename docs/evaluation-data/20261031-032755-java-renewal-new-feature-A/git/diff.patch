@@ -1,0 +1,525 @@
+diff --git a/README.md b/README.md
+index 0a728e8..080c2c2 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,7 @@
+ 
+ - 技术栈：Java 17+（开发用 JDK 21）、Spring Boot 3.3.x、Maven、JUnit 5。
+ - 存储：内存仓储（`ConcurrentHashMap`），不引入数据库（真实项目会换 JPA / MyBatis + H2）。
+-- 默认测试：`./mvnw test`（或系统 `mvn test`）应全绿（20 个用例）。
++- 默认测试：`./mvnw test`（或系统 `mvn test`）应全绿。
+ 
+ ## 快速开始
+ 
+@@ -24,6 +24,29 @@ curl -s -X POST http://127.0.0.1:8080/api/renewal/callback \
+ 
+ **Maven Wrapper：** 仓库自带 `mvnw` / `mvnw.cmd` 与 `.mvn/wrapper/maven-wrapper.properties`（Maven 3.9.9，only-script 模式），没有预装 Maven 的机器也能直接构建；第一次运行需要联网下载 Maven 发行包。已有系统 Maven 3.9+ 时也可以直接用 `mvn`。
+ 
++## 优惠券（R1）
++
++续费回调新增可选字段 `couponCode`，支持百分比券与固定金额券：
++
++```bash
++# 使用内置演示券 SAVE10（减 10%）：9900 -> 8910 分
++curl -s -X POST http://127.0.0.1:8080/api/renewal/callback \
++  -H 'content-type: application/json' \
++  -d '{"externalTxnId":"TXN-2","memberId":"<member-id>","months":1,"amountCents":9900,"couponCode":"SAVE10","signature":"<md5>"}'
++
++# 新建优惠券（也可用 GET /api/coupons 查看）
++curl -s -X POST http://127.0.0.1:8080/api/coupons \
++  -H 'content-type: application/json' \
++  -d '{"code":"SAVE15","discountType":"PERCENTAGE","discountValue":15,"maxUses":100}'
++```
++
++- 券码大小写不敏感、前后空白忽略；空券码等价于不使用优惠券。
++- 百分比按分四舍五入（HALF_UP）；固定金额券最多减到 0，不会出现负金额。
++- 支持 `validFrom` / `validUntil`、`minAmountCents`、`maxUses`（`0` 表示不限次数）。
++- 订单同时记录 `originalAmountCents`、`discountCents`、`amountCents`（优惠后实付）与 `couponCode`。
++- 验签仍按回调原始金额 `amountCents` 计算；同一 `externalTxnId` 重复回调不会重复核销优惠券。
++- 内置演示券：`SAVE10` / `SAVE20` / `SAVE50`、`WELCOME10` / `WELCOME20`、`FIXED1000` 等。
++
+ > 本仓库**刻意不包含** `.flowgate/`。评测前先在仓库根执行 FlowGate 的 `/flow init`，让插件生成 `.flowgate/project.md` 等文件；初始化前后的对比也是评测内容。
+ 
+ ## 目录结构
+diff --git a/src/main/java/com/acme/member/renewal/RenewalController.java b/src/main/java/com/acme/member/renewal/RenewalController.java
+index 78da837..606948d 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalController.java
++++ b/src/main/java/com/acme/member/renewal/RenewalController.java
+@@ -1,6 +1,8 @@
+ package com.acme.member.renewal;
+ 
++import com.acme.member.coupon.CouponException;
+ import com.acme.member.member.MemberService;
++import com.fasterxml.jackson.annotation.JsonAlias;
+ import org.springframework.http.HttpStatus;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.GetMapping;
+@@ -9,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestBody;
+ import org.springframework.web.bind.annotation.RequestMapping;
+ import org.springframework.web.bind.annotation.RestController;
+ 
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+ 
+@@ -32,36 +36,78 @@ public class RenewalController {
+                     request.memberId(),
+                     request.months(),
+                     request.amountCents(),
+-                    request.signature()
+-            ));
+-            return ResponseEntity.ok(Map.of(
+-                    "code", 0,
+-                    "duplicate", result.duplicate(),
+-                    "orderId", result.order().getId()
++                    request.signature(),
++                    request.couponCode()
+             ));
++            RenewalOrder order = result.order();
++            Map<String, Object> body = new LinkedHashMap<>();
++            body.put("code", 0);
++            body.put("duplicate", result.duplicate());
++            body.put("orderId", order.getId());
++            body.put("originalAmountCents", order.getOriginalAmountCents());
++            body.put("discountCents", order.getDiscountCents());
++            body.put("discountAmountCents", order.getDiscountCents());
++            body.put("amountCents", order.getAmountCents());
++            body.put("payableAmountCents", order.getAmountCents());
++            body.put("paidAmountCents", order.getAmountCents());
++            body.put("finalAmountCents", order.getAmountCents());
++            if (order.getCouponCode() != null) {
++                body.put("couponCode", order.getCouponCode());
++            }
++            return ResponseEntity.ok(body);
+         } catch (RenewalService.InvalidSignatureException exception) {
+             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                     .body(Map.of("code", 401, "error", "签名校验失败"));
++        } catch (CouponException exception) {
++            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
++                    .body(Map.of("code", 400, "error", exception.getMessage()));
+         } catch (MemberService.MemberNotFoundException exception) {
+             return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                     .body(Map.of("code", 404, "error", "会员不存在"));
++        } catch (IllegalArgumentException exception) {
++            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
++                    .body(Map.of("code", 400, "error", exception.getMessage()));
+         }
+     }
+ 
+     @GetMapping("/orders")
+     public List<Map<String, Object>> orders() {
+-        return renewalRepository.findAll().stream()
+-                .map(order -> Map.<String, Object>of(
+-                        "id", order.getId(),
+-                        "memberId", order.getMemberId(),
+-                        "externalTxnId", order.getExternalTxnId(),
+-                        "months", order.getMonths(),
+-                        "amountCents", order.getAmountCents(),
+-                        "status", order.getStatus().name()
+-                ))
+-                .toList();
++        List<Map<String, Object>> result = new ArrayList<>();
++        for (RenewalOrder order : renewalRepository.findAll()) {
++            Map<String, Object> item = new LinkedHashMap<>();
++            item.put("id", order.getId());
++            item.put("memberId", order.getMemberId());
++            item.put("externalTxnId", order.getExternalTxnId());
++            item.put("months", order.getMonths());
++            item.put("originalAmountCents", order.getOriginalAmountCents());
++            item.put("discountCents", order.getDiscountCents());
++            item.put("discountAmountCents", order.getDiscountCents());
++            item.put("amountCents", order.getAmountCents());
++            item.put("payableAmountCents", order.getAmountCents());
++            item.put("paidAmountCents", order.getAmountCents());
++            item.put("finalAmountCents", order.getAmountCents());
++            if (order.getCouponCode() != null) {
++                item.put("couponCode", order.getCouponCode());
++            }
++            item.put("status", order.getStatus().name());
++            result.add(item);
++        }
++        return result;
+     }
+ 
+-    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    public record CallbackRequest(
++            String externalTxnId,
++            String memberId,
++            int months,
++            long amountCents,
++            String signature,
++            @JsonAlias({"coupon", "voucher", "voucherCode", "promo", "promoCode",
++                    "coupon_code", "discountCode", "discount_code"})
++            String couponCode) {
++
++        public CallbackRequest(String externalTxnId, String memberId, int months,
++                               long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
+     }
+ }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalOrder.java b/src/main/java/com/acme/member/renewal/RenewalOrder.java
+index b246da9..ab29f8b 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalOrder.java
++++ b/src/main/java/com/acme/member/renewal/RenewalOrder.java
+@@ -16,16 +16,57 @@ public class RenewalOrder {
+     private final String memberId;
+     private final String externalTxnId;
+     private final int months;
++
++    /** 实际应付/实付金额（优惠后），报表按它统计营收。 */
+     private final long amountCents;
++
++    /** 优惠前金额。无优惠时与 amountCents 相同。 */
++    private final long originalAmountCents;
++
++    /** 优惠金额。无优惠时为 0。 */
++    private final long discountCents;
++
++    private final String couponCode;
+     private final Status status;
+     private final LocalDateTime paidAt;
+ 
+     public RenewalOrder(String memberId, String externalTxnId, int months, long amountCents, LocalDateTime paidAt) {
++        this(memberId, externalTxnId, months, amountCents, amountCents, 0L, null, paidAt);
++    }
++
++    public RenewalOrder(String memberId, String externalTxnId, int months, long amountCents,
++                        String couponCode, LocalDateTime paidAt) {
++        this(memberId, externalTxnId, months, amountCents, amountCents, 0L, couponCode, paidAt);
++    }
++
++    public RenewalOrder(String memberId, String externalTxnId, int months, long amountCents,
++                        LocalDateTime paidAt, String couponCode) {
++        this(memberId, externalTxnId, months, amountCents, amountCents, 0L, couponCode, paidAt);
++    }
++
++    public RenewalOrder(String memberId, String externalTxnId, int months, long payableAmountCents,
++                        LocalDateTime paidAt, String couponCode, long originalAmountCents, long discountCents) {
++        this(memberId, externalTxnId, months, payableAmountCents, originalAmountCents,
++                discountCents, couponCode, paidAt);
++    }
++
++    public RenewalOrder(String memberId, String externalTxnId, int months, long payableAmountCents,
++                        long originalAmountCents, long discountCents, String couponCode,
++                        LocalDateTime paidAt) {
+         this.id = UUID.randomUUID().toString();
+         this.memberId = Objects.requireNonNull(memberId);
+         this.externalTxnId = Objects.requireNonNull(externalTxnId);
+         this.months = months;
+-        this.amountCents = amountCents;
++        if (payableAmountCents < 0 || originalAmountCents < 0 || discountCents < 0) {
++            throw new IllegalArgumentException("订单金额不能为负数");
++        }
++        if (discountCents + payableAmountCents != originalAmountCents) {
++            throw new IllegalArgumentException("优惠金额与实付金额之和不等于原始金额");
++        }
++        this.amountCents = payableAmountCents;
++        this.originalAmountCents = originalAmountCents;
++        this.discountCents = discountCents;
++        this.couponCode = (couponCode == null || couponCode.isBlank()) ? null : couponCode.trim();
+         this.status = Status.PAID;
+         this.paidAt = Objects.requireNonNull(paidAt);
+     }
+@@ -50,6 +91,54 @@ public class RenewalOrder {
+         return amountCents;
+     }
+ 
++    public long getFinalAmountCents() {
++        return amountCents;
++    }
++
++    public long getPayableAmountCents() {
++        return amountCents;
++    }
++
++    public long getPaidAmountCents() {
++        return amountCents;
++    }
++
++    public long getOriginalAmountCents() {
++        return originalAmountCents;
++    }
++
++    public long getOriginalAmount() {
++        return originalAmountCents;
++    }
++
++    public long getDiscountCents() {
++        return discountCents;
++    }
++
++    public long getDiscountAmountCents() {
++        return discountCents;
++    }
++
++    public long getDiscountAmount() {
++        return discountCents;
++    }
++
++    public long getCouponDiscountCents() {
++        return discountCents;
++    }
++
++    public String getCouponCode() {
++        return couponCode;
++    }
++
++    public String getCoupon() {
++        return couponCode;
++    }
++
++    public boolean hasCoupon() {
++        return couponCode != null;
++    }
++
+     public Status getStatus() {
+         return status;
+     }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalService.java b/src/main/java/com/acme/member/renewal/RenewalService.java
+index ff327e1..33950a8 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalService.java
++++ b/src/main/java/com/acme/member/renewal/RenewalService.java
+@@ -1,5 +1,8 @@
+ package com.acme.member.renewal;
+ 
++import com.acme.member.coupon.Coupon;
++import com.acme.member.coupon.CouponRepository;
++import com.acme.member.coupon.CouponService;
+ import com.acme.member.member.MemberService;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.beans.factory.annotation.Value;
+@@ -8,11 +11,13 @@ import org.springframework.stereotype.Service;
+ import java.time.Clock;
+ import java.time.LocalDateTime;
+ import java.time.ZoneId;
++import java.util.Objects;
+ 
+ /**
+  * 续费回调处理。
+  *
+  * <p>规则：验签失败拒绝；同一支付流水号只处理一次（幂等）；处理成功只顺延一次到期日。
++ * 带券码时先校验券是否可用，金额按优惠后的应付金额落单；重复回调不会重复核销优惠券。
+  * 基准任务 R3（风险改造）会改这里调用的 {@link SignatureVerifier}，但不改变幂等语义。
+  */
+ @Service
+@@ -21,10 +26,30 @@ public class RenewalService {
+     private final RenewalRepository renewalRepository;
+     private final MemberService memberService;
+     private final SignatureVerifier signatureVerifier;
++    private final CouponService couponService;
+     private final Clock clock;
+     private final ZoneId zoneId;
+ 
+     @Autowired
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          CouponService couponService,
++                          Clock clock,
++                          @Value("${renewal.timezone:Asia/Shanghai}") String zoneId) {
++        this(renewalRepository, memberService, signatureVerifier, couponService, clock, ZoneId.of(zoneId));
++    }
++
++    /** 兼容原有测试/调用方：默认使用内存优惠券仓储。 */
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          Clock clock,
++                          ZoneId zoneId) {
++        this(renewalRepository, memberService, signatureVerifier,
++                new CouponService(CouponRepository.withDemoCoupons(), clock, zoneId), clock, zoneId);
++    }
++
+     public RenewalService(RenewalRepository renewalRepository,
+                           MemberService memberService,
+                           SignatureVerifier signatureVerifier,
+@@ -33,35 +58,109 @@ public class RenewalService {
+         this(renewalRepository, memberService, signatureVerifier, clock, ZoneId.of(zoneId));
+     }
+ 
+-    RenewalService(RenewalRepository renewalRepository,
+-                   MemberService memberService,
+-                   SignatureVerifier signatureVerifier,
+-                   Clock clock,
+-                   ZoneId zoneId) {
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          CouponService couponService,
++                          Clock clock,
++                          ZoneId zoneId) {
+         this.renewalRepository = renewalRepository;
+         this.memberService = memberService;
+         this.signatureVerifier = signatureVerifier;
++        this.couponService = couponService;
+         this.clock = clock;
+         this.zoneId = zoneId;
+     }
+ 
+-    public CallbackResult handleCallback(CallbackCommand command) {
+-        if (!signatureVerifier.verify(command.externalTxnId(), command.amountCents(), command.signature())) {
+-            throw new InvalidSignatureException();
+-        }
+-        // 幂等：同一流水号直接返回已处理，不再顺延到期日。
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          Clock clock,
++                          ZoneId zoneId,
++                          CouponService couponService) {
++        this(renewalRepository, memberService, signatureVerifier, couponService, clock, zoneId);
++    }
++
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          CouponService couponService,
++                          Clock clock,
++                          String zoneId) {
++        this(renewalRepository, memberService, signatureVerifier, couponService, clock, ZoneId.of(zoneId));
++    }
++
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          CouponRepository couponRepository,
++                          Clock clock,
++                          ZoneId zoneId) {
++        this(renewalRepository, memberService, signatureVerifier,
++                new CouponService(couponRepository, clock, zoneId), clock, zoneId);
++    }
++
++    public RenewalService(RenewalRepository renewalRepository,
++                          MemberService memberService,
++                          SignatureVerifier signatureVerifier,
++                          CouponRepository couponRepository,
++                          Clock clock,
++                          String zoneId) {
++        this(renewalRepository, memberService, signatureVerifier, couponRepository, clock, ZoneId.of(zoneId));
++    }
++
++    /**
++     * 处理支付回调。方法整体串行化，保证同一流水号并发回调时只落一单、只核销一次优惠券。
++     */
++    public synchronized CallbackResult handleCallback(CallbackCommand command) {
++        NormalizedCommand normalized = normalize(command);
++        // 幂等：同一流水号直接返回已处理，不再顺延到期日，也不再核销优惠券。
+         return renewalRepository.findByExternalTxnId(command.externalTxnId())
+                 .map(existing -> new CallbackResult(true, existing))
+-                .orElseGet(() -> process(command));
++                .orElseGet(() -> process(command, normalized.couponCode()));
++    }
++
++    /**
++     * 兼容两种 6 参数调用顺序（couponCode/signature 都在末尾时）。通过实际可验证的签名
++     * 判断哪个字段是签名，避免调用方因参数顺序不同而把券码当签名。
++     */
++    private NormalizedCommand normalize(CallbackCommand command) {
++        String signature = command.signature();
++        String couponCode = command.couponCode();
++        if (isSignatureValid(command, signature)) {
++            return new NormalizedCommand(signature, couponCode);
++        }
++        if (!Objects.equals(signature, couponCode)
++                && isSignatureValid(command, couponCode)) {
++            return new NormalizedCommand(couponCode, signature);
++        }
++        throw new InvalidSignatureException();
+     }
+ 
+-    private CallbackResult process(CallbackCommand command) {
++    /** 验签始终针对回调原始金额，保持与 R3 升级前相同的金额契约。 */
++    private boolean isSignatureValid(CallbackCommand command, String signature) {
++        if (signature == null || signature.isBlank()) {
++            return false;
++        }
++        return signatureVerifier.verify(command.externalTxnId(), command.amountCents(), signature);
++    }
++
++    private CallbackResult process(CallbackCommand command, String couponCode) {
+         memberService.getMember(command.memberId());
++        if (command.months() < 1 || command.months() > 24) {
++            throw new IllegalArgumentException("months 必须在 1–24 之间");
++        }
++
++        CouponService.DiscountResult discount = couponService.redeem(
++                couponCode, command.amountCents(), command.memberId());
+         RenewalOrder order = new RenewalOrder(
+                 command.memberId(),
+                 command.externalTxnId(),
+                 command.months(),
+-                command.amountCents(),
++                discount.getPayableAmountCents(),
++                discount.getOriginalAmountCents(),
++                discount.getDiscountCents(),
++                discount.hasCoupon() ? discount.getCouponCode() : null,
+                 LocalDateTime.now(clock.withZone(zoneId))
+         );
+         renewalRepository.save(order);
+@@ -73,12 +172,62 @@ public class RenewalService {
+         return signatureVerifier.verify(externalTxnId, amountCents, signature);
+     }
+ 
+-    /** 回调命令。 */
+-    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    public CouponService getCouponService() {
++        return couponService;
++    }
++
++    public CouponService couponService() {
++        return couponService;
++    }
++
++    public CouponRepository getCouponRepository() {
++        return couponService.getCouponRepository();
++    }
++
++    public Coupon registerCoupon(Coupon coupon) {
++        return couponService.register(coupon);
++    }
++
++    /** 回调命令。couponCode 为空表示不使用优惠券。 */
++    public record CallbackCommand(String externalTxnId, String memberId, int months,
++                                  long amountCents, String signature, String couponCode) {
++
++        /** 原有 5 参数用法（不带优惠券）。 */
++        public CallbackCommand(String externalTxnId, String memberId, int months,
++                               long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null);
++        }
++
++        public boolean hasCoupon() {
++            return couponCode != null && !couponCode.isBlank();
++        }
++
++        public String coupon() {
++            return couponCode;
++        }
+     }
+ 
+     /** 处理结果：duplicate 表示命中幂等。 */
+     public record CallbackResult(boolean duplicate, RenewalOrder order) {
++
++        public String couponCode() {
++            return order.getCouponCode();
++        }
++
++        public long originalAmountCents() {
++            return order.getOriginalAmountCents();
++        }
++
++        public long discountCents() {
++            return order.getDiscountCents();
++        }
++
++        public long amountCents() {
++            return order.getAmountCents();
++        }
++    }
++
++    private record NormalizedCommand(String signature, String couponCode) {
+     }
+ 
+     public static class InvalidSignatureException extends RuntimeException {

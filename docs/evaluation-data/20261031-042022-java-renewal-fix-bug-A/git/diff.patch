@@ -1,0 +1,33 @@
+diff --git a/src/main/java/com/acme/member/member/MemberService.java b/src/main/java/com/acme/member/member/MemberService.java
+index bd561c4..cb664c3 100644
+--- a/src/main/java/com/acme/member/member/MemberService.java
++++ b/src/main/java/com/acme/member/member/MemberService.java
+@@ -12,7 +12,7 @@ import java.time.ZoneId;
+  * 会员领域服务。
+  *
+  * <p>续费的核心规则：在会员当前到期时刻上顺延 N 个月；已过期会员从当前时刻重新起算。
+- * 这里保留了一个真实缺陷（到期日多算一天），由基准任务 R2 修复，
++ * 到期日按自然月顺延，月末续费会落在目标月份的最后一天。
+  * 验收测试在 {@code RenewalExpiryKnownBugs}。
+  */
+ @Service
+@@ -47,8 +47,8 @@ public class MemberService {
+     /**
+      * 为会员续费 months 个月。
+      *
+-     * <p>缺陷说明：{@code plusDays(1)} 是多余的——{@code expireAt} 的语义已经是
+-     * "最后有效时刻"，再次加一天会让到期日多算一天。
++     * <p>{@code expireAt} 的语义已经是"最后有效时刻"，因此只按自然月顺延，
++     * 不再额外加一天。
+      */
+     public Member renew(String memberId, int months) {
+         if (months < 1 || months > 24) {
+@@ -57,7 +57,7 @@ public class MemberService {
+         Member member = getMember(memberId);
+         LocalDateTime now = LocalDateTime.now(clock.withZone(zoneId));
+         LocalDateTime base = member.getExpireAt().isBefore(now) ? now : member.getExpireAt();
+-        member.setExpireAt(base.plusMonths(months).plusDays(1));
++        member.setExpireAt(base.plusMonths(months));
+         member.setActive(true);
+         return memberRepository.save(member);
+     }
