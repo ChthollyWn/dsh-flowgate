@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-10-30T18:35:01.910Z",
+  "repo": "ts-todo-api",
+  "task": "fix-bug",
+  "condition": "B",
+  "rounds": 3,
+  "skipped": false,
+  "note": "回归 = 默认测试套件；acceptance = 该任务的已知缺陷验收测试（修复后应全绿）",
+  "results": [
+    {
+      "kind": "regression",
+      "label": "默认测试套件（回归，基线 34/34）",
+      "command": "pnpm test",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 350,
+      "expected": "green",
+      "parsed": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "passed": 34,
+        "verdict": "green"
+      },
+      "status": "green",
+      "outputTail": "  ✔ 按完成状态过滤 (3.770208ms)\n✔ 待办列表与分页 (14.081917ms)\n▶ 创建与更新\n  ✔ 创建返回 201 与生成的 id (2.065167ms)\n  ✔ title 为空返回 400 与 hint (0.983083ms)\n  ✔ 更新完成状态返回 200 (1.561333ms)\n  ✔ 更新不存在的待办返回 404 (0.616125ms)\n  ✔ completed 非布尔返回 400 (1.020959ms)\n✔ 创建与更新 (6.469167ms)\n▶ 错误处理\n  ✔ 未知路由返回 404 (0.393166ms)\n  ✔ 非法 JSON 返回 400 (0.397834ms)\n✔ 错误处理 (0.838208ms)\n▶ 密码哈希\n  ✔ 哈希格式包含参数，可校验 (24.0855ms)\n  ✔ 篡改或格式错误的哈希校验失败 (8.35275ms)\n  ✔ needsRehash 识别较低迭代次数 (7.735334ms)\n✔ 密码哈希 (42.595125ms)\n▶ 登录接口\n  ✔ 正确邮箱密码返回 200 与用户信息 (17.814625ms)\n  ✔ 密码错误返回 401，且不区分具体原因 (10.5055ms)\n  ✔ 旧参数哈希在登录成功后自动迁移到当前参数 (17.980459ms)\n✔ 登录接口 (46.450958ms)\n▶ 提醒模块（相邻模块，基准任务不涉及）\n  ✔ 只提醒未完成且超过 24 小时的条目 (1.471083ms)\n  ✔ createdAt 非法的条目被跳过 (0.057083ms)\n✔ 提醒模块（相邻模块，基准任务不涉及） (1.912ms)\n▶ 分页参数\n  ✔ 缺省与非法值回落到默认 (1.398667ms)\n  ✔ pageSize 有上限 (0.066459ms)\n  ✔ 接受字符串数字 (0.048709ms)\n✔ 分页参数 (1.926417ms)\n▶ 排序\n  ✔ 按 createdAt 倒序 (6.023417ms)\n  ✔ 不修改原数组 (0.165709ms)\n✔ 排序 (6.306334ms)\n▶ 分页结果\n  ✔ 第 1 页返回前 pageSize 条与总数 (0.189375ms)\n  ✔ 第 2 页与第 1 页不重叠 (0.239459ms)\n  ✔ 总数小于一页时 hasNext 为 false (0.119625ms)\n  ✔ 空列表返回空页且 total 为 0 (0.115375ms)\n  ✔ paginate 返回数组（兼容旧调用） (0.167416ms)\n✔ 分页结果 (0.977208ms)\n▶ 遗留概览（诱饵代码，行为契约固定）\n  ✔ 统计完成、未完成与完成率 (0.669916ms)\n  ✔ 空列表完成率为 0 且标签为 empty (0.061333ms)\n  ✔ 完成率四舍五入到两位 (0.047209ms)\n  ✔ 完成率高时标签为 great (0.788959ms)\n✔ 遗留概览（诱饵代码，行为契约固定） (2.060875ms)\nℹ tests 34\nℹ suites 11\nℹ pass 34\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 160.20725\n\n$ node --test test/api.test.js test/pagination.test.js test/reports.test.js test/notifications.test.js test/auth.test.js\n"
+    },
+    {
+      "kind": "acceptance",
+      "label": "R2 验收测试 known-bugs.mjs（修复后应全绿）",
+      "command": "node --test test/known-bugs.mjs",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 56,
+      "expected": "green",
+      "parsed": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "passed": 4,
+        "verdict": "green"
+      },
+      "status": "green",
+      "outputTail": "▶ R2：分页最后一页重复（当前已知缺陷）\n  ✔ 遍历全部页：每条待办恰好出现一次，不重复不遗漏 (5.638792ms)\n  ✔ 最后一页只包含剩余条目（10 条 / 每页 3 条 → 第 4 页仅 1 条） (0.375084ms)\n  ✔ 超过总页数的页码返回空页，total 仍然正确 (0.288375ms)\n  ✔ createdAt 相同的条目按 id 升序稳定排序 (0.047333ms)\n✔ R2：分页最后一页重复（当前已知缺陷） (6.710458ms)\nℹ tests 4\nℹ suites 1\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 36.603833\n\n"
+    }
+  ]
+}

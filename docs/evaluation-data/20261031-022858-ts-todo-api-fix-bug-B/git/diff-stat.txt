@@ -1,0 +1,2 @@
+ src/pagination.js | 23 ++++++++++++-----------
+ 1 file changed, 12 insertions(+), 11 deletions(-)

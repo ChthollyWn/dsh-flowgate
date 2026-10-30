@@ -12,12 +12,15 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - 发布工程：本 `CHANGELOG.md`、发布说明草稿 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)、tag 推送触发的发布 workflow `.github/workflows/release.yml`（校验后发布 npm 并创建 GitHub Release；截至本文件提交时尚未触发执行）。
   - 这些文件属于发布流程本身，不是插件功能变更。若发布时把 `v0.1.0` tag 前移到包含这些提交的 HEAD，请把本节并入 `[0.1.0]` 的「Documentation」一节。
 - host 层单测补齐：`test/host/dispatch.test.ts`（11 例：注册、engine 未就绪、无 subagents/provider 降级、顺序/并行派发、worktree 落点、创建失败降级、互斥、失败结算）与 `test/host/review.test.ts`（14 例：开关、provider 降级、findings 归一化与 diff 指纹、重试 1 次、sessionQuery 读取覆盖、调查任务）。
+- 首个真模型对照 pilot（`ts-todo-api / fix-bug`，A/B 各 1 次，2026-10-31）：两种条件均修复正确（回归 34/34、验收 4/4）；B 组多 2 轮、约 13 倍耗时、3 次人工门，但留下 RED/GREEN 回执、门禁留痕与交付报告。原始数据见 `docs/evaluation-data/20261031-0228*/`，结论与局限见 [docs/evaluation.md](docs/evaluation.md) §6.1。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
 
 ### Fixed
 
 - **审查子 agent 启动失败**（真机发现）：`cordis.patch.yml` 的 reviewer preset 中 `reviewer-tool-fs-search` 缺少 rc.5 必填配置 `sampleOverCapGlobResults`，导致审查子 agent 启动报 `invalid config`、审查重试后仍缺失；已补 `sampleOverCapGlobResults: false`。
 - **`flow_dispatch_next` 结构化返回的 worktree 为空**：并行批次回填了派发前的 envelope 快照，实际 worktree 由 `startExecutor` 创建；现在回填 `started.worktree` 并加单测断言。
+- **基准仓库 R2 验收测试期望值错误**（pilot 发现）：`examples/ts-todo-api/test/known-bugs.mjs` 断言最后一页是 `todo-010`，但与 `createdAt` 倒序契约矛盾（正确修复后是 `todo-001`），会让正确修复被判红；已修正断言并保留修复前 4/4 失败、修复后 4/4 通过的两个态验证。
+- **git 自动提交恒失败**（真机发现）：`NodeGit.add` 生成 `git add -- -A`，`-A` 被 git 当作 pathspec，自动提交永远失败（任务门只能降级提示）；已修 `buildAddArgs`（选项在 `--` 之前）并新增 `test/host/node-git.test.ts` 回归测试。
 - **`R-TDD-ORDER` 在 Java 测试路径上死锁**（真机发现）：任务卡 `tests` 写成裸类名（如 `RenewalPageQueryTest`）时，测试文件路径不匹配 `tests` glob，写 `src/test/java/**/XxxTest.java` 也被拒；RED 又必须由测试文件产生，形成死锁。现在 `evaluate.ts` 增加常见测试路径识别（`/test/`、`*.test.ts`、`*Test.java`、`test_*.py` 等）作为后备判定，并补回归测试。
 - **`structured_output` 被误判为未知写工具**（真机发现）：headless/结构化输出场景下该工具被覆盖自检归为未知可写工具并触发 `R-MCP` 待处理项，阻塞任务门；现已列入安全宿主工具（只读语义）并补单测；`tools/admin.js` 增加负责人 `pending` 命令（dev tooling）。
 - **归档后变更编号被复用**（真机发现）：归档把 `.flowgate/changes/<id>/` 移走后，编号分配只扫描当前列表，新建变更会再次分配 C-001，导致账本/归档目录同号；现在编号分配同时读取 `.flowgate/archive/<日期>-<id>/` 的历史编号，并新增 engine 集成回归测试。
@@ -25,7 +28,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（本次提交实测）：**65 个测试文件 / 970 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 25 个 host 用例 + 1 个 TDD 测试路径回归）。
+- 测试规模（本次提交实测）：**66 个测试文件 / 972 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 25 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归）。
 
 ## [0.1.0] - 2026-10-30
 
@@ -85,7 +88,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
-- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **65 files / 969 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
+- 测试规模（`e1aef8d` 时点实测）：**63 个测试文件 / 944 个用例**；本次提交进一步补到 **66 files / 972 tests**（见 [Unreleased]「Tests」）。注：[implementation-status.md](docs/impl/implementation-status.md) §2 记录的 61 files / 925 tests 是该报告首次成稿时的基线。
 - 真实 Web 宿主走查（隔离 `DSH_HOME`，DSH 0.2.1-rc.5 + Chrome）：插件组合与加载、浏览器 bundle、`/flow` 命令族、tools 模块 14/14 工具注册（含派发模块共 15 个 `flow_*` 工具）、状态条/面板、preset 菜单、自动接续、宿主能力检测。
 - 守卫真机证据：真实 headless 会话中 agent 对 `src/server.js` 的 `edit` 被 `R-STAGE-SRC` 拦截，文件未被修改，模型收到完整拒绝原因与解锁路径（debug trace + 账本可查；此前一次「放行」经查为上一轮遗留的单次放行 `OV-1`）。
 - 真实模型完整闭环：在 `ts-todo-api` 上以 C-002 从 `/flow new` 走到 S6 归档——G1 7/7、G2 真实 baseline 34/34、G3 9/9、G4 任务门、G5 全量测试/场景/运行证据、G6 批准；产出 116KB HTML 交付报告，主规格按 R1–R5 合并（账本 `spec.merged`）。API key 经环境变量注入隔离 home，未提交。

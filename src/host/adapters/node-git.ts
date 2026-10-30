@@ -61,6 +61,18 @@ async function gitOrThrow(args: readonly string[], cwd: string, timeoutMs?: numb
   return result.stdout
 }
 
+/**
+ * 构造 `git add` 参数：以 `-` 开头的是选项（如 `-A`），不能放到 `--` 之后。
+ * 真机发现（2026-10-31）：engine 的自动提交调用 `add(root, ['-A'])`，旧实现生成
+ * `git add -- -A`，git 把 `-A` 当成 pathspec → "did not match any file(s)"，
+ * 自动提交永远失败。选项与路径分开后 `git add -A` / `git add -- a.ts` 都正确。
+ */
+export function buildAddArgs(paths: readonly string[]): string[] {
+  const flags = paths.filter((path) => path.startsWith('-'))
+  const files = paths.filter((path) => !path.startsWith('-'))
+  return ['add', ...flags, ...(files.length > 0 ? ['--', ...files] : [])]
+}
+
 /** `git status --porcelain=v2 -z`：稳定的工作区快照（NUL 分隔，原样返回给调用方哈希）。 */
 export class NodeGit implements GitPort {
   async isRepo(cwd: string): Promise<boolean> {
@@ -130,7 +142,7 @@ export class NodeGit implements GitPort {
   }
 
   async add(cwd: string, paths: string[]): Promise<void> {
-    await gitOrThrow(['add', '--', ...paths], cwd)
+    await gitOrThrow(buildAddArgs(paths), cwd)
   }
 
   async commit(cwd: string, message: string): Promise<void> {

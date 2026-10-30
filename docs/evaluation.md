@@ -1,6 +1,6 @@
 # 评测方案（M6 / T6.1）
 
-> 状态：**未执行**（模型对照评测尚未开跑）。本文件是执行方案，不是结果。评测脚本与数据目录已就绪（见第 5 节）；跑完后把结果表、原始数据链接和局限说明补在本文件（或改名为 `evaluation.md` 并在 README 引用）。
+> 状态：**部分执行（pilot 1/9 任务）**。2026-10-31 用 `scripts/run-evaluation.mjs` 跑通 `ts-todo-api / fix-bug` 的 A/B 对照（第 6.1 节），其余 8 个任务与从 0 开发/并行对照仍待跑。本文件其余部分是执行方案与原始数据说明。
 
 ## 1. 基准仓库与任务
 
@@ -96,13 +96,43 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 6. **B 组隔离 profile 的安装依赖本机 DSH/pnpm**：脚本用 `dsh plugin add link:` 安装本地插件；不同 DSH RC 版本的 CLI 参数若变化，先在 `--dry-run` 后的真实运行前用 `dsh --help` 核对。
 7. **headless 组合的 preset 行是 pending 状态**：精简 headless 没有 `agentPresets`/`subagents` 服务，插件包里的三个 `preset-flowgate*` 行会 pending（不影响 `/flow`、守卫与工具，见 `docs/impl/host-integration.md`）；脚本只用 `--dump-config` 校验 `dsh-flowgate` 插件行，`--dump-config-schema` 在该组合可能因 preset 嵌套行报错，属既有限制。
 
-## 6. 结果表（待填）
+## 6. 结果表
+
+### 6.1 pilot 结果（2026-10-31，`ts-todo-api / fix-bug`）
+
+条件：同一句模糊需求「待办分页好像有问题，翻到最后一页会看到前面出现过的条目，帮我修一下。」；headless 一次性任务；隔离 `DSH_HOME`；B 组 `dispatch=inline`、`review.enabled=false`、人工门由脚本扮演负责人批准。
+
+| 项 | A（DSH 标准模式） | B（DSH + FlowGate） |
+|---|---|---|
+| 轮次 / 耗时 | 1 轮 / **26.2s** | 3 轮 / **363s**（121.8 + 198.1 + 41.8） |
+| 人工门动作 | 0 | 3（G1 / G3 / G6，脚本扮演负责人） |
+| 改动 | `src/pagination.js` +10/−9 | `src/pagination.js` +12/−11 |
+| 回归（`pnpm test`） | ✅ 34/34 | ✅ 34/34 |
+| 验收（`node --test test/known-bugs.mjs`） | ✅ 4/4 | ✅ 4/4 |
+| 越界文件 / 敏感改动 | 0 | 0 |
+| 虚假完成（自述 vs 客观结果） | 无（本机沙箱不可用，agent 自述未跑测试；脚本外部复跑通过） | 无（RED/GREEN 回执 E-0002/E-0003/E-0007，外部复跑通过） |
+| FlowGate 指标 | — | M-6 42.9、M-9 100、M-10 100、M-13 4、M-14 5.9min；M-12/M-15~M-18 未知 |
+| 数据 | [A](evaluation-data/20261031-022830-ts-todo-api-fix-bug-A/) | [B](evaluation-data/20261031-022858-ts-todo-api-fix-bug-B/) |
+
+解读与局限（样本 1 对，不能外推）：
+
+- 该任务两种条件都修对了，差异主要在**过程成本**：B 多 2 个轮次、约 13 倍耗时、3 次人工门，换来显式的 RED/GREEN 证据、门禁留痕与交付报告；A 没有这些证据（agent 自述"按测试逻辑核对"，靠脚本外部复跑才证明正确）。
+- 本机 `workspace-write` 沙箱后端不可用（`sandbox-exec: Operation not permitted`），两种条件下 agent 都无法自己跑测试；B 组靠 `flow_verify` 由插件执行命令，证据链更完整。这是环境限制，评测正式跑时应换可执行 sandbox 的机器。
+- 隐藏需求遗漏/验收覆盖率尚未人工核对（脚本只收客观信号）；`M-13=4` 是门禁次数，不是真实人类响应时间。
+- pilot 发现并修复了两个基准/产品缺陷：R2 验收测试期望值与倒序契约矛盾（见 6.3）；git 自动提交参数 `git add -- -A` 恒失败（见 `docs/impl/implementation-status.md` §3.5）。
+
+### 6.2 完整 9 任务 × 2 条件表（待填）
 
 | 任务 | 条件 | 隐藏需求遗漏 | 越界文件 | 虚假完成 | 回归失败 | 验收覆盖 | 人工交互 | 耗时 | token |
 |---|---|---|---|---|---|---|---|---|---|
 | java-renewal 新功能 | A | | | | | | | | |
 | java-renewal 新功能 | B | | | | | | | | |
 | … | | | | | | | | | |
+
+### 6.3 pilot 修正记录
+
+1. **R2 验收测试 fixture bug**（`examples/ts-todo-api/test/known-bugs.mjs`）：原断言"第 4 页 = `todo-010`"与 `sortTodos` 的 `createdAt` 倒序契约矛盾（正确修复后第 4 页是最早的 `todo-001`），导致 A 组正确修复也被判红；已改为 `todo-001` 并加注释。修复前 4/4 失败、修复后 4/4 通过，两态均已复验。
+2. **git 自动提交**：`NodeGit.add` 生成 `git add -- -A`，`-A` 被当 pathspec，自动提交永远失败；已修 `buildAddArgs`（选项在 `--` 前）并加 host 回归测试。
 
 ## 7. 结论模板（跑完后写）
 

@@ -35,7 +35,9 @@ describe('R2：分页最后一页重复（当前已知缺陷）', () => {
   test('最后一页只包含剩余条目（10 条 / 每页 3 条 → 第 4 页仅 1 条）', () => {
     const last = buildPage(makeTodos(10), 4, 3)
     assert.equal(last.items.length, 1)
-    assert.deepEqual(last.items.map((todo) => todo.id), ['todo-010'])
+    // 列表按 createdAt 倒序（最新在前），因此最后一页是**最早**的一条 todo-001。
+    // 2026-10-31 修正：原断言写成 todo-010，与排序契约矛盾，正确修复也会被判红。
+    assert.deepEqual(last.items.map((todo) => todo.id), ['todo-001'])
     assert.equal(last.hasNext, false)
   })
 
