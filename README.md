@@ -4,6 +4,11 @@
 
 [English](./README.en.md) | 简体中文
 
+[![CI](https://github.com/ChthollyWn/dsh-flowgate/actions/workflows/ci.yml/badge.svg)](https://github.com/ChthollyWn/dsh-flowgate/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DSH 0.2.1-rc.5](https://img.shields.io/badge/DSH-0.2.1--rc.5-informational)](docs/compat/0.2.1-rc.5.md)
+
+
 - 宿主：DeepSeek Harness（DSH）≥ `0.2.1-rc.5 < 0.3.0`（Desktop / Web）
 - 包名：`dsh-flowgate`，MIT 许可
 - 仓库：<https://github.com/ChthollyWn/dsh-flowgate>

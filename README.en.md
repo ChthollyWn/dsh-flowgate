@@ -2,6 +2,11 @@
 
 [简体中文](./README.md) | English
 
+[![CI](https://github.com/ChthollyWn/dsh-flowgate/actions/workflows/ci.yml/badge.svg)](https://github.com/ChthollyWn/dsh-flowgate/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DSH 0.2.1-rc.5](https://img.shields.io/badge/DSH-0.2.1--rc.5-informational)](docs/compat/0.2.1-rc.5.md)
+
+
 > **One sentence:** FlowGate turns the specification layer of OpenSpec, the execution discipline of Superpowers, and the delivery loop of gstack into a DSH plugin's own capabilities, and enforces a 7-stage development pipeline in code — if the previous stage is not complete, the next stage's writes are rejected, with an explanation of what is missing and how to unlock.
 
 - Host: DeepSeek Harness (DSH) `>=0.2.1-rc.5 <0.3.0` (Desktop / Web)
