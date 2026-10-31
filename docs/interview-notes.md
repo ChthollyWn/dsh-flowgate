@@ -45,7 +45,7 @@ FlowGate 是给 DeepSeek Harness（DSH）加「硬约束开发流程」的插件
 - 评测：**18/18 run**（9 任务 × A/B，真实模型 + 隔离 headless）+ 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）**人工评分 18/18**（[evaluation.md](evaluation.md) §6.2/§6.5）；单点 pilot（`ts-todo-api / fix-bug` A/B 各 1 次）：两种条件回归 34/34、验收 4/4 全过，B 多 2 轮 / 约 13 倍耗时 / 3 次人工门（§6.1）；从 0 开发演练 6 次与派发对照见 §6.6/§6.7。
 - 派发真机：`java-renewal` 新功能 `dispatch=auto` 顺序派发 3 批次完整结算到 S5（外部回归 20/20）；并行批次两个执行者真实启动（worktree + 独立子 agent + 回执 + 熔断），但 headless 一次性进程在集成检查点合并前退出（[evaluation.md](evaluation.md) §6.7）。
 - 第六轮复验：独立只读复验驱动修复了 **7 项 P1 接线缺口**（并行 worktree 执行根、派发双结算、S5 全量测试回归判定、上下文压缩/跨会话重注入、澄清占位符、低复杂度任务数上限，均补回归测试，提交 `cea85dd`），并修正 T2.3/T5.1/M-16/规则试跑等 P2 与文档口径——这是"用审计反推实现接线"的真实工程故事。
-- CI：GitHub Actions 覆盖 lint / test / coverage / build / verify:package / verify:client；最后绿灯是 `b671ef9`；**第六轮提交尚未推送，CI 待推送后重跑**（本地门禁全绿）。
+- CI：GitHub Actions 覆盖 lint / test / coverage / build / verify:package / verify:client；第六轮提交（`cea85dd` + `25fffac`）已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（本地门禁同样全绿）。
 
 ## 坦诚的局限（面试时主动说）
 

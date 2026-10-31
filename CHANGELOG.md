@@ -3,7 +3,7 @@
 FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 > **发布状态（2026-10-31）**：npm 上尚无此包（registry 404）、GitHub 尚无 Release；仓库 tag `v0.1.0` 指向 `f53d5f1`，落后于本轮开发后的本地 HEAD（未发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
-> 第六轮（独立复验后的接线修复，代码提交 `cea85dd`）改动**尚未推送**，CI 待推送后重跑（最后绿灯 `b671ef9`）。
+> 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；正式发布时请按实际发布日期回填本文的时间与链接。
 
 ## [Unreleased]
@@ -14,7 +14,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
   - 背景：独立只读复验推翻第五轮"功能缺口全部闭环"结论，新发现 **7 项 P1 接线缺口**（均补回归测试）：T4.9 并行 worktree 执行根（`flow_verify`/输入哈希/自动提交以任务 worktree 为根）；派发双结算（`taskFailed` 对 done 早退 + host finalize 先查状态）；T4.2 S5 全量测试改走 `runFullSuite`（regressions 写入回执，G5 可判回归、M-12 有数据源）；T4.8 压缩后交接摘要重注入（含 `agent/created source='compact'` 防御式路径，DSH rc.5 实测该事件不可达）；T3.7/T4.8 跨会话注入最近 interrupted 任务卡与「任务 RED/GREEN」状态；T2.2 澄清「改变说明」占位符（`（待补充）`/`（未记录）`）不再通过 G1（并回写 `clarifyRounds`）；T2.8 低复杂度 G3 任务数上限=1。
   - P2/证据修正：T2.3 `test: none` 时 G2 前真实运行 build/lint/typecheck 基线并落回执；M-16 数据源（`roadmap.approved`/`roadmap.progress` 写 total/delivered）；T5.1 执行图节点可点击/键盘选择 + 任务详情（snapshot 可选 `taskCards`）；规则试跑改为客户端本地近似并固定标注「精确判定以宿主为准」；T2.4 技能重复加载给出「本会话已加载」短提示；taskDone 审查提示不再引用不存在的 `flow_request_review`。
   - 技能/文档/物料：skills 同步（dispatch auto 未按 size 路由、低复杂度 1 张卡、澄清占位符、test:none 基线）；文档与发布物料清理（门禁 46→52 项、面试 M-6=42.9% 补原始数据、真实故事拆两条、README.en 状态、compat/startup 头注、evaluation §194、compat"无网络"、CI 状态表述、todo-audit 89.29、release.yml 加 coverage、package.json repository/homepage/bugs、tag 推送说明、截图可离线补做、vitest 注释、构建体积）。
-  - 数字：**112 files / 1522 tests** 全绿（第五轮 107/1459，+5 文件 / +63 用例）；typecheck/lint 通过（130 源文件）；coverage thresholds 通过（合计 **86.40 / 76.25 / 86.92 / 89.46**）；compat **13/13**；startup **+16.2ms**；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测，含 README）。**CI 尚未推送本轮提交、待推送后重跑**（最后绿灯 `b671ef9`）。
+  - 数字：**112 files / 1522 tests** 全绿（第五轮 107/1459，+5 文件 / +63 用例）；typecheck/lint 通过（130 源文件）；coverage thresholds 通过（合计 **86.40 / 76.25 / 86.92 / 89.46**）；compat **13/13**；startup **+16.2ms**；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测，含 README）。**第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success**（lint/test/coverage/build/verify）。
   - 仍开放（四分类）：环境/人工受限验证；可离线补做（projection epoch 复验/自动接续与 doctor 截图）；需负责人决策（发布 tag 方案、自举 §9、T2.1 字面口径）；后续 P2/产品决策（C0 骨架 TDD 死锁、`run:auto` size 路由未实现、Remote 非降级 v0.1 不做、M-17/dispatch 摘要/worktree 归因/T4.4 引导、T5.2 学习模式抽查）。详见 [implementation-status §4](docs/impl/implementation-status.md) 与 [acceptance-gap-audit §7](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
 - **第五轮：执行方案验收缺口修复（2026-10-31，提交 `8963a92`…`535842b`、`6e3bd24`）**：

@@ -93,7 +93,7 @@ Remote 非降级路径 → **v0.1 决策不做**（Typert Remote 需构建期生
 ### 5.2 发布（负责人决策，此前明确暂缓）
 
 npm publish、GitHub Release、tag `v0.1.0` 前移/版本 bump、awesome-dsh-plugin 收录、V2EX/即刻反馈、
-demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已就绪；CI 最后绿灯是 `b671ef9`（run [41190320744](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41190320744) 覆盖 `60a82dc` 的 lint/test/coverage/build/verify），**第六轮提交尚未推送，CI 待推送后重跑**；发布只差负责人决定 tag/版本方案（远程 tag `v0.1.0` 已指向 `f53d5f1`，前移需 force-move 或 bump 新版本，见 [release notes §8](../release/v0.1.0.md)）。
+demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已就绪；第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint/test/coverage/build/verify；上一轮绿灯为 `60a82dc` 的 run 41190320744）；发布只差负责人决定 tag/版本方案（远程 tag `v0.1.0` 已指向 `f53d5f1`，前移需 force-move 或 bump 新版本，见 [release notes §8](../release/v0.1.0.md)）。
 
 ### 5.3 自举（04 §9，负责人决策项）
 
@@ -117,7 +117,7 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 > **第六轮本地门禁（2026-10-31，代码提交 `cea85dd` + 本轮文档）**：`pnpm test` **112 files / 1522 tests** 全绿；lint/typecheck 通过（130 源文件）；
 > `pnpm coverage` thresholds 通过（合计 86.40 / 76.25 / 86.92 / 89.46）；build host 1,210,648 B（≈1.21MB）/ client 223,830 B（≈219KB）；
 > `verify:package` 39 文件 / 1032.8KB（docs 修改后重跑实测，含 README）；`verify:client` 通过；`verify:compat` 13/13（隔离 `DSH_HOME=/tmp/fg-audit-env`，dump-config 1314 行）；
-> `measure:startup` +16.2ms；`verify:uninstall` 通过。**CI 待推送后重跑**（最后绿灯 `b671ef9`）。
+> `measure:startup` +16.2ms；`verify:uninstall` 通过。**CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功**（第六轮提交推送后）。
 
 ## 7. 第六轮：独立复验与接线修复（2026-10-31）
 
@@ -156,10 +156,10 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 3. **需负责人决策**：发布（tag force-move vs bump `0.1.1` + `NODE_AUTH_TOKEN` + demo 动图 + 干净机器 10 分钟验收）、自举 §9、T2.1"每产物 10 正/反例"字面口径。
 4. **后续 P2 / 产品决策**：C0 骨架首任务 TDD 死锁（`package.json` 在 RED 前不可写；需决定 C0 豁免 TDD 或标准 allow-once SOP）、`run: auto` 按 size 路由未实现（skills 已如实说明）、Remote 非降级 v0.1 决策不做、上下文阈值/M-17 数据源、dispatch 摘要落账、worktree 归因、T4.4 PR/CHANGELOG 生成引导。
 
-### 7.4 第六轮门禁数字（本地，CI 待推送后重跑）
+### 7.4 第六轮门禁数字（本地 + CI）
 
 - `pnpm lint` + `typecheck` 通过（130 源文件）；`pnpm test` **112 files / 1522 tests** 全绿（+63 用例）。
 - `pnpm coverage` thresholds 通过：合计 **86.40 / 76.25 / 86.92 / 89.46**；core 83.42 / 69.26 / 82.59 / 88.48；host 74.09 / 65.71 / 70.00 / 78.20。
 - build：`lib/host.js` 1,210,648 B（≈1.21MB）/ `lib/client.js` 223,830 B（≈219KB）；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测）；`verify:client` 通过。
 - `verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env`，新构建，dump-config 1314 行）；`measure:startup` **+16.2ms**（基线 16.5 / 加载 32.6）；`verify:uninstall` 通过（rc.5 `plugin remove` 不 prune node_modules 已知警告）。
-- CI：**未推送本轮提交，最后绿灯 `b671ef9`；第六轮本地全绿，CI 待推送后重跑。**
+- CI：第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint/test/coverage/build/verify）。

@@ -14,7 +14,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期；接管后旧会话写拒绝（R-LEASE）与接续快照对比；篡改检测；返工失效；evidence.md/review.md（第五轮补） |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | `run: main` 路由、检查点修复任务与重试、计划修订、S5 回退、终审生产者、run/health 运行证据、风险提高效应、检查点任务验证+全量测试已闭环（第五轮补）；第六轮补：并行 worktree 执行根、S5 `runFullSuite` 回归判定、跨会话任务卡注入与压缩重注入、派发双结算防护（§3.12）；真实并行合并结算仍受 headless 环境限制（§4.1） |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 完成 | 真实 Web 宿主走查 25 张截图；第五轮补：规则统计用实际生效规则、例外可撤销、非 agent 改动确认、GREEN 过期按输入哈希、看板随状态重生成、report/board 尝试系统打开；第六轮补：执行图节点可点击 + 任务详情；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），固定标注精确判定以宿主实际拦截为准，本地无法判定的项目自定义规则会列出（§3.12） |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 对照评测 18/18 + 4 项主观指标评分完成；第六轮本地门禁全绿：**112 files / 1522 tests**、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat **13/13**、startup **+16.2ms**、uninstall 通过；CI 待推送后重跑。未发布 npm、Desktop 未走查（发布由负责人决定暂缓） |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 对照评测 18/18 + 4 项主观指标评分完成；第六轮本地门禁全绿：**112 files / 1522 tests**、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat **13/13**、startup **+16.2ms**、uninstall 通过；CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功。未发布 npm、Desktop 未走查（发布由负责人决定暂缓） |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -31,7 +31,7 @@ DSH_HOME=/tmp/fg-home node scripts/verify-dsh-compat.mjs --profile flowgate --wr
 DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --dump-config
 ```
 
-最近一次结果（2026-10-31 第六轮，代码提交 `cea85dd` + 文档提交；全部为当前工作树实测）：lint + typecheck 通过（130 个源文件）；`test` **112 files / 1522 tests** 全绿（第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42 / 69.26 / 82.59 / 88.48，host 74.09 / 65.71 / 70.00 / 78.20；构建产物 `lib/host.js` **1,210,648 B（≈1.21MB）** / `lib/client.js` **223,830 B（≈219KB）**（build-client 打印的 211.4KB 是 JS 字符串长度，不是文件体积）；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测，含 README）；`verify:client` 通过。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env` 的 profile + `link:` 安装，新构建；`--dump-config` 1314 行）、`measure:startup` 中位数增量 **+16.2ms**（基线 16.5ms / 加载 32.6ms，验收线 <200ms）、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。**CI 尚未推送本轮提交，最后绿灯是 `b671ef9`；第六轮为本地全绿，CI 待推送后重跑。**
+最近一次结果（2026-10-31 第六轮，代码提交 `cea85dd` + 文档提交；全部为当前工作树实测）：lint + typecheck 通过（130 个源文件）；`test` **112 files / 1522 tests** 全绿（第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42 / 69.26 / 82.59 / 88.48，host 74.09 / 65.71 / 70.00 / 78.20；构建产物 `lib/host.js` **1,210,648 B（≈1.21MB）** / `lib/client.js` **223,830 B（≈219KB）**（build-client 打印的 211.4KB 是 JS 字符串长度，不是文件体积）；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测，含 README）；`verify:client` 通过。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env` 的 profile + `link:` 安装，新构建；`--dump-config` 1314 行）、`measure:startup` 中位数增量 **+16.2ms**（基线 16.5ms / 加载 32.6ms，验收线 <200ms）、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。**第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success。**
 
 上一轮结果（2026-10-31 第五轮，代码提交 `6e3bd24` + 文档提交，保留以便追溯）：lint 通过（130 个源文件）；`test` **107 files / 1459 tests** 全绿；构建产物 host 约 1.20MB（1,196,501 B）/ client 约 202KB（202,243 B）；`verify:package` 通过（**39 文件 / 1015.9KB**）；`verify:client` 通过。`pnpm coverage` 通过 thresholds（80/80/80/70）；文本报告聚合：core 82.97 / 68.50 / 81.51 / 88.15、host 73.76 / 65.10 / 70.00 / 77.82、合计 86.19 / 75.84 / 86.60 / 89.29。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-final-home` 的 profile + link 安装；含 6 项离线结构检查）、`measure:startup` 中位数增量 **+15.8ms**、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。
 
@@ -324,7 +324,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 | 14 | 技能文案与实现不一致 | skills 同步：dispatch auto 未按 size 路由（如实说明）、低复杂度 1 张任务卡、澄清占位符、`test:none` 基线 | `skills/flow-plan|flow-orchestrate|flow-clarify|flow-context/SKILL.md` |
 | 15 | 文档/物料过期或事实错误 | 46→52 项门禁检查、面试 M-6=42.9% 补原始数据、真实故事拆两条、README.en 状态、compat/startup 头注、evaluation §194、compat"无网络"、CI 状态、todo-audit 89.29、release.yml 加 coverage、package.json repository/homepage/bugs、tag 推送说明、截图可离线补做、vitest 注释、构建体积 | `README*.md`、`CHANGELOG.md`、`docs/**`、`package.json`、`.github/workflows/release.yml`、`vitest.config.ts` |
 
-> 第六轮门禁数字见 §2：**112 files / 1522 tests** 全绿、lint/typecheck 通过、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat 13/13、startup +16.2ms、uninstall 通过；CI 待推送后重跑。
+> 第六轮门禁数字见 §2：**112 files / 1522 tests** 全绿、lint/typecheck 通过、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat 13/13、startup +16.2ms、uninstall 通过；CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功。
 > 第六轮仍开放项（四分：环境受限 / 可离线补做 / 需负责人决策 / 后续 P2）见 §4；逐项证据见 [acceptance-gap-audit §7](acceptance-gap-audit-2026-10-31.md)。
 
 ## 4. 剩余项（第六轮复验后，四分）

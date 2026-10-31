@@ -133,7 +133,7 @@
 - "发布前检查清单"全部 10 项、发布后验证、失败恢复（`docs/release/v0.1.0.md:131-149`）。
 - package.json `repository/homepage/bugs` 元数据、CHANGELOG 是否进 npm 包（`docs/release/v0.1.0.md` 可选元数据项）。
 - awesome-dsh-plugin 收录、README 演示动图等推广物料（`docs/impl/implementation-status.md:261`）。
-- CI"待推送后重跑"等发布证据刷新（`docs/release/v0.1.0.md:85`）。
+- CI 发布证据刷新：第六轮推送后已由 run 41197243594 验证（正式发布时仍需按 release notes 重跑）。
 
 ## 6. 已核实、不应再列为待办的（避免重复盘点）
 
@@ -224,5 +224,5 @@ sed -n '150,170p'    src/host/guard/index.ts      # engine 缺失时放行（fai
 
 P2/证据口径修正 8 项：T2.3 `test: none` 真实基线回执、M-16 数据源（`roadmap.progress`）、T5.1 执行图节点/任务详情（snapshot `taskCards`）、规则试跑本地近似标注、T2.4 技能重复加载短提示、taskDone 审查提示修正、skills 同步、文档/物料修正（46→52、M-6=42.9% 补来源等）。
 
-- 第六轮数字：**112 files / 1522 tests** 全绿（+5 文件 / +63 用例）；lint/typecheck 通过；coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）；compat 13/13；startup +16.2ms；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` 39 文件 / 1032.8KB（docs 修改后重跑实测，含 README）。CI 待推送后重跑（最后绿灯 `b671ef9`）。
+- 第六轮数字：**112 files / 1522 tests** 全绿（+5 文件 / +63 用例）；lint/typecheck 通过；coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）；compat 13/13；startup +16.2ms；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` 39 文件 / 1032.8KB（docs 修改后重跑实测，含 README）。第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success。
 - 仍开放（四分类，详见 [acceptance-gap-audit §7.3](acceptance-gap-audit-2026-10-31.md) 与 [implementation-status §4](implementation-status.md)）：环境/人工受限验证；可离线补做（projection epoch/截图）；需负责人决策（发布、自举、T2.1 字面口径）；后续 P2/产品决策（C0 骨架 TDD 死锁、`run:auto` size 路由未实现、Remote 非降级 v0.1 不做、M-17/dispatch 摘要/worktree 归因/T4.4 引导、T5.2 学习模式抽查）。
