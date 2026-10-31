@@ -12,7 +12,7 @@
 | [03-panel-overview.png](03-panel-overview.png) | 右侧栏 FlowGate 面板：学习模式三档、8 个视图标签、七阶段流程、阶段卡（做什么/为什么/合格标准/产物/方法来源/反模式/正反例）与术语表 |
 | [04-panel-change.png](04-panel-change.png) | 有进行中变更（C-002）时的面板：变更编号、标题、复杂度/风险与阶段进度 |
 | [05-model-tool-call.png](05-model-tool-call.png) | 模型链路打通后：模型调用 `flow_status` 工具，把快照字段复述给用户（修复"注入消息 source kind"与"工具结果非 JSON"之后） |
-| [06-doctor-capabilities.png](06-doctor-capabilities.png) | `/flow doctor` 的宿主能力清单：工具 14/14、守卫心跳、投影 ✓、`appendPluginRecord` ✓（对照剩余的 ✗ 项） |
+| [06-doctor-capabilities.png](06-doctor-capabilities.png) | `/flow doctor` 的宿主能力清单：工具 15/15、守卫心跳、投影 ✓、`appendPluginRecord` ✓（对照剩余的 ✗ 项） |
 | [07-allow-once.png](07-allow-once.png) | `/flow allow-once R-STAGE-SRC …` 单次放行记录（OV-1），说明人工放行只经命令、记账留痕 |
 | [08-statusbar-s1.png](08-statusbar-s1.png) | 立项后状态条：`◆ FlowGate C-001 中 · 普通风险 │ ① 需求澄清 │ 下一步：写澄清/需求产物后 flow_submit({gate:"G1"})` |
 | [09-preset-menu.png](09-preset-menu.png) | Agent 预设菜单中出现 **FlowGate 工程模式** 与 **FlowGate 执行者**（`cordis.patch.yml` 的 preset 行在真实宿主生效；reviewer 只供审查子 agent） |

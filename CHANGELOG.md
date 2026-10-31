@@ -9,6 +9,14 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Added
 
+- **第五轮：执行方案验收缺口修复（2026-10-31，提交 `8963a92`…`535842b`、`6e3bd24`）**：
+  - 冻结/守卫：契约判定快照（改 config 只影响新变更）、门后产物哈希冻结 + `R-FROZEN-ARTIFACT`、越界撤销自动解除、非 agent 改动进入面板与 G6、接管后旧会话写拒绝（`R-LEASE`）与接续快照对比。
+  - 执行/证据：`evidence.md`/`review.md` 由插件维护；篡改检测（`core/tamper`，跳过测试/删断言/改测试基础设施 → TM-n、审查输入、G6）；行级审查读取覆盖、同 diff 去重、critical/major 独立阻塞与 `/flow review waive`；返工失效（`flow_declare_rework`）；交接摘要过门/任务完成时生成并注入任务卡。
+  - 交付/调度：S5 run/health 运行证据（宿主启服务+健康检查+日志+清理进程组）；检查点任务验证+全量测试与 worktree 降级标注；高风险终审三份结论；调查并发上限/耗时；relatedTo 继承分析结论。
+  - UI/交付物：G1 低复杂度自动通过、G3 执行图、高风险确认卡风险/回滚逐项确认、例外可撤销、规则统计/试跑用生效规则、看板随状态重生成、report/board 尝试系统打开、注入 token 预算截断。
+  - 评测/加固：compat 13/13（含 6 项离线结构检查）、浏览器包缺失故障注入、`review.model` 接线。
+  - 最终数字：**107 files / 1459 tests**；coverage 86.19/75.84/86.60/89.30；package 39 文件/1015.9KB；startup +15.8ms；uninstall 通过。详见 [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md)。
+
 - 发布工程：本 `CHANGELOG.md`、发布说明草稿 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)、tag 推送触发的发布 workflow `.github/workflows/release.yml`（校验后发布 npm 并创建 GitHub Release；截至本文件提交时尚未触发执行）。
   - 这些文件属于发布流程本身，不是插件功能变更。若发布时把 `v0.1.0` tag 前移到包含这些提交的 HEAD，请把本节并入 `[0.1.0]` 的「Documentation」一节。
 - host 层单测补齐：`test/host/dispatch.test.ts`（11 例：注册、engine 未就绪、无 subagents/provider 降级、顺序/并行派发、worktree 落点、创建失败降级、互斥、失败结算）与 `test/host/review.test.ts`（14 例：开关、provider 降级、findings 归一化与 diff 指纹、重试 1 次、sessionQuery 读取覆盖、调查任务）。

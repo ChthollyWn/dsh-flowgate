@@ -2,7 +2,7 @@
 
 > 用途：把「六个能力 → 实现机制 → 可量化指标 → 一个真实故事」压成一页，面试时按需展开。
 > 所有数字都来自本仓库可复现的验证，不虚构；未完成项在文末如实列出。
-> 数字基线：2026-10-31 第四轮，代码提交 `090c143`（P0+P1 修复后；`pnpm test` 96 files / 1363 tests 全绿）。
+> 数字基线：2026-10-31 第五轮，代码提交 `6e3bd24`（执行方案验收缺口修复后；`pnpm test` 107 files / 1459 tests 全绿）。
 
 ## 一句话
 
@@ -17,7 +17,7 @@ FlowGate 是给 DeepSeek Harness（DSH）加「硬约束开发流程」的插件
 | 3 | 规格层可被检查 | 产物解析（clarify/proposal/spec/context/design/risk/tasks）+ G0–G3/G5/G6 检查；场景覆盖、模糊词、事实引用逐行核验、任务卡与执行图 | 46 项检查每项正反例；G1 首轮失败项 `scenarioCoverage`/`factsCitations` 可复现；G3 任务卡/范围/依赖检查 |
 | 4 | 跨会话可接续、账本防篡改 | `.flowgate/` 目录 + 哈希链 + HMAC 账本；会话租约与 takeover；锁定模式与 `/flow repair`；归档主规格 ADDED/MODIFIED/REMOVED 合并 | 篡改可定位到行（锁定时写操作拒绝）；归档后编号不复用（C-002）；`spec.merged` R1–R5 |
 | 5 | 交付闭环与指标 | S5/S6 检查、单文件 HTML 交付报告、跨会话看板、M-1～M-18 指标（取不到标"未知"不用 0）、规则沉淀、只读分析任务 | C-001 交付报告 128KB；M-6 首次通过率 28.6%、M-10 TDD 合规率 100%、M-13 人工门 4 次；18/18 组 A/B 对照 + 4 项主观指标人工评分可复现（`docs/evaluation.md` §6） |
-| 6 | 可视与降级路径 | 输入框状态条 + 右侧栏 8 视图面板；`/flow doctor` 能力清单；缺服务/缺 provider/无 git 时逐项降级并提示；插件故障不阻塞宿主 | 真实 Web 宿主 **25 张截图**（会话内 preset 切换 / 8 视图 / 面板 Remote 兜底 / 低复杂度确认卡 / 拦截反馈组件级）；`restrict`/`presentAs` 能力检测 ✓；启动增量 **+12.1 / +15.5ms**（模块加载口径，不含 UI 冷启动）；卸载干净度检查通过 |
+| 6 | 可视与降级路径 | 输入框状态条 + 右侧栏 8 视图面板；`/flow doctor` 能力清单；缺服务/缺 provider/无 git 时逐项降级并提示；插件故障不阻塞宿主 | 真实 Web 宿主 **25 张截图**（会话内 preset 切换 / 8 视图 / 面板 Remote 兜底 / 低复杂度确认卡 / 拦截反馈组件级）；`restrict`/`presentAs` 能力检测 ✓；启动增量 **+15.8ms**（模块加载口径，不含 UI 冷启动）；卸载干净度检查通过 |
 
 ## 一个真实故事（不是编的）
 
@@ -32,12 +32,12 @@ FlowGate 是给 DeepSeek Harness（DSH）加「硬约束开发流程」的插件
 
 ## 工程与验证数字
 
-- 测试：**96 个测试文件 / 1363 个用例**（core / host / client / 集成 / 故障注入），`pnpm test` 全绿（约 3.3s）；CI 同时跑 coverage。
-- 真机兼容：DSH `0.2.1-rc.5`，`verify:compat` 7/7（2026-10-31，HEAD `43d18e5`；当前 HEAD 尚未复跑，见 [compat/](compat/)）；真实 Web 宿主走查截图 25 张（其中 24–26 为组件级）+ headless 真模型完整 S0→S6（`ts-todo-api` / `java-renewal`）。
-- 加固：故障注入 **7/7**；启动增量 **+12.1 / +15.5ms**（两次采样，验收线 <200ms；口径是模块加载成本，不含 Electron/UI 冷启动）；隔离 profile 安装/卸载干净度通过。
-- 包：**39 文件 / 928.0KB**（`pnpm verify:package`），零 `@deepseek-ai/*` 运行时依赖（只作可选 peer），不联网、无遥测。
+- 测试：**107 个测试文件 / 1459 个用例**（core / host / client / 集成 / 故障注入），`pnpm test` 全绿；CI 同时跑 coverage。
+- 真机兼容：DSH `0.2.1-rc.5`，`verify:compat` **13/13**（2026-10-31 第五轮在隔离 profile 复跑，含 6 项离线结构检查；见 [compat/](compat/)）；真实 Web 宿主走查截图 25 张（其中 24–26 为组件级）+ headless 真模型完整 S0→S6（`ts-todo-api` / `java-renewal`）。
+- 加固：故障注入套件通过（含状态损坏/守卫抛错/服务缺失/配置损坏/浏览器包缺失）；启动增量 **+15.8ms**（验收线 <200ms；口径是模块加载成本，不含 Electron/UI 冷启动）；隔离 profile 安装/卸载干净度通过。
+- 包：**39 文件 / 1015.9KB**（`pnpm verify:package`），零 `@deepseek-ai/*` 运行时依赖（只作可选 peer），不联网、无遥测。
 - 评测：**18/18 run**（9 任务 × A/B，真实模型 + 隔离 headless）+ 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）**人工评分 18/18**；从 0 开发演练 6 次与派发对照见 `docs/evaluation.md` §6.6/§6.7。
-- CI：GitHub Actions 覆盖 lint / test / build / verify:package / verify:client；当前 HEAD 本地全量验证通过（本轮未推送，CI 需推送后重跑）。
+- CI：GitHub Actions 覆盖 lint / test / coverage / build / verify:package / verify:client；HEAD `a48c2b9` 的 CI 已成功，第五轮修复后本地全量验证通过（待推送后重跑 CI）。
 
 ## 坦诚的局限（面试时主动说）
 

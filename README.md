@@ -212,13 +212,13 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 产物解析与 GR/G0/G1/G2/G3/G5/G6 检查（46 项）、任务卡检查、执行计划与执行图 | ✅ 已实现（每项检查一正一反） |
 | `.flowgate/` 目录、台账、账本哈希链 + HMAC、跨会话接续与租约、锁定模式与 `/flow repair` | ✅ 已实现（篡改可定位第 N 行；重建可严格往返） |
 | 证据回执、输入哈希判定过期、风险引擎、返工失效范围、可核验源码引用 | ✅ 已实现 |
-| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 专项单测（含并行槽位级自动补位、检查点失败修复任务与重试、`run: main` 路由）；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
-| 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：状态条、8 视图、会话内切换工程模式 preset、面板按钮 Remote 兜底、低复杂度确认卡、待处理项（scope/risk/plan/rule/conflict/blocker）面板审批（25 张截图）；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；拦截视图误判反馈仍为组件级验证 |
+| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 专项单测（并行槽位补位、检查点修复任务与重试、`run: main` 路由、行级读取覆盖、同 diff 去重、终审三份结论、检查点任务验证+全量测试）；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
+| 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：状态条、8 视图、会话内切换工程模式 preset、面板按钮 Remote 兜底、低复杂度确认卡、待处理项（scope/risk/plan/rule/conflict/blocker）面板审批、例外列表/撤销、非 agent 改动确认（25 张截图）；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；GREEN 过期按输入哈希显示；规则统计/试跑使用实际生效规则；拦截视图误判反馈仍为组件级验证 |
 | HTML 交付报告、跨会话看板 | ✅ 已实现（单文件离线可用，样例见 test/fixtures） |
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
 | 有 / 无插件对照评测报告 | ✅ **18/18 run 完成 + 4 项主观指标人工评分 18/18**（9 任务 × A/B，真实模型 + headless）；本轮另补跑从 0 开发演练与派发（inline vs auto）对照（[§6.5–§6.7](docs/evaluation.md)）。诚实结论：B 在需求覆盖上没有胜出（多数 B run 被环境/人工门阻塞），真实收益是 0 虚假完成与可审计过程；样本小、不可外推 |
 
-**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（**96 文件 / 1363 用例**）；`pnpm coverage` 通过 thresholds（80/80/80/70；core/host 明细见 implementation-status §2；CI 也跑 coverage）；真实 DSH 0.2.1-rc.5 下 `--dump-config` 已加载本插件（`--dump-config-schema` 在 rc.5 上会因宿主自带 preset 行同样报错，不作为判据，见 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run 并补齐主观评分，结论含反例/阻塞原因与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
+**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（**107 文件 / 1459 用例**）；`pnpm coverage` 通过 thresholds（80/80/80/70；core/host 明细见 implementation-status §2；CI 也跑 coverage）；真实 DSH 0.2.1-rc.5 下 `--dump-config` 已加载本插件，隔离 profile 复跑 `verify:compat` **13/13**（含 6 项离线结构检查；`--dump-config-schema` 在 rc.5 上会因宿主自带 preset 行同样报错，不作为判据，见 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run 并补齐主观评分，结论含反例/阻塞原因与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。第五轮按 04 验收条件修复的缺口与剩余项见 [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
 ## 界面
 
