@@ -204,6 +204,10 @@ const POSITIVE_CONTEXTS: Record<string, () => GateCheckContext> = {
       project: { ...PROJECT, commands: { test: 'none', lint: 'pnpm lint', build: 'pnpm build' } },
       artifacts: bundle({ risk: riskWithMaintainabilityTestNone() }),
     }),
+  'g1.coreSkills': () =>
+    makeCtx({ gate: 'G1', change: change({ skillReceipts: [{ name: 'flow-clarify', hash: 'sha256:x', at: NOW }] }) }),
+  'g3.coreSkills': () =>
+    makeCtx({ gate: 'G3', change: change({ skillReceipts: [{ name: 'flow-plan', hash: 'sha256:x', at: NOW }] }) }),
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +352,8 @@ const NEGATIVE_CONTEXTS: Record<string, (ctx: GateCheckContext) => GateCheckCont
     ...ctx,
     change: change({ frozen: { proposal: { hash: 'sha256:deadbeef', at: NOW } } }),
   }),
+  'g1.coreSkills': (ctx) => ({ ...ctx, gate: 'G1', change: change({ skillReceipts: [] }) }),
+  'g3.coreSkills': (ctx) => ({ ...ctx, gate: 'G3', change: change({ skillReceipts: [] }) }),
   'g3.cleanWorktree': (ctx) => ({ ...ctx, git: dirtyGit }),
   'g3.testNoneRisk': (ctx) => ({
     ...ctx,
@@ -650,7 +656,13 @@ describe('runGateChecks', () => {
 
   it('合法输入时全部门通过', async () => {
     for (const gate of TABLE_GATES) {
-      const outcomes = await runGateChecks(makeCtx({ gate }))
+      const withSkills = change({
+        skillReceipts: [
+          { name: 'flow-clarify', hash: 'sha256:c', at: NOW },
+          { name: 'flow-plan', hash: 'sha256:p', at: NOW },
+        ],
+      })
+      const outcomes = await runGateChecks(makeCtx({ gate, change: withSkills }))
       expect(outcomes.length, `gate ${gate}`).toBeGreaterThan(0)
       for (const outcome of outcomes) expect(outcome.passed, `${gate}:${outcome.item} ${JSON.stringify(outcome)}`).toBe(true)
     }

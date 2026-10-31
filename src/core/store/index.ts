@@ -53,7 +53,11 @@ export type {
 
 export {
   freezeContract,
+  contractConfigSnapshot,
+  frozenContractConfig,
   artifactsFingerprint,
+  freezeArtifacts,
+  unfreezeArtifacts,
   assertArtifactsUnmodified,
   assertNotFrozen,
   artifactKeyForPath,

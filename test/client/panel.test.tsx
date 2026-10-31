@@ -179,6 +179,39 @@ describe('gates view (T2.6 / T2.8)', () => {
     const html = renderToStaticMarkup(<GatesView model={empty} t={zh} onAction={noop} />)
     expect(html).toContain('当前没有等待你的门禁')
   })
+
+  it('lists active exceptions with a revoke action (T5.1 验收 #1)', () => {
+    const projection = makeProjection({
+      snapshot: {
+        exceptions: [
+          { id: 'EX-1', ruleId: 'R-SCOPE', pathPattern: 'src/legacy/**', reason: '迁移期放行', createdAt: '2026-11-01T09:00:00+08:00', changeId: 'C-003' },
+        ],
+      },
+    })
+    const html = renderToStaticMarkup(<GatesView model={buildPanelModel(projection, zh)} t={zh} onAction={noop} />)
+    void html
+    const intercepts = renderToStaticMarkup(<InterceptsView model={buildPanelModel(projection, zh)} t={zh} onAction={noop} />)
+    expect(intercepts).toContain('data-flowgate="exceptions"')
+    expect(intercepts).toContain('src/legacy/**')
+    expect(intercepts).toContain('data-action="revoke-exception-EX-1"')
+  })
+
+  it('lists non-agent changes with a confirm action (T1.4 验收 #3)', () => {
+    const projection = makeProjection({
+      snapshot: {
+        externalChanges: [
+          { path: 'src/manual.ts', at: '2026-11-01T09:00:00+08:00', origin: 'external' },
+          { path: 'src/unknown.ts', at: '2026-11-01T09:01:00+08:00', origin: 'unknown' },
+        ],
+      },
+    })
+    const html = renderToStaticMarkup(<GatesView model={buildPanelModel(projection, zh)} t={zh} onAction={noop} />)
+    expect(html).toContain('data-flowgate="external-changes"')
+    expect(html).toContain('src/manual.ts')
+    expect(html).toContain('src/unknown.ts')
+    expect(html).toContain('来源未归因')
+    expect(html).toContain('data-action="confirm-external-all"')
+  })
 })
 
 describe('tasks view (T3.6 / T5.1)', () => {

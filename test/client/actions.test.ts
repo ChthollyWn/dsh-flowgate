@@ -52,6 +52,16 @@ describe('commandFor', () => {
       [{ kind: 'reject-pending', id: 'BL-3', reason: '不解除' }, ''],
       [{ kind: 'allow-once', ruleId: 'R-STAGE-SRC', reason: '紧急修复' }, '/flow allow-once R-STAGE-SRC 紧急修复'],
       [{ kind: 'revoke-exception', id: 'EX-1' }, '/flow exception revoke EX-1'],
+      [
+        { kind: 'add-exception', ruleId: 'R-SCOPE', reason: '迁移期放行' },
+        '/flow exception add R-SCOPE - 迁移期放行',
+      ],
+      [
+        { kind: 'add-exception', ruleId: 'R-SCOPE', pathPattern: 'src/legacy/**', reason: '迁移期放行' },
+        '/flow exception add R-SCOPE src/legacy/** 迁移期放行',
+      ],
+      [{ kind: 'confirm-external' }, '/flow external confirm all'],
+      [{ kind: 'confirm-external', path: 'src/manual.ts' }, '/flow external confirm src/manual.ts'],
       [{ kind: 'raise-complexity', reason: '范围变大' }, '/flow complexity high 范围变大'],
       [{ kind: 'resume', changeId: 'C-003' }, '/flow resume C-003'],
       [{ kind: 'resume', changeId: 'C-003', takeover: true }, '/flow resume C-003 --takeover'],

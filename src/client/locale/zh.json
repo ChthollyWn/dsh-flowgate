@@ -124,7 +124,7 @@
   "intercepts.log": "拦截记录",
   "intercepts.misjudged": "误判反馈",
   "intercepts.reasonPh": "为什么这次拦截是误判",
-  "intercepts.revokeException": "撤销例外",
+  "intercepts.revokeException": "撤销",
   "intercepts.ruleStats": "按规则统计",
   "intercepts.tab.coverage": "覆盖",
   "intercepts.tab.log": "记录",
@@ -354,5 +354,12 @@
   "trace.summary": "覆盖 {covered}/{total}",
   "trace.title": "追溯矩阵",
   "trace.uncovered": "未覆盖场景：{list}",
-  "trace.uncoveredShort": "未覆盖"
+  "trace.uncoveredShort": "未覆盖",
+  "gates.externalChanges": "非 agent 改动（待确认）",
+  "gates.externalHint": "这些文件是编辑器/格式化等非 agent 改动；G6 前必须确认或还原。",
+  "gates.confirmExternal": "全部确认",
+  "gates.externalUnknown": "来源未归因",
+  "intercepts.exceptions": "生效中的规则例外",
+  "intercepts.noExceptions": "没有生效中的例外。",
+  "intercepts.exceptionRule": "规则 {rule}"
 }

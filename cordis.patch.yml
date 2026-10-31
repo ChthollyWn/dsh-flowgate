@@ -30,10 +30,28 @@
         description: 硬约束开发流程：先澄清与设计，再按执行图 TDD，证据驱动验收；写操作由 FlowGate 守卫把关。
         order: 50
         plugins:
+          # 人设 + 计划模式引导（T1.7）：先把决定、下一步和证据写清楚，再动手；
+          # 输出压缩/上下文参数由宿主组合层（dsh-compaction-tool-result-pruner）统一配置，
+          # 插件不硬编码宿主阈值（避免不同 RC 组合下配置被拒）。
           - id: flowgate-persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: '你在 FlowGate 工程模式下工作：严格按阶段推进，先澄清需求与边界，再设计拆解，禁止跳步；用证据而不是自述证明完成。'
+              prefix: '你在 FlowGate 工程模式下工作：严格按阶段推进，先澄清需求与边界，再设计拆解，禁止跳步；每次行动前先用一句话说明「当前阶段、允许的动作、下一步」，先计划再执行；用证据而不是自述证明完成，输出保持简洁。'
+          # 工具集（T1.7 / 03 §2.4）：工程模式明确拥有文件读写、搜索与技能工具；
+          # 原生委派由守护进程 restrict + 守卫关闭，不在此列。
+          - id: flowgate-tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: true
+              edit: true
+          - id: flowgate-tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: flowgate-tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
 
     # ── 执行者：flow_dispatch_next 派发的子 agent ───────────────────────────
     - id: preset-flowgate-executor
@@ -47,7 +65,21 @@
           - id: executor-persona
             name: '@deepseek-ai/dsh-persona'
             config:
-              prefix: '你是 FlowGate 执行者子 agent，只完成分配给你的单个任务卡；只改任务范围，用 flow_verify 产生证据，完成后回传结构化摘要。'
+              prefix: '你是 FlowGate 执行者子 agent，只完成分配给你的单个任务卡；只改任务范围，先用一句话说清要改什么，再执行；用 flow_verify 产生证据，完成后回传结构化摘要。'
+          # 执行者工具集：文件读写、搜索与 shell（跑测试/构建）；没有委派工具。
+          - id: executor-tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: true
+              edit: true
+          - id: executor-tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: executor-tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
 
     # ── 只读取证：审查/调查子 agent（能力边界先由工具集保证，守卫兜底）──────
     - id: preset-flowgate-reviewer

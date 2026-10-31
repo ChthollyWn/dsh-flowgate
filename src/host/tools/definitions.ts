@@ -12,6 +12,7 @@ import { defineHostTool, fail, ok, type HostToolValue, type ParamSpecs } from '.
 import { HostError, toAgentError } from '../errors.js'
 import { captureTaskStartSnapshot } from '../postcheck/index.js'
 import { readTaskDiff, reviewCapability, runFinalReview, runInvestigation, runTaskReview, taskReviewRounds } from '../review/index.js'
+import { runRuntimeEvidence } from '../verify/run.js'
 
 /** 取引擎（工具调用时引擎一定已初始化；仍做兜底）。 */
 async function requireEngine(runtime: HostRuntime): Promise<EngineLike> {
@@ -149,8 +150,21 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         // 开着 review.enabled 时提交 G5 必然"缺少 S5 终审记录"（P0-5）。
         // 这里在提交 G5 前自动跑一次只读终审子 agent 并登记记录。
         let finalReviewMessage = ''
+        let runtimeMessage = ''
         if (gate === 'G5') {
           const change = engine.currentChange()
+          if (change && change.stage === 'S5') {
+            // T4.2：配置了 run 命令时由宿主启动服务、健康检查、采集日志并清理（不是模型自己跑）。
+            const runtimeEvidence = await runRuntimeEvidence(runtime, engine)
+            runtimeMessage = runtimeEvidence.attempted ? runtimeEvidence.message : ''
+            if (runtimeEvidence.attempted && !runtimeEvidence.ok) {
+              return fail(
+                `S5 运行证据失败：${runtimeEvidence.message}`,
+                '修复服务启动/health 配置后重新 flow_submit G5；或用 attach_evidence 提交日志+冒烟证据（普通风险兜底）',
+                { gate: 'G5', runtimeEvidence: runtimeEvidence.message },
+              )
+            }
+          }
           if (change && change.stage === 'S5' && engine.getConfig().review.enabled) {
             const finalReview = await runFinalReview(runtime)
             finalReviewMessage = finalReview.message
@@ -176,7 +190,11 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         }
         const result = await engine.submitGate(gate)
         runtime.emit()
-        const lines = finalReviewMessage !== '' ? [`终审：${finalReviewMessage}`, result.message] : [result.message]
+        const lines = [
+          ...(runtimeMessage !== '' ? [`运行证据：${runtimeMessage}`] : []),
+          ...(finalReviewMessage !== '' ? [`终审：${finalReviewMessage}`] : []),
+          result.message,
+        ]
         for (const failure of result.failures) {
           lines.push(`✗ ${failure.label}：${failure.hint ?? ''}${failure.example ? `（例：${failure.example}）` : ''}`)
         }

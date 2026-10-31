@@ -84,6 +84,7 @@ describe('real gate checks (no injected checker)', () => {
     expect(engine.currentChange()?.stage).toBe('S1')
     await writeArtifacts(fs, created.changeId)
 
+    await engine.recordSkillLoaded('flow-clarify', 'sha256:clarify')
     const g1 = await engine.submitGate('G1')
     if (!g1.passed) throw new Error(`G1 失败：${g1.failures.map((failure: CheckOutcome) => `${failure.label} → ${failure.hint} ${JSON.stringify(failure.details ?? [])}`).join(' | ')}`)
     expect(g1.awaiting).toBe('owner')
@@ -93,9 +94,14 @@ describe('real gate checks (no injected checker)', () => {
     if (!g2.passed) throw new Error(`G2 失败：${g2.failures.map((failure: CheckOutcome) => `${failure.label} → ${failure.hint}`).join(' | ')}`)
     expect(engine.currentChange()?.stage).toBe('S3')
 
+    await engine.recordSkillLoaded('flow-plan', 'sha256:plan')
     const g3 = await engine.submitGate('G3')
     if (!g3.passed) throw new Error(`G3 失败：${g3.failures.map((failure: CheckOutcome) => `${failure.label} → ${failure.hint} ${JSON.stringify(failure.details ?? [])}`).join(' | ')}`)
     expect(g3.awaiting).toBe('owner')
+    // T2.9：G3 等负责人期间执行图数据已经物化，批准卡片能看到流程图。
+    expect(Object.keys(engine.currentChange()?.tasks ?? {})).toEqual(['T1'])
+    expect(engine.currentChange()?.batches.map((batch) => batch.id)).toEqual(['B1'])
+    expect(fs.listFiles()).toContain(`.flowgate/changes/${created.changeId}/execution-plan.md`)
     await engine.approveGate('G3')
     expect(engine.currentChange()?.stage).toBe('S4')
     expect(Object.keys(engine.currentChange()?.tasks ?? {})).toEqual(['T1'])
@@ -140,5 +146,14 @@ describe('real gate checks (no injected checker)', () => {
     const g0 = await engine.newChange({ title: 'ignored', fromRoadmap: 'C0' })
     expect(g0.changeId).toBe('C-001')
     expect(engine.currentChange()?.title).toBeTruthy()
+    // T2.7：proposal.md 草稿带入路线图的目标与验收要点；路线图状态回写为「进行中」。
+    const proposal = await fs.readFile('.flowgate/changes/C-001/proposal.md')
+    expect(proposal).toContain('测试框架跑通 1 个冒烟测试')
+    expect(proposal).toContain('验收要点（来自已批准的路线图）')
+    expect(await fs.readFile('.flowgate/roadmap.md')).toContain('进行中')
+
+    // 暂停时回写「暂停」。
+    await engine.pauseChange()
+    expect(await fs.readFile('.flowgate/roadmap.md')).toContain('暂停')
   }, 30_000)
 })

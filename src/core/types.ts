@@ -58,6 +58,7 @@ export type PendingKind =
   | 'exception'
   | 'conflict'
   | 'blocker'
+  | 'tamper'
 export const PENDING_PREFIX: Record<PendingKind, string> = {
   risk: 'RK',
   scope: 'SC',
@@ -67,6 +68,7 @@ export const PENDING_PREFIX: Record<PendingKind, string> = {
   exception: 'EX',
   conflict: 'CF',
   blocker: 'BL',
+  tamper: 'TM',
 }
 
 // ---------------------------------------------------------------------------
@@ -658,12 +660,30 @@ export interface GitPort {
 // Persistent change state (changes/<id>/status.json)
 // ---------------------------------------------------------------------------
 
+/**
+ * 冻结时用于判定的配置子集。
+ *
+ * 只冻结会改变判定结果的部分：规则、风险触发器、等级定义与数量/预算限制。
+ * 命令、派发、并行、学习模式等不属于「契约」（变更期间可调整）。
+ */
+export interface ContractConfigSnapshot {
+  rules: Rule[]
+  triggers: TriggerSettings
+  levels: LevelSettings
+  limits: LimitSettings
+}
+
 export interface ContractSnapshot {
   plugin: string
   rules: string
   levels: string
   skills: Record<string, string>
   createdAt: string
+  /**
+   * 完整判定快照（v0.1 验收 T1.3 起写入）。在途变更按它判定，之后改
+   * `config.yaml` 只影响新建变更；旧状态没有该字段时回退当前配置。
+   */
+  snapshot?: ContractConfigSnapshot
 }
 
 export interface GateRecord {
@@ -846,7 +866,13 @@ export interface ChangeStatus {
   /** S2 baseline test result used for S5 regression comparison. */
   baseline?: { commit: string | null; summary: TestSummary; recordedAt: string; receiptId?: string }
   /** Changes detected between agent calls (manual edits, formatters) pending owner confirmation. */
-  externalChanges?: { path: string; at: string; origin: 'external' | 'unknown' }[]
+  externalChanges?: { path: string; at: string; origin: 'external' | 'unknown'; confirmedAt?: string }[]
+  /** 会话释放/暂停时记录的工作区状态；新会话接续时对比出「会话之间的非 agent 改动」。 */
+  worktreeSnapshot?: { at: string; statusPorcelain: string; paths: string[] }
+  /** 宿主上报的本变更累计 token 用量（token-meter 可用时）；无数据不填。 */
+  tokenUsage?: number
+  /** 已经被加载过的阶段技能回执（T2.4：核心技能必须在过门前加载）。 */
+  skillReceipts?: { name: string; hash: string; at: string; sessionId?: string }[]
   /** Highest artifact hashes frozen at gate approval. */
   frozen?: Record<string, { hash: string; at: string }>
   createdAt: string
@@ -1024,6 +1050,14 @@ export type LedgerEventType =
   | 'report.generated'
   | 'dispatch.started'
   | 'dispatch.completed'
+  | 'artifacts.frozen'
+  | 'artifact.frozen'
+  | 'artifact.unfrozen'
+  | 'external.detected'
+  | 'external.acknowledged'
+  | 'budget.exceeded'
+  | 'skill.loaded'
+  | 'tamper.cleared'
 
 export interface LedgerEvent {
   seq: number
@@ -1081,6 +1115,12 @@ export interface RuntimeSnapshot {
   activeTaskId?: string
   pending: PendingItem[]
   violations: Violation[]
+  /** 未经负责人确认的非 agent 改动（编辑器/格式化等），面板展示并在 G6 前要求确认。 */
+  externalChanges?: NonNullable<ChangeStatus['externalChanges']>
+  /** 本会话是接续已存在的进行中变更（状态条显示「已接续」）。 */
+  resumed?: boolean
+  /** 生效中的规则例外（面板可撤销）。 */
+  exceptions?: ExceptionRecord[]
   off: boolean
   locked: boolean
   interceptCounts: Record<string, number>

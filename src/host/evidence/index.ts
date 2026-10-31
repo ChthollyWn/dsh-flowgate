@@ -15,6 +15,65 @@ import type { DshContext, DshContentBlock, DshPostToolDecision, DshToolExecution
 import type { HostRuntime } from '../runtime.js'
 import type { EvidenceKind, EvidenceReceipt, TestSummary } from '../../core/types.js'
 import { toAgentError } from '../errors.js'
+import { collectTamperSignals } from '../../core/tamper/index.js'
+import { sha256Hex } from '../../core/util/hash.js'
+
+/** 每次工具调用后的维护任务（证据新鲜度 + 篡改扫描）去抖计时器。 */
+const maintenanceTimers = new WeakMap<object, ReturnType<typeof setTimeout>>()
+const MAINTENANCE_DEBOUNCE_MS = 250
+
+/** 工具调用后异步维护：刷新面板证据新鲜度，并扫描 diff 里的篡改信号（T3.5/T3.6）。 */
+export function schedulePostToolMaintenance(runtime: HostRuntime): void {
+  const key = runtime as unknown as object
+  const existing = maintenanceTimers.get(key)
+  if (existing !== undefined) clearTimeout(existing)
+  const timer = setTimeout(() => {
+    maintenanceTimers.delete(key)
+    void runPostToolMaintenance(runtime)
+  }, MAINTENANCE_DEBOUNCE_MS)
+  const maybeUnref = timer as unknown as { unref?: () => void }
+  maybeUnref.unref?.()
+}
+
+async function runPostToolMaintenance(runtime: HostRuntime): Promise<void> {
+  const engine = runtime.engine()
+  const ports = runtime.ports()
+  const root = runtime.root()
+  if (!engine || !ports || !root) return
+  try {
+    await engine.refreshEvidenceFreshness()
+    engine.notifyStateChanged()
+  } catch {
+    // 新鲜度是展示数据：失败不影响门禁。
+  }
+  try {
+    const snapshot = runtime.lastSnapshot
+    if (!snapshot?.initialized || snapshot.off) return
+    if (!ports.git || !(await ports.git.isRepo(root))) return
+    const diffText = await ports.git.diffText(root)
+    if (diffText.trim() === '') return
+    const signals = collectTamperSignals(diffText)
+    if (signals.length > 0) await engine.recordTamperSignals(signals, 'post-execute')
+  } catch {
+    // 篡改扫描失败时保持静默；下一轮工具调用会重试。
+  }
+}
+
+/**
+ * 从一次工具调用里识别「技能加载」：DSH 的 `dsh-tool-skill` 把加载结果作为工具
+ * 结果返回，工具名是 `skill`。名称从参数 name/skill/id 里取（按常见写法兜底）。
+ * 不是技能工具时返回 null。
+ */
+export function skillNameFromTool(tool: string, args: unknown): string | null {
+  if (!/^skills?$/i.test(tool.trim())) return null
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return null
+  const record = args as Record<string, unknown>
+  for (const key of ['name', 'skill', 'skillName', 'id']) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
 
 /** 触发压缩的最小内容长度（字符）。 */
 const COMPRESS_THRESHOLD_CHARS = 1_200
@@ -102,7 +161,25 @@ export function installEvidenceCompression(runtime: HostRuntime): void {
       'tools/post-execute',
       async (exec: DshToolExecution, result: Readonly<DshToolResult>, next: () => Promise<DshPostToolDecision>) => {
         const decision = await next()
-        return await compressPostExecute(runtime, exec, result, decision)
+        // 技能加载回执（T2.4）：过 G1/G3 前必须已经加载过阶段核心技能。
+        const skillName = skillNameFromTool(exec.name, exec.arguments)
+        const engineForSkill = runtime.engine()
+        if (skillName !== null && engineForSkill) {
+          try {
+            const body = 'content' in decision && Array.isArray(decision.content) ? textOf(decision.content) : textOf(result.content)
+            const receipt = await engineForSkill.recordSkillLoaded(skillName, sha256Hex(body))
+            runtime.noteFeature(
+              'skills',
+              receipt.duplicate ? `技能 ${skillName} 本会话已加载过（不重复注入全文）` : `已记录技能加载回执：${skillName}`,
+            )
+          } catch (error) {
+            runtime.noteFeature('skills', `技能回执记录失败：${toAgentError(error).error}`)
+          }
+        }
+        const compressed = await compressPostExecute(runtime, exec, result, decision)
+        // 任何工具执行后都可能改变输入文件（源码/测试），刷新证据新鲜度并扫篡改。
+        schedulePostToolMaintenance(runtime)
+        return compressed
       },
     )
   })

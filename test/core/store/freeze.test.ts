@@ -7,7 +7,11 @@ import {
   artifactsFingerprint,
   assertArtifactsUnmodified,
   assertNotFrozen,
+  contractConfigSnapshot,
+  freezeArtifacts,
   freezeContract,
+  frozenContractConfig,
+  unfreezeArtifacts,
 } from '../../../src/core/store'
 import { DEFAULT_CONFIG, parseConfig } from '../../../src/core/store'
 import { makeChange } from './fixtures'
@@ -82,6 +86,78 @@ describe('freezeContract', () => {
     expect(newer.rules).toBe(older.rules)
     expect(newer.levels).toBe(older.levels)
     expect(newer.plugin).not.toBe(older.plugin)
+  })
+})
+
+describe('frozenContractConfig（T1.3：在途变更按冻结契约判定）', () => {
+  const at = '2026-11-12T10:00:00+08:00'
+  const changed = parseConfig(
+    'rules:\n  - id: R-STAGE-SRC\n    when: {}\n    decision: allow\n    why: 测试覆盖\n    unlock: 无\nlimits:\n  task_max_files: 9\n',
+  )
+
+  it('contract.snapshot 写入完整判定配置', () => {
+    const contract = freezeContract(DEFAULT_CONFIG, '0.1.0', {}, at)
+    expect(contract.snapshot).toBeDefined()
+    expect(contract.snapshot!.rules).toEqual(DEFAULT_CONFIG.rules)
+    expect(contract.snapshot!.limits).toEqual(DEFAULT_CONFIG.limits)
+    expect(contract.snapshot).toEqual(contractConfigSnapshot(DEFAULT_CONFIG))
+  })
+
+  it('有冻结快照时忽略之后修改的规则与限制', () => {
+    const contract = freezeContract(DEFAULT_CONFIG, '0.1.0', {}, at)
+    const effective = frozenContractConfig(changed, contract)
+    expect(effective.rules).toEqual(DEFAULT_CONFIG.rules)
+    expect(effective.limits).toEqual(DEFAULT_CONFIG.limits)
+    // 命令等非契约字段仍取当前配置。
+    expect(effective.commands.test).toBe(changed.commands.test)
+  })
+
+  it('旧状态没有快照时回退当前配置（兼容性）', () => {
+    const legacy = { plugin: '0.1.0', rules: 'sha256:x', levels: 'sha256:y', skills: {}, createdAt: at }
+    expect(frozenContractConfig(changed, legacy)).toBe(changed)
+    expect(frozenContractConfig(changed, undefined)).toBe(changed)
+  })
+
+  it('返回的是深拷贝，修改结果不会污染冻结快照', () => {
+    const contract = freezeContract(DEFAULT_CONFIG, '0.1.0', {}, at)
+    const effective = frozenContractConfig(changed, contract)
+    effective.limits.task_max_files = 123
+    expect(contract.snapshot!.limits.task_max_files).not.toBe(123)
+  })
+})
+
+describe('freezeArtifacts / unfreezeArtifacts（T2.1/T2.5：门通过后冻结产物）', () => {
+  const at = '2026-11-12T10:00:00+08:00'
+
+  it('把产物原文哈希合并进 change.frozen，内容未变不重复更新', () => {
+    const change = makeChange({ id: 'C-001' })
+    const first = freezeArtifacts(change, bundle, at)
+    expect(first).toEqual(['clarify', 'design', 'risk'])
+    expect(change.frozen!.design!.hash).toBe(sha256(designRaw))
+
+    const second = freezeArtifacts(change, bundle, '2026-11-13T10:00:00+08:00')
+    expect(second).toEqual([])
+    // 未变化时保留原冻结时间。
+    expect(change.frozen!.design!.at).toBe(at)
+  })
+
+  it('内容变化时更新哈希与冻结时间', () => {
+    const change = makeChange({ id: 'C-001' })
+    freezeArtifacts(change, bundle, at)
+    const changed: ArtifactBundle = { ...bundle, design: { ...bundle.design!, raw: '改过的设计' } }
+    const keys = freezeArtifacts(change, changed, '2026-11-13T10:00:00+08:00')
+    expect(keys).toEqual(['design'])
+    expect(change.frozen!.design!.hash).toBe(sha256('改过的设计'))
+  })
+
+  it('unfreezeArtifacts 可按 key 解除或全部解除', () => {
+    const change = makeChange({ id: 'C-001' })
+    freezeArtifacts(change, bundle, at)
+    expect(unfreezeArtifacts(change, ['design'])).toEqual(['design'])
+    expect(Object.keys(change.frozen!).sort()).toEqual(['clarify', 'risk'])
+    expect(unfreezeArtifacts(change)).toEqual(['clarify', 'risk'])
+    expect(change.frozen).toEqual({})
+    expect(unfreezeArtifacts(change)).toEqual([])
   })
 })
 

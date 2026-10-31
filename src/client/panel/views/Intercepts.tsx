@@ -363,6 +363,31 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
           </div>
         </Section>
       ) : null}
+      <Section title={t('intercepts.exceptions')} count={model.exceptions.length}>
+        {model.exceptions.length === 0 ? (
+          <EmptyState text={t('intercepts.noExceptions')} />
+        ) : (
+          <ul data-flowgate="exceptions" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4 }}>
+            {model.exceptions.map((exception) => (
+              <li
+                key={exception.id}
+                data-flowgate="exception-row"
+                data-exception={exception.id}
+                style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11.5 }}
+              >
+                <Badge label={t('intercepts.exceptionRule', { rule: exception.ruleId })} color={COLORS.warn} />
+                {exception.pathPattern !== undefined ? <Mono>{exception.pathPattern}</Mono> : null}
+                <span style={{ color: COLORS.dim, flex: 1 }}>{exception.reason}</span>
+                <ActionButton
+                  label={t('intercepts.revokeException')}
+                  dataAction={`revoke-exception-${exception.id}`}
+                  onClick={() => onAction({ kind: 'revoke-exception', id: exception.id })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
     </div>
   )
 }

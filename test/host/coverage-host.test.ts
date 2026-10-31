@@ -51,6 +51,7 @@ import {
   resolveCwd,
   snapshotWithGit,
   snapshotWithWalk,
+  cleanedPaths,
 } from '../../src/host/postcheck/index'
 import { DEBUG_FETCH_LOG, installFetchDebug } from '../../src/host/debug-fetch'
 import { resetHostPluginForTest } from '../../src/host/index'
@@ -444,6 +445,7 @@ describe('host/postcheck — porcelain 解析 / 快照 / 归因', () => {
     const before = { at: '1', mode: 'walk' as const, fingerprint: 'f1', files: new Map([['a', '1'], ['b', '2']]) }
     const after = { at: '2', mode: 'walk' as const, fingerprint: 'f2', files: new Map([['b', '3'], ['c', '4']]) }
     expect(diffSnapshots(before, after)).toEqual(['a', 'b', 'c'])
+    expect(cleanedPaths(before, after)).toEqual(['a'])
     expect(diffSnapshots(after, after)).toEqual([])
     expect(resolveCwd('/repo', '/abs/x')).toBe('/abs/x')
     expect(resolveCwd('/repo', 'C:\\abs\\x')).toBe('C:\\abs\\x')

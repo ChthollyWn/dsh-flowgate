@@ -565,8 +565,14 @@ describe('artifacts/checks — G5 / G6', () => {
     const runReceipt = { ...validEvidence()[0]!, kind: 'run' as const, exitCode: 1 }
     expectFail(checkG5RuntimeEvidence(ctx({ change: validChange({ risk: 'high' }), evidence: [runReceipt] })), '高风险变更需要运行证据')
     expect(checkG5RuntimeEvidence(ctx({ change: validChange({ risk: 'high' }), evidence: [{ ...runReceipt, exitCode: 0 }] })).passed).toBe(true)
-    expect(checkG5RuntimeEvidence(ctx({ project: project({ commands: { run: 'pnpm dev' } }), evidence: [] })).passed).toBe(true)
+    // 配置了 run 就必须有运行回执（T4.2 验收 #2）；手工证据可以兜底。
+    expectFail(
+      checkG5RuntimeEvidence(ctx({ project: project({ commands: { run: 'pnpm dev' } }), evidence: [] })),
+      '配置了 run 命令',
+    )
+    const manualReceipt = { ...runReceipt, kind: 'manual' as const, group: 'manual', exitCode: 0 }
     expect(checkG5RuntimeEvidence(ctx({ project: project({ commands: { run: 'pnpm dev' } }), evidence: [{ ...runReceipt, exitCode: 0 }] })).passed).toBe(true)
+    expect(checkG5RuntimeEvidence(ctx({ project: project({ commands: { run: 'pnpm dev' } }), evidence: [manualReceipt] })).passed).toBe(true)
     expect(checkG5RuntimeEvidence(ctx()).passed).toBe(true)
   })
 

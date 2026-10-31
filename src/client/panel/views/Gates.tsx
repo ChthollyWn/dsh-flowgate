@@ -10,6 +10,32 @@ import { ActionButton, Badge, EmptyState, KeyValue, Mono, Notice, Section } from
 import { COLORS, UI_FONT } from '../../theme'
 import { ExecutionGraph } from '../ExecutionGraph'
 
+/** 非 agent 改动列表（T1.4 验收 #3）：G6 前必须由负责人确认。 */
+function ExternalChangesSection({ model, t, onAction }: ViewProps): React.ReactElement | null {
+  if (model.externalChanges.length === 0) return null
+  return (
+    <Section title={t('gates.externalChanges')}>
+      <div data-flowgate="external-changes" style={{ display: 'grid', gap: 6 }}>
+        <div style={{ fontSize: 10.5, color: COLORS.dim }}>{t('gates.externalHint')}</div>
+        <ul style={{ margin: 0, paddingInlineStart: 16, fontSize: 11.5 }}>
+          {model.externalChanges.map((entry) => (
+            <li key={entry.path}>
+              <Mono>{entry.path}</Mono>
+              {entry.origin === 'unknown' ? ` · ${t('gates.externalUnknown')}` : ''}
+            </li>
+          ))}
+        </ul>
+        <ActionButton
+          label={t('gates.confirmExternal')}
+          tone="primary"
+          dataAction="confirm-external-all"
+          onClick={() => onAction({ kind: 'confirm-external' })}
+        />
+      </div>
+    </Section>
+  )
+}
+
 export function GatesView({ model, t, onAction }: ViewProps): React.ReactElement {
   const gate = model.gate
   const [reason, setReason] = React.useState('')
@@ -140,10 +166,11 @@ export function GatesView({ model, t, onAction }: ViewProps): React.ReactElement
 
   if (gateName === null && gate.items.length === 0) {
     return (
-      <div data-flowgate="view-gates">
+      <div data-flowgate="view-gates" style={{ display: 'grid', gap: 10 }}>
         <Section title={t('gates.title')}>
           <EmptyState text={t('gate.noGate')} />
         </Section>
+        <ExternalChangesSection model={model} t={t} onAction={onAction} />
       </div>
     )
   }
@@ -237,6 +264,7 @@ export function GatesView({ model, t, onAction }: ViewProps): React.ReactElement
           <ExecutionGraph graph={model.execution} t={t} />
         </Section>
       ) : null}
+      <ExternalChangesSection model={model} t={t} onAction={onAction} />
       <div style={{ fontSize: 10.5, color: COLORS.faint }}>
         <Mono>/flow approve {gateName ?? 'G1'}</Mono>
       </div>

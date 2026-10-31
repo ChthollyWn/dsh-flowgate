@@ -74,6 +74,7 @@ import type {
 import { PENDING_PREFIX, GATES, STAGES } from './types'
 import { isoNow, dateOnly, isOlderThanMinutes } from './util/time'
 import { normalizeRelPath, posixJoin, isUnder } from './util/paths'
+import { matchGlob } from './util/glob'
 import { sha256, stableJson, containsSecret, redactSecrets } from './util/hash'
 import type { FileSystem } from './util/fs'
 
@@ -141,6 +142,8 @@ import { computeMetrics } from './metrics'
 import { renderChangeReport } from './report'
 import { renderDashboard } from './dashboard'
 import { mergeIncrementalSpec, capabilityDirName } from './archive'
+import { riskRaisedEffects } from './risk'
+import type { TamperSignal, TamperSignalKind } from './tamper'
 
 export class FlowGateError extends Error {
   hint?: string
@@ -206,6 +209,8 @@ export class FlowEngine {
   private roadmapDoc: RoadmapDoc | null = null
   private receipts: EvidenceReceipt[] = []
   private coverageReport: CoverageReport | null = null
+  /** 回执 id → 当前输入哈希下是否仍新鲜（面板/注入用；由 refreshEvidenceFreshness 计算）。 */
+  private evidenceFreshnessCache: Record<string, boolean> = {}
   private loaded = false
   private loadError: string | null = null
   /** 加载阶段发现的损坏状态文件（status.json 等）；非空即进入锁定模式（03 §14）。 */
@@ -215,6 +220,11 @@ export class FlowEngine {
   private ruleFeedback: Record<string, RuleFeedback> = {}
   private lastRuleId: string | null = null
   private guardHeartbeat = { toolCalls: 0, decisions: 0 }
+  /** 本会话是否接续了已存在的变更（状态条「已接续」）。 */
+  private resumed = false
+  /** 租约外部变化检查（节流 1s，避免每次写操作都读 sessions.json）。 */
+  private lastLeaseRefreshAt = 0
+  private foreignLease: SessionLease | null = null
   private notices: string[] = []
   private evidenceCounter = 0
 
@@ -335,6 +345,7 @@ export class FlowEngine {
         }
       }
       await this.reloadArtifacts()
+      await this.refreshEvidenceFreshness()
       this.loaded = true
     } catch (error) {
       this.loadError = (error as Error).message
@@ -436,13 +447,24 @@ export class FlowEngine {
   }
 
   /**
+   * 当前变更生效的判定配置。
+   *
+   * 变更创建时已把「规则 / 触发器 / 等级 / 限制」冻结进 `contract.snapshot`；
+   * 在途变更始终按冻结快照判定（T1.3 验收：改 config.yaml 只影响新变更）。
+   * 旧状态没有快照（字段是后续版本加的）时回退当前配置。
+   */
+  private configFor(change: ChangeStatus | null | undefined): FlowgateConfig {
+    return store.frozenContractConfig(this.config, change?.contract)
+  }
+
+  /**
    * Review rounds required for each task gate at the current change's level
    * (0 = review not required). Host uses it to run the full number of rounds
    * instead of short-circuiting after the first pass (high risk requires 2).
    */
   requiredReviewRounds(): number {
     if (!this.current) return 0
-    return levelProfile(this.current.complexity, this.current.risk, this.config.limits).reviewRoundsPerTask
+    return levelProfile(this.current.complexity, this.current.risk, this.configFor(this.current).limits).reviewRoundsPerTask
   }
 
   getState(): store.ProjectState | null {
@@ -487,6 +509,11 @@ export class FlowEngine {
 
   noteGuardDecision(): void {
     this.guardHeartbeat.decisions += 1
+  }
+
+  /** 宿主在补算投影数据（如证据新鲜度）后主动刷新一次面板投影。 */
+  notifyStateChanged(): void {
+    this.emitState()
   }
 
   private async reloadArtifacts(): Promise<void> {
@@ -534,6 +561,101 @@ export class FlowEngine {
     const path = posixJoin(store.layout(this.root).dir, EVIDENCE_INDEX)
     await this.fs.appendFile(path, `${JSON.stringify(receipt)}\n`)
     this.receipts.push(receipt)
+    // 回执一变，证据文档与面板新鲜度都要跟着刷新（T3.2/T3.6）。
+    await this.refreshEvidenceFreshness()
+    await this.refreshEvidenceDoc()
+  }
+
+  /** 面板用：回执 id → 是否仍按当前输入新鲜（输入哈希判定，不只看「组内最新」）。 */
+  getEvidenceFreshness(): Record<string, boolean> {
+    return this.evidenceFreshnessCache
+  }
+
+  /**
+   * 重新计算全部回执的新鲜度（T3.6 验收：改了源码后 GREEN 证据应显示「过期」）。
+   * 同一输入集合只哈希一次；取不到文件系统信息时保守记为不新鲜。
+   */
+  async refreshEvidenceFreshness(): Promise<void> {
+    const change = this.current
+    if (!change) {
+      this.evidenceFreshnessCache = {}
+      return
+    }
+    const tasks = this.getTasks()
+    const hashes = new Map<string, string>()
+    const cache: Record<string, boolean> = {}
+    for (const receipt of this.receipts.filter((item) => item.changeId === change.id)) {
+      try {
+        const task = receipt.taskId !== undefined ? tasks.find((item) => item.id === receipt.taskId) : undefined
+        const group = task?.verify.find((item) => item.group === receipt.group)
+        const inputs = group?.inputs !== undefined ? group.inputs : this.baselineInputs()
+        const key = stableJson(inputs)
+        let inputsHash = hashes.get(key)
+        if (inputsHash === undefined) {
+          inputsHash = (await hashInputs(this.fs, this.root, inputs)).hash
+          hashes.set(key, inputsHash)
+        }
+        cache[receipt.id] = receiptFreshness(receipt, inputsHash).fresh
+      } catch {
+        cache[receipt.id] = false
+      }
+    }
+    this.evidenceFreshnessCache = cache
+  }
+
+  /** 把全部回执写成 `evidence.md`（T3.2 交付物；插件维护，agent 不可写）。 */
+  async refreshEvidenceDoc(): Promise<void> {
+    const change = this.current
+    if (!change) return
+    const receipts = this.receipts.filter((item) => item.changeId === change.id)
+    const rows = receipts.map((receipt) => {
+      const fresh = this.evidenceFreshnessCache[receipt.id] === true ? '新鲜' : '过期/未知'
+      const result = `${receipt.phase} · exit=${receipt.exitCode}${receipt.timedOut ? ' · 超时' : ''}`
+      return `| ${receipt.id} | ${receipt.taskId ?? '—'} | ${receipt.group} | ${receipt.kind} | ${result} | ${fresh} | ${receipt.finishedAt} |`
+    })
+    const lines = [
+      `# 证据回执 ${change.id}`,
+      '',
+      '> 由 FlowGate 插件根据回执索引生成；agent 不能直接编辑（R-PROTECTED）。',
+      '',
+      '| 回执 | 任务 | 验证组 | 类型 | 结果 | 新鲜度 | 时间 |',
+      '|---|---|---|---|---|---|---|',
+      ...rows,
+      '',
+    ]
+    await this.fs.writeFile(store.changePaths(this.root, change.id).evidence, lines.join('\n'))
+  }
+
+  /** 把审查记录写成 `review.md`（T3.4 交付物；插件维护）。 */
+  async refreshReviewDoc(): Promise<void> {
+    const change = this.current
+    if (!change) return
+    const reviews = change.reviews
+    const lines = [`# 审查记录 ${change.id}`, '']
+    if (reviews.length === 0) {
+      lines.push('> 还没有审查记录。')
+    } else {
+      for (const review of reviews) {
+        lines.push(`## ${review.id} · ${review.kind} · ${review.verdict}`)
+        lines.push('')
+        lines.push(`- 任务：${review.taskId ?? '（终审）'}`)
+        lines.push(`- 读取覆盖：${review.coverageOk ? '通过' : '不完整'}`)
+        lines.push(`- 时间：${review.createdAt}`)
+        lines.push('')
+        if (review.findings.length === 0) lines.push('（无 findings）')
+        else {
+          lines.push('| 级别 | 文件 | 行 | 规则 | 说明 |')
+          lines.push('|---|---|---|---|---|')
+          for (const finding of review.findings) {
+            lines.push(
+              `| ${finding.severity} | ${finding.file} | ${finding.line ?? '—'} | ${finding.rule} | ${finding.message.replace(/\|/g, '\\|')} |`,
+            )
+          }
+        }
+        lines.push('')
+      }
+    }
+    await this.fs.writeFile(store.changePaths(this.root, change.id).review, lines.join('\n'))
   }
 
   private async appendLedger(type: Parameters<Ledger['append']>[0]['type'], data: Record<string, unknown> = {}): Promise<void> {
@@ -562,6 +684,26 @@ export class FlowEngine {
     }
     await store.writeChangeStatus(this.fs, this.root, change)
     await store.writeChangesIndex(this.fs, this.root, this.state.changes)
+    // 执行图随状态变化重生成（T2.9）：任务/批次状态一变，execution-plan.md 就是最新视图。
+    if (
+      change.plan !== undefined &&
+      (change.stage === 'S3' || change.stage === 'S4' || change.stage === 'S5' || change.stage === 'S6')
+    ) {
+      try {
+        const planMd = renderExecutionPlanMarkdown(change.plan, change)
+        await this.fs.writeFile(store.changePaths(this.root, change.id).executionPlan, planMd)
+      } catch {
+        // 执行图重生成失败不阻塞状态保存。
+      }
+    }
+    // 跨会话看板随状态变化重新生成（T5.3 验收 #2）：文件写盘失败不阻塞状态保存。
+    if (this.state?.initialized === true) {
+      try {
+        await this.generateBoard()
+      } catch {
+        // 忽略看板生成失败。
+      }
+    }
     await this.appendLedger('change.updated', {
       changeId: change.id,
       change: JSON.parse(JSON.stringify(change)) as ChangeStatus,
@@ -806,7 +948,9 @@ export class FlowEngine {
     })
     change.contract = store.freezeContract(this.config, this.pluginVersion, this.skillVersions(), now)
     await store.ensureChangeDir(this.fs, this.root, change.id)
-    await this.writeChangeTemplates(change)
+    const roadmapEntry =
+      roadmapRef !== undefined ? this.roadmapDoc?.entries.find((entry) => entry.change === roadmapRef) : undefined
+    await this.writeChangeTemplates(change, roadmapEntry)
     this.state.changes.push(change)
     this.current = change
     if (this.sessionId) {
@@ -823,6 +967,7 @@ export class FlowEngine {
       await this.saveLeases()
     }
     await this.appendLedger('change.created', { changeId: change.id, kind: change.kind, title, complexity, risk })
+    if (roadmapRef !== undefined) await this.updateRoadmapStatus(change, '进行中')
     const g0 = await this.evaluateGate(change, 'G0')
     await this.recordGateResult(change, 'G0', g0, now)
     await this.saveChange(change)
@@ -880,10 +1025,17 @@ export class FlowEngine {
     await this.fs.writeFile(layout.roadmap, roadmap)
   }
 
-  private async writeChangeTemplates(change: ChangeStatus): Promise<void> {
+  private async writeChangeTemplates(
+    change: ChangeStatus,
+    roadmapEntry?: { goal: string; capability: string; acceptance: string },
+  ): Promise<void> {
     const paths = store.changePaths(this.root, change.id)
-    const clarifyTemplate = `# 澄清记录：${change.title}\n\n## 原始描述\n\n<!-- 负责人原始描述 -->\n\n## 已知事实\n\n<!-- 每条写 文件:起止行 引用形式；没有引用只能算假设 -->\n\n## 六要素\n\n| 要素 | 结论 | 来源 | 状态 |\n|---|---|---|---|\n| 目标 |  |  |  |\n| 边界（做 / 不做） |  |  |  |\n| 角色与权限 |  |  |  |\n| 验收标准 |  |  |  |\n| 约束（非功能） |  |  |  |\n| 未知与假设 |  |  |  |\n\n## 问答记录\n\n| 问题 | 选项 | 回答 | 这个回答改变了什么 |\n|---|---|---|---|\n\n## 已接受的假设\n\n## 未决问题\n`
-    const proposalTemplate = `# 变更提案：${change.title}\n\n## 为什么\n\n<!-- 要解决的问题与证据 -->\n\n## 改什么\n\n<!-- 功能列表，配套增量规格 -->\n\n## 影响\n\n<!-- 受影响的模块、接口、数据 -->\n\n## 不做\n\n<!-- 明确排除的范围 -->\n`
+    const clarifyGoal = roadmapEntry?.goal !== undefined && roadmapEntry.goal !== '' ? roadmapEntry.goal : ''
+    const clarifyTemplate = `# 澄清记录：${change.title}\n\n## 原始描述\n\n${clarifyGoal !== '' ? `${clarifyGoal}（来自已批准的路线图）` : '<!-- 负责人原始描述 -->'}\n\n## 已知事实\n\n<!-- 每条写 文件:起止行 引用形式；没有引用只能算假设 -->\n\n## 六要素\n\n| 要素 | 结论 | 来源 | 状态 |\n|---|---|---|---|\n| 目标 |  |  |  |\n| 边界（做 / 不做） |  |  |  |\n| 角色与权限 |  |  |  |\n| 验收标准 |  |  |  |\n| 约束（非功能） |  |  |  |\n| 未知与假设 |  |  |  |\n\n## 问答记录\n\n| 问题 | 选项 | 回答 | 这个回答改变了什么 |\n|---|---|---|---|\n\n## 已接受的假设\n\n## 未决问题\n`
+    const proposalTemplate =
+      roadmapEntry !== undefined && (roadmapEntry.goal !== '' || roadmapEntry.acceptance !== '')
+        ? `# 变更提案：${change.title}\n\n## 为什么\n\n${roadmapEntry.goal !== '' ? roadmapEntry.goal : '<!-- 要解决的问题与证据 -->'}\n\n## 改什么\n\n${roadmapEntry.capability !== '' ? roadmapEntry.capability : '<!-- 功能列表，配套增量规格 -->'}\n\n## 影响\n\n<!-- 受影响的模块、接口、数据 -->\n\n## 不做\n\n<!-- 明确排除的范围 -->\n\n## 验收要点（来自已批准的路线图）\n\n${roadmapEntry.acceptance !== '' ? roadmapEntry.acceptance : '<!-- 验收要点 -->'}\n`
+        : `# 变更提案：${change.title}\n\n## 为什么\n\n<!-- 要解决的问题与证据 -->\n\n## 改什么\n\n<!-- 功能列表，配套增量规格 -->\n\n## 影响\n\n<!-- 受影响的模块、接口、数据 -->\n\n## 不做\n\n<!-- 明确排除的范围 -->\n`
     await this.fs.writeFile(paths.clarify, clarifyTemplate)
     await this.fs.writeFile(paths.proposal, proposalTemplate)
     await this.fs.mkdir(posixJoin(paths.dir, 'specs'))
@@ -895,7 +1047,7 @@ export class FlowEngine {
 
   private level(): LevelProfile {
     const change = this.current
-    return levelProfile(change?.complexity ?? 'medium', change?.risk ?? 'normal', this.config.limits)
+    return levelProfile(change?.complexity ?? 'medium', change?.risk ?? 'normal', this.configFor(change).limits)
   }
 
   private async buildGateContext(change: ChangeStatus, gate: GateId): Promise<GateCheckContext> {
@@ -904,12 +1056,13 @@ export class FlowEngine {
     this.project = await loadProjectDoc(this.fs, this.root)
     this.roadmapDoc = await this.loadRoadmapDoc()
     const changeReceipts = this.receipts.filter((receipt) => receipt.changeId === change.id)
+    const config = this.configFor(change)
     return {
       root: this.root,
       gate,
-      level: levelProfile(change.complexity, change.risk, this.config.limits),
+      level: levelProfile(change.complexity, change.risk, config.limits),
       change,
-      config: this.config,
+      config,
       artifacts,
       fs: this.fs,
       git: this.git,
@@ -918,7 +1071,7 @@ export class FlowEngine {
       project: this.project,
       roadmap: this.roadmapDoc,
       now: isoNow(this.clock),
-      limits: this.config.limits,
+      limits: config.limits,
     }
   }
 
@@ -968,7 +1121,7 @@ export class FlowEngine {
       }
       return
     }
-    const level = levelProfile(change.complexity, change.risk, this.config.limits)
+    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
     const human = isHumanGate(gate)
     if (human) return
     if (gate === 'G2') {
@@ -1065,7 +1218,7 @@ export class FlowEngine {
     }
 
     const human = isHumanGate(gate)
-    const merged = gate === 'G3' && levelProfile(change.complexity, change.risk, this.config.limits).mergedGates
+    const merged = gate === 'G3' && levelProfile(change.complexity, change.risk, this.configFor(change).limits).mergedGates
     if (human || merged) {
       Object.assign(change, applyGateAwaiting(change, gate, now))
       change.gates[gate] = {
@@ -1076,6 +1229,8 @@ export class FlowEngine {
         attempts: (change.gates[gate]?.attempts ?? 0) + 1,
       }
       await this.appendLedger('gate.passed', { changeId: change.id, gate, awaiting: 'owner', items: itemsSummary(result.items) })
+      // G3 批准卡片要显示执行图（T2.9 验收 #3）：等负责人期间就物化任务/批次。
+      if (gate === 'G3') this.materializePlan(change)
       await this.saveChange(change)
       this.hooks?.onAwaitingOwner?.(change, gate)
       if (gate === 'GR') this.pushNotice('路线图检查通过，等负责人批准：/flow approve GR。')
@@ -1094,7 +1249,7 @@ export class FlowEngine {
     }
 
     // Merged G1: pass silently and keep moving (owner confirms G1+G3 together at G3).
-    const level = levelProfile(change.complexity, change.risk, this.config.limits)
+    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
     if (gate === 'G1' && level.mergedGates) {
       Object.assign(change, applyGatePassed(change, 'G1', now))
       change.gates.G1 = { ...(change.gates.G1 ?? { state: 'passed', attempts: 0 }), state: 'passed', items: result.items, submittedAt: now, passedAt: now, attempts: (change.gates.G1?.attempts ?? 0) + 1 }
@@ -1160,7 +1315,7 @@ export class FlowEngine {
       return { gate, passed: true, items: record?.items ?? [], failures: [], stage: change.stage, message: '路线图已批准（GR）。' }
     }
 
-    const level = levelProfile(change.complexity, change.risk, this.config.limits)
+    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
     const approveG1Too = gate === 'G3' && level.mergedGates && change.gates.G1?.state === 'passed'
     Object.assign(change, applyGateApproved(change, gate, now))
     change.gates[gate] = {
@@ -1169,6 +1324,13 @@ export class FlowEngine {
       approvedAt: now,
     }
     await this.appendLedger('gate.approved', { changeId: change.id, gate, reason: options.reason })
+    // 人工门通过后冻结当前全部产物的原文哈希（T2.1/T2.5）：之后 agent 直接改
+    // 已批准产物会被守卫拒绝，G3/G6 的 frozenArtifacts 检查也会发现绕过守卫的改动。
+    await this.reloadArtifacts()
+    const frozenKeys = store.freezeArtifacts(change, this.artifacts, now)
+    if (frozenKeys.length > 0) {
+      await this.appendLedger('artifacts.frozen', { changeId: change.id, gate, keys: frozenKeys })
+    }
     if (approveG1Too) {
       Object.assign(change, applyGateApproved(change, 'G1', now))
       change.gates.G1 = { ...(change.gates.G1 ?? { state: 'passed', attempts: 0 }), state: 'passed', approvedAt: now }
@@ -1227,19 +1389,64 @@ export class FlowEngine {
     await this.appendLedger('roadmap.approved', { changeId: change.id })
   }
 
-  private async onEnterS4(change: ChangeStatus): Promise<void> {
+  /**
+   * 回写路线图条目状态（T2.7）：按 `change.roadmap` 找到表格行，替换状态列。
+   * 纯文本行替换，保留负责人的表格格式与其它列。
+   */
+  private async updateRoadmapStatus(change: ChangeStatus, status: string): Promise<void> {
+    const ref = change.roadmap
+    if (!ref || !this.roadmapDoc) return
+    const layout = store.layout(this.root)
+    if (!(await this.fs.exists(layout.roadmap))) return
+    try {
+      const raw = await this.fs.readFile(layout.roadmap)
+      const lines = raw.split('\n')
+      let changed = false
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]!
+        if (!line.trim().startsWith('|')) continue
+        const cells = line.split('|')
+        // | 变更 | 能力 | ... | 状态 | → cells[1] 是变更编号，倒数第二个是状态
+        const changeCell = (cells[1] ?? '').replace(/`/g, '').trim()
+        if (changeCell !== ref) continue
+        if (cells.length < 4) continue
+        const statusIndex = cells.length - 2
+        if (cells[statusIndex]!.trim() === status) continue
+        const leading = cells[statusIndex]!.startsWith(' ') ? ' ' : ''
+        cells[statusIndex] = `${leading}${status} `
+        lines[index] = cells.join('|')
+        changed = true
+      }
+      if (changed) {
+        await this.fs.writeFile(layout.roadmap, lines.join('\n'))
+        this.roadmapDoc = await this.loadRoadmapDoc()
+        await this.appendLedger('change.updated', { changeId: change.id, roadmapRef: ref, roadmapStatus: status })
+      }
+    } catch {
+      // 路线图回写失败不影响归档主流程；下一轮 GR 修订仍是权威来源。
+    }
+  }
+
+  /**
+   * 把 `tasks.md` 末尾的执行计划物化到运行时状态（T2.9）：
+   * G3 检查通过、等负责人批准时就要有 tasks/batches，批准卡片才能显示执行图；
+   * 进入 S4 复用它而不是重置（避免丢了批准前展示的同一份计划）。
+   */
+  private materializePlan(change: ChangeStatus): void {
     const tasks = this.getTasks()
     if (tasks.length === 0) return
     const plan = this.getPlan()
     change.plan = plan
-    change.tasks = {}
-    change.batches = plan.batches.map<BatchState>((batch) => ({
-      id: batch.batch,
-      mode: batch.mode,
-      status: 'pending',
-      tasks: batch.tasks,
-    }))
+    if (!change.batches || change.batches.length === 0) {
+      change.batches = plan.batches.map<BatchState>((batch) => ({
+        id: batch.batch,
+        mode: batch.mode,
+        status: 'pending',
+        tasks: batch.tasks,
+      }))
+    }
     for (const task of tasks) {
+      if (change.tasks[task.id] !== undefined) continue
       const batch = plan.batches.find((item) => item.tasks.includes(task.id))
       change.tasks[task.id] = {
         id: task.id,
@@ -1250,6 +1457,12 @@ export class FlowEngine {
         reviewIds: [],
       }
     }
+  }
+
+  private async onEnterS4(change: ChangeStatus): Promise<void> {
+    const tasks = this.getTasks()
+    if (tasks.length === 0) return
+    this.materializePlan(change)
     if (this.config.git.change_branch && this.git) {
       try {
         const branch = `flowgate/${change.id}`
@@ -1261,7 +1474,7 @@ export class FlowEngine {
         this.pushNotice(`创建变更分支失败：${(error as Error).message}；继续在当前分支工作。`)
       }
     }
-    const planMd = renderExecutionPlanMarkdown(plan, change)
+    const planMd = renderExecutionPlanMarkdown(change.plan ?? this.getPlan(), change)
     await this.fs.writeFile(store.changePaths(this.root, change.id).executionPlan, planMd)
   }
 
@@ -1340,6 +1553,55 @@ export class FlowEngine {
     return ['**/*', '!**/node_modules/**', '!**/target/**', '!**/build/**', '!**/dist/**', '!**/.git/**']
   }
 
+  // ------------------------------------------------------------------
+  // Skill receipts (T2.4)
+  // ------------------------------------------------------------------
+
+  /** 阶段核心技能的必读回执（G3 前必须加载过）。 */
+  static readonly REQUIRED_SKILLS: Partial<Record<GateId, string[]>> = {
+    G1: ['flow-clarify'],
+    G3: ['flow-plan'],
+  }
+
+  /** 本会话已加载过的技能名（用于「不重复注入/重复加载只提示已加载」）。 */
+  private loadedSkills = new Set<string>()
+
+  /** 记录一次技能加载（宿主在 skill 工具成功后调用）。重复加载返回 duplicate。 */
+  async recordSkillLoaded(name: string, hash = ''): Promise<{ duplicate: boolean; receipt?: NonNullable<ChangeStatus['skillReceipts']>[number] }> {
+    const change = this.current
+    const trimmed = name.trim()
+    if (!change || trimmed === '') return { duplicate: false }
+    const existing = (change.skillReceipts ?? []).find(
+      (receipt) => receipt.name === trimmed && (this.sessionId === undefined || receipt.sessionId === this.sessionId),
+    )
+    if (existing) {
+      this.loadedSkills.add(trimmed)
+      return { duplicate: true, receipt: existing }
+    }
+    const receipt = { name: trimmed, hash, at: isoNow(this.clock), sessionId: this.sessionId }
+    change.skillReceipts = [...(change.skillReceipts ?? []), receipt]
+    this.loadedSkills.add(trimmed)
+    await this.appendLedger('skill.loaded', { changeId: change.id, name: trimmed, hash, duplicate: false })
+    await this.saveChange(change)
+    return { duplicate: false, receipt }
+  }
+
+  /** 本变更是否已加载过指定技能（按名字前缀归一：flow-plan / FlowGate flow-plan 都算）。 */
+  hasSkillReceipt(name: string): boolean {
+    const change = this.current
+    if (!change) return false
+    const wanted = name.trim().toLowerCase()
+    return (change.skillReceipts ?? []).some((receipt) => {
+      const loaded = receipt.name.toLowerCase()
+      return loaded === wanted || loaded.endsWith(wanted) || loaded.includes(`${wanted}:`) || loaded.includes(`/${wanted}`)
+    })
+  }
+
+  /** 本会话是否已加载过该技能（宿主用于重复加载只回「已加载」提示）。 */
+  skillLoadedThisSession(name: string): boolean {
+    return this.loadedSkills.has(name.trim()) || this.hasSkillReceipt(name)
+  }
+
   private async ensureFullSuite(change: ChangeStatus): Promise<void> {
     const commands = this.config.commands
     const command = commands.integration || commands.test
@@ -1386,6 +1648,45 @@ export class FlowEngine {
     }
     const change = this.current
     if (change?.off) return { effect: 'allow', message: '' }
+    // 已被其它会话接管的旧会话：写操作一律拒绝（T3.7 验收 #2）。
+    if (change) {
+      await this.refreshForeignLease()
+      if (this.foreignLease && this.foreignLease.changeId === change.id) {
+        const decision: Decision = {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-LEASE',
+            decision: 'deny',
+            why: `变更 ${change.id} 已被会话 ${this.foreignLease.sessionId} 接管：本会话的写操作会破坏租约与证据链。`,
+            unlock: '本会话只做只读查看；要继续写请在新会话里操作，或由负责人确认旧会话已停止后重新 --takeover。',
+          },
+          message: `拒绝：变更已被其它会话接管（R-LEASE）。`,
+        }
+        await this.logDenied(change, decision, action)
+        return decision
+      }
+    }
+    // 成本预算触发（03 §8.2）：token 用量超过复杂度预算 → 负责人确认前拒绝写操作。
+    if (change) {
+      const budgetPending = change.pending.find(
+        (item) => item.kind === 'risk' && item.status === 'open' && item.data?.trigger === 'token-budget',
+      )
+      if (budgetPending) {
+        const decision: Decision = {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-BUDGET',
+            decision: 'deny',
+            why: `本变更 token 用量 ${change.tokenUsage ?? 0} 已超过预算，已暂停并转人工（${budgetPending.id}）。`,
+            unlock: '负责人运行 /flow risk approve ' + budgetPending.id + ' 确认继续，或 /flow pause 结束本会话。',
+          },
+          message: `拒绝：token 预算已超（R-BUDGET，待处理 ${budgetPending.id}）。`,
+        }
+        await this.logDenied(change, decision, action)
+        return decision
+      }
+    }
+
     if (!change) {
       // Managed project without an active change: protect plugin state and secrets only.
       const target = 'path' in action ? action.path : undefined
@@ -1415,6 +1716,27 @@ export class FlowEngine {
       return decision
     }
 
+    // 已批准产物冻结：agent 直接改 `.flowgate/changes/<id>/<产物>.md` 一律拒绝，
+    // 必须走返工/新建变更（T2.1/T2.5/T3.1 验收）。
+    const frozenTarget = 'path' in action && typeof action.path === 'string' ? action.path : undefined
+    if (frozenTarget) {
+      const frozen = store.assertNotFrozen(change, frozenTarget)
+      if (frozen.frozen) {
+        const decision: Decision = {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-FROZEN-ARTIFACT',
+            decision: 'deny',
+            why: frozen.hint ?? '已批准产物已冻结，不能直接修改。',
+            unlock: '走返工流程解除冻结（重新声明返工范围），或新建关联变更。',
+          },
+          message: `拒绝：已批准产物已冻结（R-FROZEN-ARTIFACT）。${frozen.hint ?? ''}`,
+        }
+        await this.logDenied(change, decision, action)
+        return decision
+      }
+    }
+
     // 并行批次里多个执行者同时活跃：优先用 caller 的派发上下文定位任务卡，
     // 否则会拿全局 activeTask（可能是另一个并行任务）做范围判定，导致误拒
     //（2026-10-31 真机发现：T2 写自己 new_files 里的文件被 T1 的 scope 拒绝）。
@@ -1424,7 +1746,7 @@ export class FlowEngine {
       caller,
       stage: change.stage,
       change,
-      config: this.config,
+      config: this.configFor(change),
       task,
       overrides: change.overrides,
       exceptions: change.exceptions,
@@ -1475,11 +1797,14 @@ export class FlowEngine {
   private async logDenied(change: ChangeStatus, decision: Decision, action: Action): Promise<void> {
     const ruleId = decision.rule?.ruleId ?? 'unknown'
     this.interceptCounts[ruleId] = (this.interceptCounts[ruleId] ?? 0) + 1
+    const rawTarget =
+      'path' in action ? (action as { path?: string }).path : 'command' in action ? (action as { command?: string }).command : undefined
     await this.appendLedger('rule.denied', {
       changeId: change.id,
       ruleId,
       tool: action.tool,
-      target: 'path' in action ? (action as { path?: string }).path : 'command' in action ? (action as { command?: string }).command : undefined,
+      // 命令文本可能含密钥（T4.1 验收）：写账本前统一脱敏。
+      target: rawTarget !== undefined ? redactSecrets(rawTarget) : undefined,
     })
   }
 
@@ -1540,7 +1865,7 @@ export class FlowEngine {
 
   /** 当前变更里连续失败达到上限的任务 id（与 T-FAILURE-LIMIT 触发器同一判定）。 */
   private failingTaskIds(change: ChangeStatus): string[] {
-    const limit = this.config.triggers.consecutive_failure_limit
+    const limit = this.configFor(change).triggers.consecutive_failure_limit
     if (limit <= 0) return []
     return Object.values(change.tasks)
       .filter(
@@ -1626,7 +1951,13 @@ export class FlowEngine {
     return item
   }
 
-  async recordPostcheck(input: { origin: 'agent' | 'external' | 'unknown'; changedPaths: string[]; taskId?: string }): Promise<Violation[]> {
+  async recordPostcheck(input: {
+    origin: 'agent' | 'external' | 'unknown'
+    changedPaths: string[]
+    taskId?: string
+    /** 本次调用后消失（删除）的路径；用于「删除受控文件提风险」。 */
+    deletedPaths?: string[]
+  }): Promise<Violation[]> {
     const change = this.current
     if (!change || input.changedPaths.length === 0) return []
     const now = isoNow(this.clock)
@@ -1657,6 +1988,9 @@ export class FlowEngine {
       await this.appendLedger('violation.detected', { changeId: change.id, taskId: task.id, path, kind: violation.kind })
       this.pushNotice(`检测到越界改动：${path}（${task.id} 范围外）。撤销或申请范围变更后才能继续写入。`)
     }
+    if (input.origin === 'agent') {
+      await this.escalateDeletedTrackedFiles(change, task, input.deletedPaths ?? [])
+    }
     if (violations.length > 0 || (change.externalChanges?.length ?? 0) > 0) await this.saveChange(change)
     return violations
   }
@@ -1681,6 +2015,182 @@ export class FlowEngine {
     await this.appendLedger('violation.cleared', { changeId: change.id, path, violationId: violation.id })
     await this.saveChange(change)
     return true
+  }
+
+  /**
+   * 撤销（`git checkout -- <file>`）后自动解除越界（T1.4 验收 #2）。
+   * 宿主事后检测把「本次调用后已回到干净状态」的路径传进来。
+   */
+  async clearViolationsForReverted(paths: string[]): Promise<string[]> {
+    const change = this.current
+    if (!change || paths.length === 0) return []
+    const normalized = new Set(paths.map((path) => normalizeRelPath(path)))
+    const cleared: string[] = []
+    const now = isoNow(this.clock)
+    for (const violation of change.violations) {
+      if (violation.clearedAt !== undefined || !normalized.has(violation.path)) continue
+      violation.clearedAt = now
+      cleared.push(violation.path)
+      await this.appendLedger('violation.cleared', {
+        changeId: change.id,
+        path: violation.path,
+        violationId: violation.id,
+        reason: 'reverted',
+      })
+    }
+    if (cleared.length > 0) {
+      await this.saveChange(change)
+      this.pushNotice(`已撤销的文件自动解除越界：${cleared.join('、')}。`)
+    }
+    return cleared
+  }
+
+  /**
+   * 负责人确认非 agent 改动（T1.4 验收 #3 / G6 单列确认）。
+   * 不传 paths 时确认全部；返回确认条数。
+   */
+  async acknowledgeExternalChanges(paths?: string[]): Promise<number> {
+    const change = this.current
+    if (!change || !change.externalChanges || change.externalChanges.length === 0) return 0
+    const now = isoNow(this.clock)
+    const normalized = paths !== undefined && paths.length > 0 ? new Set(paths.map((path) => normalizeRelPath(path))) : null
+    let count = 0
+    for (const entry of change.externalChanges) {
+      if (entry.confirmedAt !== undefined) continue
+      if (normalized && !normalized.has(entry.path)) continue
+      entry.confirmedAt = now
+      count += 1
+    }
+    if (count > 0) {
+      await this.appendLedger('external.acknowledged', { changeId: change.id, count, paths: paths ?? 'all' })
+      await this.saveChange(change)
+      this.pushNotice(`负责人已确认 ${count} 处非 agent 改动。`)
+    }
+    return count
+  }
+
+  /** 记录篡改嫌疑（跳过测试/删断言/改测试基础设施），生成 TM-n 待处理项（T3.5）。 */
+  async recordTamperSignals(signals: TamperSignal[], origin = 'postcheck'): Promise<PendingItem | null> {
+    const change = this.current
+    if (!change || signals.length === 0) return null
+    const open = change.pending.find((item) => item.kind === 'tamper' && item.status === 'open')
+    if (open) {
+      const existing = (open.data?.signals as TamperSignal[] | undefined) ?? []
+      const seen = new Set(existing.map((signal) => `${signal.kind}\u0000${signal.path}`))
+      const merged = [...existing]
+      for (const signal of signals) {
+        const key = `${signal.kind}\u0000${signal.path}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        merged.push(signal)
+      }
+      open.data = { ...(open.data ?? {}), signals: merged }
+      await this.saveChange(change)
+      return open
+    }
+    const detail = signals.map((signal) => `${signal.detail}（${signal.kind}）`).join('\n')
+    const item = this.createPending(change, {
+      kind: 'tamper',
+      title: '疑似篡改测试/门禁配置',
+      detail,
+      data: { signals, origin },
+    })
+    await this.appendLedger('tamper.detected', {
+      changeId: change.id,
+      pendingId: item.id,
+      signals: signals.map((signal) => ({ kind: signal.kind, path: signal.path })),
+    })
+    await this.saveChange(change)
+    this.pushNotice(`检测到疑似篡改（${item.id}）：${signals.slice(0, 3).map((signal) => signal.path).join('、')}。已进入审查输入与 G6 清单。`)
+    return item
+  }
+
+  // ------------------------------------------------------------------
+  // Risk-escalation & token budget (FR-6.6 / 03 §8.2)
+  // ------------------------------------------------------------------
+
+  /**
+   * 风险提高为高风险的统一副作用（FR-6.6）：
+   * - 已完成任务的审查按新标准重新要求：清空 reviewIds（测试回执保留），并生成
+   *   RK 待处理项提醒负责人安排两轮审查；
+   * - 已进入 S5/S6 的退回 S4（`riskRaisedEffects` 决定）。
+   */
+  private async applyRiskRaised(change: ChangeStatus, reason: string): Promise<void> {
+    if (change.risk !== 'high') change.risk = 'high'
+    const effects = riskRaisedEffects(change)
+    for (const taskId of effects.refreezeReviews) {
+      const task = change.tasks[taskId]
+      if (task) task.reviewIds = []
+    }
+    const now = isoNow(this.clock)
+    if (effects.backToStage !== undefined && change.stage !== effects.backToStage) {
+      Object.assign(change, enterStage(change, effects.backToStage, now))
+      await this.appendLedger('stage.entered', { changeId: change.id, stage: effects.backToStage, reason: 'risk-raised' })
+    }
+    if (effects.refreezeReviews.length > 0 || effects.backToStage !== undefined) {
+      const item = this.createPending(change, {
+        kind: 'risk',
+        title: '风险提高：已完成任务的审查需按两轮标准重新要求',
+        detail: `原因：${reason}。受影响任务：${effects.refreezeReviews.join('、') || '（无已完成任务）'}；测试回执保留。`,
+        data: { trigger: 'risk-raised', tasks: effects.refreezeReviews, backToStage: effects.backToStage },
+      })
+      await this.appendLedger('risk.raised', {
+        changeId: change.id,
+        pendingId: item.id,
+        tasks: effects.refreezeReviews,
+        backToStage: effects.backToStage,
+        reason,
+      })
+    }
+    this.pushNotice(
+      `风险提高为高风险：${effects.backToStage !== undefined ? `已退回 ${effects.backToStage}；` : ''}已完成任务（${effects.refreezeReviews.join('、') || '无'}）的审查按两轮标准重新要求（回执保留）。`,
+    )
+  }
+
+  /**
+   * 宿主上报本变更累计 token 用量（token-meter 的 tokenUsage 投影，取不到不调用）。
+   * 超过复杂度预算时生成 RK 待处理项并把写操作切到 R-BUDGET，直到负责人批准。
+   */
+  async recordTokenUsage(total: number): Promise<void> {
+    const change = this.current
+    if (!change || !Number.isFinite(total) || total < 0) return
+    const rounded = Math.round(total)
+    if (change.tokenUsage === rounded) return
+    change.tokenUsage = rounded
+    const budget = this.configFor(change).limits.token_budget[change.complexity]
+    const existing = change.pending.find(
+      (item) => item.kind === 'risk' && item.status === 'open' && item.data?.trigger === 'token-budget',
+    )
+    if (budget > 0 && rounded > budget && !existing) {
+      const item = this.createPending(change, {
+        kind: 'risk',
+        title: 'token 预算超支，已暂停转人工',
+        detail: `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。负责人确认后写操作恢复（/flow risk approve ${'RK-n'}），或 /flow pause 结束本会话。`,
+        data: { trigger: 'token-budget', used: rounded, budget },
+      })
+      item.detail = `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。运行 /flow risk approve ${item.id} 确认继续，或 /flow pause 结束本会话。`
+      await this.appendLedger('budget.exceeded', { changeId: change.id, pendingId: item.id, used: rounded, budget })
+      this.pushNotice(`token 预算超支：累计 ${rounded} / 预算 ${budget}。已暂停写操作，等负责人处理 ${item.id}。`)
+    }
+    await this.saveChange(change)
+  }
+
+  /** 删除受版本控制文件时把风险提高为高风险（T4.1 / 03 §5.6）。 */
+  private async escalateDeletedTrackedFiles(change: ChangeStatus, task: TaskCard | undefined, deletedPaths: string[]): Promise<void> {
+    if (deletedPaths.length === 0 || change.risk === 'high' || !this.git || !task) return
+    const declared = (task.changes ?? []).filter((entry) => entry.kind === 'delete').map((entry) => normalizeRelPath(entry.path))
+    for (const rawPath of deletedPaths) {
+      const path = normalizeRelPath(rawPath)
+      if (!declared.some((pattern) => pattern === path || matchGlob(pattern, path))) continue
+      try {
+        const original = await this.git.showFile(this.root, 'HEAD', path)
+        if (original === null) continue
+      } catch {
+        continue
+      }
+      await this.applyRiskRaised(change, `删除受版本控制文件 ${path}`)
+      return
+    }
   }
 
   // ------------------------------------------------------------------
@@ -1796,7 +2306,7 @@ export class FlowEngine {
       contextExcerpt,
       handoff: change.handoff?.text,
       verifyGroups: task.verify,
-      tdd: !task.autoRepair && (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll),
+      tdd: !task.autoRepair && (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.configFor(change).limits).tddRequiredAll),
     }
   }
 
@@ -1810,7 +2320,7 @@ export class FlowEngine {
     if (taskState.status === 'done') throw new FlowGateError(`${taskId} 已经完成`, '无需重复提交')
     const failures: CheckOutcome[] = []
     const now = isoNow(this.clock)
-    const level = levelProfile(change.complexity, change.risk, this.config.limits)
+    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
 
     // 1. Fresh GREEN evidence for every verify group.
     for (const group of task.verify) {
@@ -1967,7 +2477,7 @@ export class FlowEngine {
         const attempts = state.checkpoint?.attempts ?? 0
         // 达到连续失败上限后不再自动重试集成命令，转为负责人闸门：等负责人
         // 处理好冲突/失败并批准 conflict 项（会重置 attempts）后再重试。
-        const limit = this.config.triggers.consecutive_failure_limit
+        const limit = this.configFor(change).triggers.consecutive_failure_limit
         const ownerConflict = change.pending.find(
           (entry) =>
             entry.status === 'open' &&
@@ -2228,6 +2738,7 @@ export class FlowEngine {
       findings: input.findings.map((finding) => ({ severity: finding.severity, file: finding.file, line: finding.line })),
     })
     await this.saveChange(change)
+    await this.refreshReviewDoc()
     if (input.findings.some((finding) => finding.severity === 'critical')) {
       this.pushNotice(`审查发现 critical 问题（${review.id}），任务门不会通过，必须修复。`)
     }
@@ -2331,7 +2842,7 @@ export class FlowEngine {
     })
     if (kind === 'merge') await this.appendLedger('merge.conflict', { changeId: change.id, batchId })
 
-    const limit = this.config.triggers.consecutive_failure_limit
+    const limit = this.configFor(change).triggers.consecutive_failure_limit
     const canAutoRepair = kind === 'integration' && (limit <= 0 || attempts < limit)
     if (canAutoRepair) {
       const inputs = this.checkpointRepairInputs(batchId, result)
@@ -2627,12 +3138,12 @@ export class FlowEngine {
       } else if (receipt.phase === 'green') {
         const tddRequired =
           !task.autoRepair &&
-          (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll)
+          (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.configFor(change).limits).tddRequiredAll)
         if (!tddRequired || taskState.redObserved) taskState.tdd = 'green'
       }
       if (receipt.exitCode !== 0) {
         taskState.failureCount = (taskState.failureCount ?? 0) + 1
-        const limit = this.config.triggers.consecutive_failure_limit
+        const limit = this.configFor(change).triggers.consecutive_failure_limit
         if (limit > 0 && taskState.failureCount >= limit) {
           taskState.status = 'blocked'
           taskState.blockReason = `连续 ${taskState.failureCount} 次验证失败`
@@ -2659,6 +3170,46 @@ export class FlowEngine {
       summary: receipt.summary,
     })
     this.hooks?.onEvidence?.(receipt)
+    await this.saveChange(change)
+    return receipt
+  }
+
+  /**
+   * 记录一条运行证据（T4.2 验收 #2）：宿主启动 run 命令、轮询 health、采集日志后
+   * 由宿主调用；回执 kind=`run`，G5 的 g5.runtime 读它。
+   */
+  async recordRunEvidence(input: {
+    command: string
+    ok: boolean
+    detail: string
+    logPath?: string
+    health?: { url?: string; status?: number; ok: boolean }
+  }): Promise<EvidenceReceipt> {
+    const change = this.requireChange()
+    this.evidenceCounter += 1
+    const id = `E-${String(this.evidenceCounter).padStart(4, '0')}`
+    const now = isoNow(this.clock)
+    const healthNote = input.health
+      ? `健康检查：${input.health.ok ? '通过' : '失败'}${input.health.url !== undefined ? ` ${input.health.url}` : ''}${input.health.status !== undefined ? ` → HTTP ${input.health.status}` : ''}`
+      : '健康检查：未配置'
+    const receipt: EvidenceReceipt = {
+      id,
+      changeId: change.id,
+      group: 'runtime',
+      kind: 'run',
+      phase: input.ok ? 'green' : 'red',
+      command: input.command,
+      runBy: 'flowgate',
+      exitCode: input.ok ? 0 : 1,
+      summary: null,
+      inputsHash: '',
+      outputRef: input.logPath ?? '',
+      startedAt: now,
+      finishedAt: now,
+      notes: `${healthNote}｜${input.detail}`,
+    }
+    await this.appendReceipt(receipt)
+    await this.appendLedger('evidence.recorded', { changeId: change.id, evidenceId: id, kind: 'run', runBy: 'plugin' })
     await this.saveChange(change)
     return receipt
   }
@@ -2703,13 +3254,27 @@ export class FlowEngine {
     if (!task) throw new FlowGateError(`没有任务 ${input.taskId}`, '运行 /flow 查看任务列表')
     if (!input.add || input.add.length === 0) throw new FlowGateError('范围变更至少写一个路径', '用法：flow_request_scope_change({ taskId, add: ["src/..."], reason })')
     if (!input.reason.trim()) throw new FlowGateError('范围变更必须写理由', '说明为什么必须改这些文件')
+    const limit = this.configFor(change).triggers.max_scope_new_files
+    const expanded = limit > 0 && input.add.length > limit
     const item = this.createPending(change, {
       kind: 'scope',
-      title: `${input.taskId} 申请扩大范围`,
-      detail: input.reason,
-      data: { taskId: input.taskId, add: input.add },
+      title: `${input.taskId} 申请扩大范围${expanded ? '（范围膨胀）' : ''}`,
+      detail: expanded
+        ? `${input.reason}\n\n⚠ 范围膨胀：一次申请 ${input.add.length} 个路径，超过触发器上限 ${limit}（03 §8.2）。批准后风险将提高为高风险。`
+        : input.reason,
+      data: { taskId: input.taskId, add: input.add, ...(expanded ? { scopeExpanded: true } : {}) },
       scope: { changeId: change.id, taskId: input.taskId, paths: input.add },
     })
+    if (expanded) {
+      await this.appendLedger('risk.raised', {
+        changeId: change.id,
+        pendingId: item.id,
+        trigger: 'scope-expansion',
+        paths: input.add.length,
+        limit,
+      })
+      this.pushNotice(`范围膨胀：${input.add.length} 个路径超过上限 ${limit}，批准该范围变更会同时把风险提高为高风险。`)
+    }
     await this.appendLedger('scope.requested', { changeId: change.id, pendingId: item.id, taskId: input.taskId, add: input.add })
     await this.saveChange(change)
     this.pushNotice(`收到范围变更申请 ${item.id}，等负责人处理：/flow scope approve ${item.id} 或 /flow scope reject ${item.id} <理由>。`)
@@ -2779,6 +3344,9 @@ export class FlowEngine {
           }
         }
         await this.appendLedger('scope.approved', { changeId: change.id, pendingId: id, taskId, add })
+        if (item.data?.scopeExpanded === true && change.risk === 'normal') {
+          await this.applyRiskRaised(change, '范围膨胀（一次范围变更超过触发器上限）')
+        }
       } else if (item.kind === 'risk') {
         // Approving a risk takeover unlocks exactly the action that triggered it, once.
         const ruleId = item.scope?.ruleId
@@ -2833,6 +3401,9 @@ export class FlowEngine {
         // 负责人解锁「连续失败熔断」：清失败计数、任务恢复 running，并把同任务的
         // 其它 open blocker（含历史版本每个动作一条的 T-FAILURE-LIMIT 残留项）一起关闭。
         await this.approveBlocker(change, item, reason)
+      } else if (item.kind === 'tamper') {
+        // 负责人确认「这是合法重构」：关闭篡改嫌疑项，G6 的 g6.tamper 随即可通过。
+        await this.appendLedger('tamper.cleared', { changeId: change.id, pendingId: id })
       }
       await this.appendLedger('gate.approved', { changeId: change.id, pendingId: id, kind: item.kind })
     } else {
@@ -2903,7 +3474,7 @@ export class FlowEngine {
 
   /** 旧版阻断项没有 data.taskId：从当前 blocked/failing 任务里反推唯一解锁目标。 */
   private resolveBlockedTaskId(change: ChangeStatus): string {
-    const limit = this.config.triggers.consecutive_failure_limit
+    const limit = this.configFor(change).triggers.consecutive_failure_limit
     const candidates = Object.values(change.tasks).filter(
       (task) =>
         task.status !== 'done' &&
@@ -3041,7 +3612,7 @@ export class FlowEngine {
     if (!reason.trim()) throw new FlowGateError('单次放行必须写理由', '用法：/flow allow-once <规则id 或 last> <理由>')
     const ruleId = ruleIdOrLast === 'last' ? (this.lastRuleId ?? '') : ruleIdOrLast
     if (!ruleId) throw new FlowGateError('没有可放行的规则', '还没有拦截记录；用 /flow allow-once <规则id> <理由>')
-    const rules = loadRules(this.config)
+    const rules = loadRules(this.configFor(change))
     if (!rules.some((rule) => rule.id === ruleId)) {
       throw new FlowGateError(`没有规则 ${ruleId}`, `可用规则：${rules.map((rule) => rule.id).join('、')}`)
     }
@@ -3117,11 +3688,11 @@ export class FlowEngine {
     const lowering = parsed === 'normal' && change.risk === 'high'
     if (lowering && !reason?.trim()) throw new FlowGateError('降低风险等级必须写理由', '用法：/flow risk-level 普通 <理由>')
     const raising = parsed === 'high' && change.risk === 'normal'
-    change.risk = parsed
-    if (raising && (change.stage === 'S5' || change.stage === 'S6')) {
-      Object.assign(change, enterStage(change, 'S4', isoNow(this.clock)))
-      await this.appendLedger('stage.entered', { changeId: change.id, stage: 'S4', reason: 'risk-raised' })
-      this.pushNotice('风险提高为高风险：已退回 S4，已完成任务的审查按新标准重新要求（回执保留）。')
+    if (raising) {
+      // FR-6.6：清空已完成任务的审查、按需退回 S4，并生成 RK 提醒（测试回执保留）。
+      await this.applyRiskRaised(change, reason ?? '负责人提高风险等级')
+    } else {
+      change.risk = parsed
     }
     await this.appendLedger('level.changed', { changeId: change.id, dimension: 'risk', level: parsed, reason })
     await this.saveChange(change)
@@ -3179,6 +3750,110 @@ export class FlowEngine {
   // Session management
   // ------------------------------------------------------------------
 
+  /**
+   * 检查当前变更是否已被其它会话接管（T3.7 验收 #2）。
+   * 被接管后的旧会话写操作必须拒绝；节流 1s 读取 sessions.json，避免每次 guard 都读盘。
+   */
+  private async refreshForeignLease(): Promise<void> {
+    if (!this.sessionId || !this.current) return
+    const nowMs = this.clock.now().getTime()
+    if (nowMs - this.lastLeaseRefreshAt < 1_000) return
+    this.lastLeaseRefreshAt = nowMs
+    try {
+      const leases = await store.readLeases(this.fs, this.root)
+      const lease = leases.find((item) => item.changeId === this.current?.id)
+      if (
+        lease &&
+        lease.sessionId !== this.sessionId &&
+        !isOlderThanMinutes(lease.heartbeatAt, this.config.session.lease_minutes, this.clock.now())
+      ) {
+        this.foreignLease = lease
+      } else {
+        this.foreignLease = null
+      }
+    } catch {
+      // 租约文件损坏由锁定模式处理；这里不额外阻断。
+    }
+  }
+
+  /**
+   * 解析 git status 的路径（接续快照对比用）：兼容 porcelain=v2 -z 与
+   * 旧版 v1 文本（测试替身/降级实现返回 v1）。
+   */
+  private static porcelainPaths(status: string): string[] {
+    if (status === '') return []
+    const paths = new Set<string>()
+    const addV1 = (line: string): void => {
+      const match = /^[ MADRCU?!]{2} (.+)$/.exec(line)
+      if (!match) return
+      const value = match[1]!
+      const renamed = /^(.+?) -> (.+)$/.exec(value)
+      paths.add(renamed ? renamed[2]! : value)
+    }
+    const records = status.split('\0')
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]
+      if (!record) continue
+      const kind = record[0]
+      if (kind === '1' || kind === 'u') {
+        const match = /^[12u] \S+ \S+ \S+ \S+ \S+ \S+ \S+ (.*)$/.exec(record)
+        const path = kind === '1' ? record.split(' ').slice(8).join(' ') : match?.[1]
+        if (path) paths.add(path)
+      } else if (kind === '2') {
+        const path = record.split(' ').slice(9).join(' ')
+        if (path) paths.add(path)
+        index += 1
+      } else if (kind === '?') {
+        const path = record.slice(2)
+        if (path) paths.add(path)
+      } else if (record.includes('\n')) {
+        for (const line of record.split('\n')) if (line !== '') addV1(line)
+      } else {
+        addV1(record)
+      }
+    }
+    return [...paths].sort()
+  }
+
+  /**
+   * 接续时对比「上一次会话释放时的快照」与当前工作区（T3.7 验收 #3）：
+   * 新增的已改路径记为非 agent 改动，交给负责人确认。
+   */
+  private async compareWorktreeSnapshot(change: ChangeStatus): Promise<void> {
+    const previous = change.worktreeSnapshot
+    if (!previous || !this.git) return
+    try {
+      const status = await this.git.statusPorcelain(this.root)
+      const currentPaths = FlowEngine.porcelainPaths(status)
+      const external = currentPaths.filter((path) => !previous.paths.includes(path))
+      if (external.length === 0) return
+      const now = isoNow(this.clock)
+      for (const path of external) {
+        if (isUnder(path, '.flowgate') || isUnder(path, '.git')) continue
+        change.externalChanges = [...(change.externalChanges ?? []), { path, at: now, origin: 'external' }]
+      }
+      await this.appendLedger('external.detected', { changeId: change.id, paths: external })
+      this.pushNotice(`接续时检测到 ${external.length} 处会话之间的非 agent 改动：${external.slice(0, 5).join('、')}。G6 前需 /flow external confirm。`)
+    } catch {
+      // 快照对比失败不阻塞接续。
+    }
+  }
+
+  /** 记录当前工作区快照（释放/暂停会话时调用），供下一次接续对比。 */
+  private async captureWorktreeSnapshot(change: ChangeStatus): Promise<void> {
+    if (!this.git) return
+    try {
+      const status = await this.git.statusPorcelain(this.root)
+      change.worktreeSnapshot = {
+        at: isoNow(this.clock),
+        statusPorcelain: status,
+        paths: FlowEngine.porcelainPaths(status),
+      }
+    } catch {
+      // 忽略快照失败。
+    }
+  }
+
   private async acquireLease(change: ChangeStatus): Promise<void> {
     if (!this.state || !this.sessionId) return
     // 损坏状态下不改写租约/附着：避免把仍应出现在 doctor 与 repair 报告里的
@@ -3196,6 +3871,11 @@ export class FlowEngine {
     })
     change.session = { attached: this.sessionLabel ?? this.sessionId, heartbeat: now }
     this.current = change
+    // 接续（而不是新建）时：对比上一次会话的工作区快照，找出会话之间的非 agent 改动。
+    if (change.worktreeSnapshot !== undefined) {
+      this.resumed = true
+      await this.compareWorktreeSnapshot(change)
+    }
     await this.saveLeases()
     await this.appendLedger('session.attached', { changeId: change.id, sessionId: this.sessionId, label: this.sessionLabel })
     await this.saveChange(change)
@@ -3254,6 +3934,8 @@ export class FlowEngine {
   async pauseChange(): Promise<HandoffSummary> {
     const change = this.requireChange()
     const handoff = await this.generateHandoff()
+    await this.captureWorktreeSnapshot(change)
+    if (change.roadmap !== undefined) await this.updateRoadmapStatus(change, '暂停')
     change.lifecycle = 'paused'
     if (this.state) this.state.leases = this.state.leases.filter((lease) => lease.sessionId !== this.sessionId)
     await this.appendLedger('change.paused', { changeId: change.id })
@@ -3269,6 +3951,7 @@ export class FlowEngine {
     if (!lease) return
     const change = this.state.changes.find((item) => item.id === lease.changeId)
     if (change && change.lifecycle === 'active') {
+      await this.captureWorktreeSnapshot(change)
       for (const task of Object.values(change.tasks)) {
         if (task.status === 'running' || task.status === 'review') {
           task.status = 'interrupted'
@@ -3367,6 +4050,8 @@ export class FlowEngine {
     await this.expireOpenPending(change, now)
     change.lifecycle = 'archived'
     change.stage = 'archived'
+    // 路线图条目状态回写：C0/C1 交付后后续变更的依赖判定才不会被卡住（T2.7）。
+    await this.updateRoadmapStatus(change, '已交付')
     await this.fs.writeFile(posixJoin(archiveDir, 'status.json'), `${JSON.stringify(change, null, 2)}\n`)
     await this.fs.remove(paths.dir)
     await this.appendLedger('report.generated', { changeId: change.id, path: posixJoin(archiveDir, 'report.html') })
@@ -3638,10 +4323,12 @@ export class FlowEngine {
       lines.push('当前是项目级澄清与路线图：写 .flowgate/project-clarify.md 与 .flowgate/roadmap.md，第一个变更必须是工程骨架 C0；完成后 flow_submit({ gate: "GR" })。')
     } else if (change.stage === 'S0' || change.stage === 'S1') {
       lines.push('S1 需求澄清：先读相关代码与规格（事实带 `文件:起止行` 引用），再用 ask_user_question 澄清（每轮 ≤4 题），写 clarify.md / proposal.md / 增量规格，然后 flow_submit({ gate: "G1" })。六要素未闭合、未决问题不为 0、模糊词未量化都会被拦。')
+      if (!this.hasSkillReceipt('flow-clarify')) lines.push('阶段核心技能：先用 skill 工具加载 flow-clarify（skill({ name: "flow-clarify" })）；G1 会核对加载回执，缺回执直接失败。')
     } else if (change.stage === 'S2') {
       lines.push('S2 上下文：写 context.md（接口约束、数据模型、非功能要求），确保 project.md 命令可执行；然后 flow_submit({ gate: "G2" })，插件会跑一次基线测试。')
     } else if (change.stage === 'S3') {
       lines.push('S3 设计拆解：写 design.md（' + (level.requiresDesignOptions ? '2–3 个方案对比、推荐与理由、数据流、错误处理、回滚' : '方案与理由') + '）、risk.md（五类）、tasks.md（任务卡 + 末尾执行计划批次），然后 flow_submit({ gate: "G3" })。')
+      if (!this.hasSkillReceipt('flow-plan')) lines.push('阶段核心技能：先用 skill 工具加载 flow-plan（skill({ name: "flow-plan" })）；G3 会核对加载回执，缺回执直接失败。')
     } else if (change.stage === 'S4') {
       const active = this.activeTask()
       if (active) {
@@ -3668,6 +4355,10 @@ export class FlowEngine {
     if (awaiting) lines.push(`当前等待负责人批准 ${awaiting[0]}：结束本轮，告诉负责人运行 /flow approve ${awaiting[0]}。`)
     const violations = change.violations.filter((violation) => !violation.clearedAt)
     if (violations.length > 0) lines.push(`未撤销的越界改动：${violations.map((violation) => violation.path).join('、')}；撤销（git checkout -- 文件）或申请范围变更后才能继续写入。`)
+    const external = (change.externalChanges ?? []).filter((item) => item.confirmedAt === undefined)
+    if (external.length > 0) {
+      lines.push(`非 agent 改动待确认：${external.map((item) => item.path).join('、')}；负责人运行 /flow external confirm 确认（G6 前必须处理）。`)
+    }
     const notices = this.notices.slice(-3)
     if (notices.length > 0) lines.push(...notices)
     if (this.config.learning === 'detail') lines.push('学习模式：每进入一个新阶段，先用 1–2 句话说明这一步在做什么、为什么。')
@@ -3679,7 +4370,7 @@ export class FlowEngine {
     const change = this.current
     const initialized = this.isInitialized()
     const pipeline = this.pipelineProgress(change)
-    const level = change ? levelProfile(change.complexity, change.risk, this.config.limits) : null
+    const level = change ? levelProfile(change.complexity, change.risk, this.configFor(change).limits) : null
     const awaitingGate = change ? findAwaitingHumanGate(change) : undefined
     const activeTask = this.activeTask()
     const pending = change?.pending.filter((item) => item.status === 'open') ?? []
@@ -3701,6 +4392,9 @@ export class FlowEngine {
       activeTaskId: activeTask?.id,
       pending,
       violations,
+      externalChanges: (change?.externalChanges ?? []).filter((item) => item.confirmedAt === undefined),
+      resumed: this.resumed,
+      exceptions: (change?.exceptions ?? []).filter((item) => item.revokedAt === undefined),
       off: change?.off ?? false,
       locked: Boolean(this.state?.locked),
       interceptCounts: { ...this.interceptCounts },
@@ -3919,6 +4613,7 @@ export function buildStatusLine(snapshot: RuntimeSnapshot): string {
     parts.push(snapshot.changeId)
     parts.push(`${complexityShort(snapshot.complexity)} · ${riskShort(snapshot.risk)}`)
   }
+  if (snapshot.resumed) parts.push('已接续')
   if (snapshot.stage === 'roadmap') parts.push('路线图 ▸ 待 GR')
   else if (snapshot.awaitingGate) parts.push(`等待批准 ${snapshot.awaitingGate}`)
   else if (snapshot.stage) parts.push(`${stageCircle(snapshot.stage)} ${STAGE_LABELS[snapshot.stage] ?? snapshot.stage}`)

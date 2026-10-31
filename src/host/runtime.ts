@@ -134,6 +134,8 @@ export class HostRuntime {
    * 投影可用时注册；返回 undefined 表示本帧取不到，绝不编造数字）。P1-7。
    */
   private contextPctSource: (() => number | undefined) | null = null
+  /** 累计 token 用量数据源（token-meter 的 tokenUsage 投影，03 §8.2 预算触发器）。 */
+  private tokenUsageSource: (() => number | undefined) | null = null
 
   constructor(options: HostRuntimeOptions) {
     this.ctx = options.ctx
@@ -612,6 +614,23 @@ export class HostRuntime {
     this.contextPctSource = source
   }
 
+  /** 安装/卸下累计 token 用量数据源（projection 模块调用）。 */
+  setTokenUsageSource(source: (() => number | undefined) | null): void {
+    this.tokenUsageSource = source
+  }
+
+  /** 当前会话累计 token 用量；无投影/读取异常时 undefined（不编造）。 */
+  tokenUsage(): number | undefined {
+    const source = this.tokenUsageSource
+    if (!source) return undefined
+    try {
+      const value = source()
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /** 当前上下文占用百分比（0–100）；无投影/未采样/读取异常时 undefined。 */
   contextPct(): number | undefined {
     const source = this.contextPctSource
@@ -639,6 +658,11 @@ export class HostRuntime {
     if (this.disposed) return
     const engine = this.engineValue
     if (!engine) return
+    // 预算触发器：token-meter 可用时把累计用量上报给引擎（超预算会生成 RK 并暂停写操作）。
+    const tokensUsed = this.tokenUsage()
+    if (tokensUsed !== undefined) {
+      void engine.recordTokenUsage(tokensUsed).catch(() => undefined)
+    }
     try {
       const rawSnapshot = engine.snapshot()
       this.lastSnapshot = rawSnapshot

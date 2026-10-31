@@ -1411,8 +1411,18 @@ export function checkG5RuntimeEvidence(ctx: GateCheckContext): CheckOutcome {
     return pass(item, label, 'P0', [runReceipt.command])
   }
   if (commands.run !== undefined && commands.run !== 'none') {
+    const manual = latestOfKind(ctx.evidence, 'manual')
     if (!runReceipt || runReceipt.exitCode !== 0) {
-      return pass(item, label, 'P0', [`普通风险：未收集到运行回执（${commands.run}），可用 attach_evidence 补充`])
+      if (manual) {
+        return pass(item, label, 'P0', [`使用手工运行证据：${manual.command}（普通风险允许 attach_evidence 兜底）`])
+      }
+      return fail(
+        item,
+        label,
+        '配置了 run 命令：S5 必须产生运行证据（flow_submit G5 会自动启动服务并做健康检查）；兼容路径是用 attach_evidence 提交日志+冒烟。',
+        'P0',
+        { details: [`run 命令：${commands.run}`, `health 命令：${commands.health ?? '未配置'}`] },
+      )
     }
     return pass(item, label, 'P0', [runReceipt.command])
   }
@@ -1569,7 +1579,21 @@ export function checkG6TamperCheck(ctx: GateCheckContext): CheckOutcome {
       details: [ctx.change.lock.reason],
     })
   }
-  return pass(item, label, 'P0', ['未检测到锁定状态；篡改检测由 `/flow doctor` 在批准前执行'])
+  const openTamper = (ctx.change.pending ?? []).filter((pending) => pending.kind === 'tamper' && pending.status === 'open')
+  if (openTamper.length > 0) {
+    const signals = openTamper.flatMap((pending) => {
+      const list = (pending.data?.signals as { kind?: string; path?: string }[] | undefined) ?? []
+      return list.map((signal) => `${signal.kind ?? 'signal'} · ${signal.path ?? ''}`)
+    })
+    return fail(
+      item,
+      label,
+      '检测到疑似篡改（跳过测试/删断言/改测试基础设施）：负责人确认前不能通过 G6；合法重构请批准 TM 项，否则回退改动。',
+      'P0',
+      { details: [...openTamper.map((pending) => `${pending.id} ${pending.title}`), ...signals].slice(0, 20) },
+    )
+  }
+  return pass(item, label, 'P0', ['未检测到篡改信号；`/flow doctor` 会复核账本与锁定状态'])
 }
 
 /** G6: non-agent changes are listed and confirmed; no open conflicts. */
@@ -1585,8 +1609,11 @@ export function checkG6ExternalChanges(ctx: GateCheckContext): CheckOutcome {
   for (const violation of ctx.change.violations ?? []) {
     if (violation.clearedAt === undefined) problems.push(`未清理的越界改动：${violation.path}`)
   }
+  for (const external of ctx.change.externalChanges ?? []) {
+    if (external.confirmedAt === undefined) problems.push(`未确认的非 agent 改动：${external.path}`)
+  }
   if (problems.length > 0) {
-    return fail(item, label, '把工作区里出现的非 agent 改动单列给负责人确认，并处理所有未清理的越界记录。', 'P0', {
+    return fail(item, label, '把工作区里出现的非 agent 改动单列给负责人确认（/flow external confirm），并处理所有未清理的越界记录。', 'P0', {
       details: problems,
     })
   }
@@ -1598,6 +1625,35 @@ export function checkG6ExternalChanges(ctx: GateCheckContext): CheckOutcome {
 // ---------------------------------------------------------------------------
 
 const CHANGE_ARTIFACTS_PRESENT: ArtifactName[] = ['clarify', 'proposal', 'spec']
+
+/** 阶段核心技能（T2.4）：过门前必须由宿主记录加载回执。 */
+const REQUIRED_SKILLS: Partial<Record<GateId, string[]>> = {
+  G1: ['flow-clarify'],
+  G3: ['flow-plan'],
+}
+
+function skillLoaded(change: ChangeStatus, wanted: string): boolean {
+  const target = wanted.toLowerCase()
+  return (change.skillReceipts ?? []).some((receipt) => {
+    const loaded = receipt.name.toLowerCase()
+    return loaded === target || loaded.endsWith(target) || loaded.includes(`${target}:`) || loaded.includes(`/${target}`)
+  })
+}
+
+/** 阶段核心技能必须已经加载过（T2.4 验收 #1）。 */
+export function checkCoreSkillReceipts(ctx: GateCheckContext): CheckOutcome {
+  const item = ctx.gate === 'G1' ? 'g1.coreSkills' : 'g3.coreSkills'
+  const label = '阶段核心技能已加载'
+  const required = REQUIRED_SKILLS[ctx.gate] ?? []
+  if (required.length === 0) return pass(item, label, 'P0', ['本门不要求技能回执'])
+  const missing = required.filter((name) => !skillLoaded(ctx.change, name))
+  if (missing.length > 0) {
+    return fail(item, label, '先在当前会话用 skill 工具加载阶段核心技能，过门时会核对加载回执。', 'P0', {
+      details: [`未加载：${missing.join('、')}`, '加载方式：调用 skill 工具（如 skill({ name: "flow-plan" })）'],
+    })
+  }
+  return pass(item, label, 'P0', [`已加载：${required.join('、')}`])
+}
 
 function onlyWhen(predicate: (ctx: GateCheckContext) => boolean) {
   return predicate
@@ -1628,6 +1684,7 @@ export const GATE_CHECKS: GateCheckDefinition[] = [
   { id: 'g1.openQuestions', label: '未决问题 = 0', gates: ['G1'], priority: 'P0', check: checkOpenQuestions },
   { id: 'g1.specFormat', label: '增量规格格式合法', gates: ['G1'], priority: 'P0', check: checkSpecFormat },
   { id: 'g1.factsCitations', label: '已知事实都带可核验引用', gates: ['G1'], priority: 'P1', check: checkAnalysisCitations },
+  { id: 'g1.coreSkills', label: '阶段核心技能已加载', gates: ['G1'], priority: 'P0', check: checkCoreSkillReceipts },
 
   // ----- G2 ---------------------------------------------------------------
   {
@@ -1683,6 +1740,7 @@ export const GATE_CHECKS: GateCheckDefinition[] = [
     ),
     check: checkPlan,
   },
+  { id: 'g3.coreSkills', label: '阶段核心技能已加载', gates: ['G3'], priority: 'P0', check: checkCoreSkillReceipts },
   {
     id: 'g3.frozenArtifacts',
     label: '已冻结产物未被修改',

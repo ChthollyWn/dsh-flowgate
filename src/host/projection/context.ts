@@ -28,6 +28,8 @@ import type { HostRuntime } from '../runtime.js'
 
 /** dsh-token-meter 注册的上下文压力投影 key。 */
 export const CONTEXT_PRESSURE_KEY = 'contextPressure'
+/** dsh-token-meter 注册的累计用量投影 key。 */
+export const TOKEN_USAGE_KEY = 'tokenUsage'
 
 /** 正整数（token 数 / 容量）；其余一律视为缺失。 */
 function positiveNumber(value: unknown): number | undefined {
@@ -82,6 +84,52 @@ export function readContextPct(
 }
 
 /**
+ * 从 `tokenUsage` 投影值读取本会话累计 token 用量：
+ * `uncachedInputTokens + outputTokens + cacheReadTokens + cacheWriteTokens`。
+ * 任一字段缺失按 0 计；全部缺失或形状不符 → undefined（不编造）。
+ */
+export function tokenUsageFromProjection(value: unknown): number | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const keys = ['uncachedInputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
+  let total = 0
+  let found = false
+  for (const key of keys) {
+    const number = record[key]
+    if (typeof number === 'number' && Number.isFinite(number) && number >= 0) {
+      total += number
+      found = true
+    }
+  }
+  return found ? Math.round(total) : undefined
+}
+
+/** 读取当前会话累计 token 用量（同步、无 IO；缺失/异常返回 undefined）。 */
+export function readTokenUsage(
+  registry: DshSessionProjectionRegistry | null,
+  session: DshSession | null,
+): number | undefined {
+  if (registry === null || session === null) return undefined
+  try {
+    if (typeof registry.snapshot === 'function') {
+      const snapshot = registry.snapshot(session, [TOKEN_USAGE_KEY])
+      const usage = tokenUsageFromProjection(snapshot.values?.[TOKEN_USAGE_KEY])
+      if (usage !== undefined) return usage
+    }
+  } catch {
+    // 降级到 host state 读法。
+  }
+  try {
+    if (typeof registry.stateOf === 'function') {
+      return tokenUsageFromProjection(registry.stateOf(session, TOKEN_USAGE_KEY))
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+/**
  * 安装 contextPct 数据源。由 projection 模块在 `sessionProjections` 可用时调用
  * （与 flowgate 投影注册共用一次注入）。
  *
@@ -106,6 +154,7 @@ export function installContextPressure(
     return
   }
   runtime.setContextPctSource(() => readContextPct(registry, runtime.mainSession()))
+  runtime.setTokenUsageSource(() => readTokenUsage(registry, runtime.mainSession()))
   let disposed = false
   let timer: ReturnType<typeof setTimeout> | null = null
   runtime.registerDisposer(() => {
@@ -113,10 +162,11 @@ export function installContextPressure(
     if (timer !== null) clearTimeout(timer)
     timer = null
     runtime.setContextPctSource(null)
+    runtime.setTokenUsageSource(null)
   })
   if (typeof registry.onChanged === 'function') {
     const disposeChange = registry.onChanged((session, key) => {
-      if (key !== CONTEXT_PRESSURE_KEY || disposed || timer !== null) return
+      if ((key !== CONTEXT_PRESSURE_KEY && key !== TOKEN_USAGE_KEY) || disposed || timer !== null) return
       const main = runtime.mainSession()
       if (main === null || sessionIdOf(session) !== sessionIdOf(main)) return
       // 延后一个宏任务：onChanged 在已提交事件的投影 drive 内同步触发，此时

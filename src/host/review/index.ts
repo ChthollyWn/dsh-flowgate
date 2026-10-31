@@ -171,12 +171,25 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
   }
   const { diff, files } = await collectDiff(runtime, taskId)
   const diffFingerprint = sha256Hex(diff)
+  const criteria = reviewCriteria()
+  // 篡改嫌疑（T3.5）：跳过测试/删断言/改测试基础设施的 TM 项必须作为审查输入。
+  const tamperSignals = (change.pending ?? [])
+    .filter((pending) => pending.kind === 'tamper' && pending.status === 'open')
+    .flatMap((pending) => (pending.data?.signals as { kind?: string; path?: string; detail?: string }[] | undefined) ?? [])
+  if (tamperSignals.length > 0) {
+    criteria.push(
+      `重点核查疑似篡改信号（这些改动可能让测试失去约束）：${tamperSignals
+        .slice(0, 10)
+        .map((signal) => `${signal.kind ?? 'signal'}@${signal.path ?? ''}`)
+        .join('；')}`,
+    )
+  }
   const prompt = buildReviewPrompt({
     taskId,
     changeTitle: `${change.id} ${change.title}`,
     taskTitle: task.title,
     taskScope: [...task.scope, ...task.newFiles],
-    criteria: reviewCriteria(),
+    criteria,
     diff,
     files,
   })

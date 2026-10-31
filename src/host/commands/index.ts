@@ -10,6 +10,7 @@
 import type { DshAgent, DshCommandDefinition, DshCommandRuntime, DshContext } from '../adapters/dsh-types.js'
 import type { EngineLike } from '../types.js'
 import type { HostRuntime } from '../runtime.js'
+import { openLocalPath } from '../open.js'
 import type { Complexity, GateId, PendingItem, RiskLevel } from '../../core/types.js'
 import { HostError, describeError, toAgentError } from '../errors.js'
 import { approveHumanGate, confirmCardText, rejectCurrentGate } from '../gates/index.js'
@@ -50,6 +51,9 @@ export const FLOW_COMMAND_HELP = [
   '/flow plan approve|reject <PC-n> [理由] — 计划修订申请',
   '/flow rule approve|reject <RL-n> [理由] — 规则沉淀提议',
   '/flow conflict approve|reject <CF-n> [理由] — 集成检查点冲突/失败：approve=确认已修好并重试检查点，reject=放弃自动重试',
+  '/flow tamper approve|reject <TM-n> [理由] — 疑似篡改（跳过测试/删断言/改测试基础设施）：approve=确认是合法重构',
+  '/flow external confirm [路径|all] — 确认非 agent 改动（编辑器/格式化），G6 前必须清零',
+  '/flow exception add <规则id> <路径模式|-> <理由> | revoke <EX-n> [理由] | list — 规则例外管理',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
   '/flow risk-level <普通|高> [理由] — 改风险等级',
   '/flow learn <detail|brief|off> — 学习模式',
@@ -124,7 +128,12 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
     case 'plan':
     case 'rule':
     case 'conflict':
+    case 'tamper':
       return pendingCommand(runtime, verb, args)
+    case 'external':
+      return externalCommand(runtime, args)
+    case 'exception':
+      return exceptionCommand(runtime, args)
     case 'unblock':
       return unblockCommand(runtime, args)
     case 'complexity':
@@ -142,12 +151,14 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
     case 'report': {
       const engine = await engineFor(runtime, agent)
       const result = await engine.generateReport()
-      return `已生成交付报告：${result.path}\n打开方式：在浏览器中打开该文件，或在文件管理器里双击。`
+      const opened = await openLocalPath(runtime, result.path)
+      return `已生成交付报告：${result.path}\n${opened.message}`
     }
     case 'board': {
       const engine = await engineFor(runtime, agent)
       const result = await engine.generateBoard()
-      return `已生成跨会话看板：${result.path}`
+      const opened = await openLocalPath(runtime, result.path)
+      return `已生成跨会话看板：${result.path}\n${opened.message}`
     }
     case 'roadmap':
       return roadmapCommand(runtime, agent ?? null)
@@ -318,9 +329,67 @@ async function approveCommand(runtime: HostRuntime, agent: DshAgent | null, args
   return lines.join('\n')
 }
 
+/**
+ * `/flow external confirm [路径|all]`：负责人确认「这些不是 agent 改的」。
+ * 不传参数等价 all；G6 的 g6.externalChanges 要求全部确认。
+ */
+async function externalCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const engine = await engineFor(runtime)
+  const change = engine.currentChange()
+  if (!change) throw new HostError('当前没有进行中的变更', '运行 /flow 查看状态')
+  const pendingExternal = (change.externalChanges ?? []).filter((item) => item.confirmedAt === undefined)
+  if (pendingExternal.length === 0) return '当前没有待确认的非 agent 改动。'
+  const target = (args[0] ?? 'all').toLowerCase()
+  const paths = target === 'all' ? undefined : args
+  const confirmed = await engine.acknowledgeExternalChanges(paths)
+  runtime.emit()
+  return confirmed === 0
+    ? `没有匹配的待确认非 agent 改动：${args.join(' ')}。运行 /flow 查看列表。`
+    : `已确认 ${confirmed} 处非 agent 改动。`
+}
+
+/**
+ * `/flow exception add|revoke|list`：规则例外的负责人入口（T5.1 验收 #1）。
+ * 例外与单次放行的区别：例外可重复命中、可撤销；单次放行只抵消一次。
+ */
+async function exceptionCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const engine = await engineFor(runtime)
+  const action = (args[0] ?? '').toLowerCase()
+  if (action === 'list') {
+    const change = engine.currentChange()
+    const list = change?.exceptions ?? []
+    if (list.length === 0) return '当前变更没有规则例外。'
+    return [
+      '规则例外：',
+      ...list.map((exception) =>
+        `- ${exception.id} · ${exception.ruleId}${exception.pathPattern !== undefined ? ` @ ${exception.pathPattern}` : ''} · ${exception.revokedAt !== undefined ? '已撤销' : '生效中'} · ${exception.reason}`,
+      ),
+    ].join('\n')
+  }
+  if (action === 'add') {
+    const ruleId = args[1]
+    const pathPattern = args[2]
+    const reason = args.slice(3).join(' ')
+    if (!ruleId || !pathPattern || reason.trim() === '') {
+      throw new HostError('用法：/flow exception add <规则id> <路径模式|-> <理由>', '例：/flow exception add R-SCOPE src/legacy/** 迁移期间允许改旧适配层')
+    }
+    const exception = await engine.addException(ruleId, pathPattern === '-' ? undefined : pathPattern, reason)
+    runtime.emit()
+    return `已加入例外 ${exception.id}：规则 ${exception.ruleId}${exception.pathPattern !== undefined ? ` @ ${exception.pathPattern}` : ''}；可用 /flow exception revoke ${exception.id} 撤销。`
+  }
+  if (action === 'revoke') {
+    const id = args[1]
+    if (!id) throw new HostError('用法：/flow exception revoke <EX-n> [理由]', '运行 /flow exception list 查看例外')
+    await engine.revokeException(id, args.slice(2).join(' ') || undefined)
+    runtime.emit()
+    return `例外 ${id} 已撤销。`
+  }
+  throw new HostError('用法：/flow exception add|revoke|list', '例：/flow exception list')
+}
+
 async function pendingCommand(
   runtime: HostRuntime,
-  kind: 'scope' | 'risk' | 'plan' | 'rule' | 'conflict',
+  kind: 'scope' | 'risk' | 'plan' | 'rule' | 'conflict' | 'tamper',
   args: string[],
 ): Promise<string> {
   const action = (args[0] ?? '').toLowerCase()
@@ -343,7 +412,9 @@ async function pendingCommand(
           ? '计划修订'
           : kind === 'conflict'
             ? '集成检查点冲突'
-            : '规则提议'
+            : kind === 'tamper'
+              ? '篡改嫌疑'
+              : '规则提议'
   return `${label} ${item.id} 已${action === 'approve' ? '批准' : '退回'}。${item.title}`
 }
 
@@ -360,6 +431,8 @@ function pendingKindHint(kind: string): string {
       return '/flow rule approve <RL-n>'
     case 'conflict':
       return '/flow conflict approve <CF-n>（确认已修好并重试检查点）或 /flow conflict reject <CF-n> <理由>（放弃自动重试）'
+    case 'tamper':
+      return '/flow tamper approve <TM-n>（确认是合法重构）或 /flow tamper reject <TM-n> <理由>'
     default:
       return '运行 /flow 查看待处理项列表'
   }

@@ -124,7 +124,7 @@
   "intercepts.log": "Intercept log",
   "intercepts.misjudged": "False-positive feedback",
   "intercepts.reasonPh": "Why this intercept was a false positive",
-  "intercepts.revokeException": "Revoke exception",
+  "intercepts.revokeException": "Revoke",
   "intercepts.ruleStats": "By rule",
   "intercepts.tab.coverage": "Coverage",
   "intercepts.tab.log": "Log",
@@ -354,5 +354,12 @@
   "trace.summary": "Covered {covered}/{total}",
   "trace.title": "Traceability matrix",
   "trace.uncovered": "Uncovered scenarios: {list}",
-  "trace.uncoveredShort": "Uncovered"
+  "trace.uncoveredShort": "Uncovered",
+  "gates.externalChanges": "Non-agent changes (pending confirmation)",
+  "gates.externalHint": "These files were modified outside the agent (editor/formatter). Confirm them or revert before G6.",
+  "gates.confirmExternal": "Confirm all",
+  "gates.externalUnknown": "origin unknown",
+  "intercepts.exceptions": "Active rule exceptions",
+  "intercepts.noExceptions": "No active exceptions.",
+  "intercepts.exceptionRule": "Rule {rule}"
 }

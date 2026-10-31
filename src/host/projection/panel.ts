@@ -178,7 +178,9 @@ function buildRules(engine: EngineLike): RuleRow[] {
 
 function buildEvidence(engine: EngineLike): EvidenceRow[] {
   const receipts = engine.getEvidence()
-  // 每组最新回执视为 fresh 的候选（真正的新鲜度由输入哈希判定，面板只做展示）。
+  // 输入哈希判定的新鲜度（T3.6）：engine 在工具调用后重算；没有缓存时退回
+  // 「组内最新且未超时」的展示口径。
+  const freshness = engine.getEvidenceFreshness()
   const latestByGroup = new Map<string, string>()
   for (const receipt of receipts) latestByGroup.set(receipt.group, receipt.id)
   return receipts.slice(-50).map((receipt) => ({
@@ -192,7 +194,7 @@ function buildEvidence(engine: EngineLike): EvidenceRow[] {
     passed: receipt.summary?.passed ?? 0,
     failed: receipt.summary?.failed ?? 0,
     skipped: receipt.summary?.skipped ?? 0,
-    fresh: latestByGroup.get(receipt.group) === receipt.id && !receipt.timedOut,
+    fresh: freshness[receipt.id] ?? (latestByGroup.get(receipt.group) === receipt.id && !receipt.timedOut),
     finishedAt: receipt.finishedAt,
   }))
 }

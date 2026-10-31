@@ -36,6 +36,8 @@ export type ClientAction =
   | { kind: 'learn'; mode: LearningMode }
   | { kind: 'open-panel' }
   | { kind: 'copy-evidence'; text: string }
+  /** 负责人确认非 agent 改动（T1.4 验收 #3）；不传 path 表示全部确认。 */
+  | { kind: 'confirm-external'; path?: string }
 
 export interface ActionPorts {
   t: TFn
@@ -117,10 +119,11 @@ export function commandFor(action: ClientAction): string {
     case 'allow-once':
       return `/flow allow-once ${action.ruleId} ${action.reason.trim()}`
     case 'add-exception':
-      // No dedicated documented command; allow-once is the safe equivalent for one action.
-      return `/flow allow-once ${action.ruleId} ${action.reason.trim()}`
+      return `/flow exception add ${action.ruleId} ${action.pathPattern !== undefined && action.pathPattern.trim() !== '' ? action.pathPattern.trim() : '-'} ${action.reason.trim()}`
     case 'revoke-exception':
       return `/flow exception revoke ${action.id}`
+    case 'confirm-external':
+      return `/flow external confirm ${action.path !== undefined && action.path !== '' ? action.path : 'all'}`
     case 'raise-complexity':
       return `/flow complexity high ${action.reason?.trim() ?? ''}`.trim()
     case 'resume':

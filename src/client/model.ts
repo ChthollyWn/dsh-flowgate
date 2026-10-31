@@ -268,6 +268,17 @@ function coerceSnapshot(raw: unknown): RuntimeSnapshot | null {
     violations: Array.isArray(raw.violations)
       ? (raw.violations.filter(isRecord) as unknown as RuntimeSnapshot['violations'])
       : [],
+    exceptions: Array.isArray(raw.exceptions)
+      ? (raw.exceptions.filter(isRecord) as unknown as NonNullable<RuntimeSnapshot['exceptions']>)
+      : [],
+    externalChanges: Array.isArray(raw.externalChanges)
+      ? (raw.externalChanges.filter(isRecord).map((entry) => ({
+          path: str(entry.path) ?? '',
+          at: str(entry.at) ?? '',
+          origin: entry.origin === 'external' ? ('external' as const) : ('unknown' as const),
+          ...(typeof entry.confirmedAt === 'string' ? { confirmedAt: entry.confirmedAt } : {}),
+        })) as RuntimeSnapshot['externalChanges'])
+      : [],
     off: raw.off === true,
     locked: raw.locked === true,
     interceptCounts: isRecord(raw.interceptCounts)
@@ -596,6 +607,10 @@ export interface PanelModel {
   metrics: MetricRowsModel
   evidence: EvidenceRow[]
   reviews: ReviewRow[]
+  /** 未经负责人确认的非 agent 改动（G6 前必须清空）。 */
+  externalChanges: NonNullable<RuntimeSnapshot['externalChanges']>
+  /** 生效中的规则例外（面板可撤销，T5.1 验收 #1）。 */
+  exceptions: NonNullable<RuntimeSnapshot['exceptions']>
   off: boolean
   locked: boolean
 }
@@ -1110,6 +1125,8 @@ export function buildPanelModel(proj: FlowgateProjection | null, t: TFn): PanelM
     metrics: buildMetricRows(panel.metrics, t),
     evidence: panel.evidence ?? [],
     reviews: panel.reviews ?? [],
+    externalChanges: (snapshot?.externalChanges ?? []).filter((entry) => entry.confirmedAt === undefined),
+    exceptions: (snapshot?.exceptions ?? []).filter((entry) => entry.revokedAt === undefined),
     off: snapshot?.off === true,
     locked: snapshot?.locked === true,
   }

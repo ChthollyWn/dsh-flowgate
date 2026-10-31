@@ -258,12 +258,26 @@ async function wrapExecute(runtime: HostRuntime, exec: DshToolExecution, next: (
   }
 
   if (before && after) {
+    // 调用前有未提交改动、调用后回到干净状态 → 说明这次调用把文件撤销/删除了，
+    // 对应的越界记录应自动解除（T1.4 验收 #2：git checkout -- 后自动解除）。
+    const engineAfter = runtime.engine()
+    if (engineAfter) {
+      const cleaned = cleanedPaths(before, after)
+      if (cleaned.length > 0) {
+        try {
+          await engineAfter.clearViolationsForReverted(cleaned)
+        } catch (error) {
+          runtime.noteFeature('postcheck', `撤销后解除越界失败：${toAgentError(error).error}`)
+        }
+      }
+    }
     try {
       const changed = diffSnapshots(before, after)
       if (changed.length > 0) {
         const engine2 = runtime.engine()
         if (engine2) {
-          const violations = await engine2.recordPostcheck({ origin: 'agent', changedPaths: changed, taskId })
+          const deletedPaths = [...after!.files.entries()].filter(([, hash]) => hash === 'deleted').map(([path]) => path)
+          const violations = await engine2.recordPostcheck({ origin: 'agent', changedPaths: changed, taskId, deletedPaths })
           if (violations.length > 0) {
             runtime.noteFeature('postcheck', `越界改动：${violations.map((violation) => violation.path).join('、')}`)
           }
@@ -286,6 +300,14 @@ async function wrapExecute(runtime: HostRuntime, exec: DshToolExecution, next: (
     }
   }
   return result
+}
+
+/**
+ * 调用前处于「已改」状态、调用后回到干净状态的路径。
+ * 用于自动解除已撤销的越界记录（T1.4）。
+ */
+export function cleanedPaths(before: WorkspaceSnapshot, after: WorkspaceSnapshot): string[] {
+  return [...before.files.keys()].filter((path) => !after.files.has(path)).sort()
 }
 
 /** 仓库相对路径拼接（worktree 目录常在根之外）。 */

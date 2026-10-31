@@ -8,11 +8,52 @@
  *   门禁/交付时复核。
  */
 import type { FileSystem } from '../util/fs'
-import type { ArtifactBundle, ChangeStatus, ContractSnapshot, FlowgateConfig } from '../types'
+import type {
+  ArtifactBundle,
+  ChangeStatus,
+  ContractConfigSnapshot,
+  ContractSnapshot,
+  FlowgateConfig,
+} from '../types'
 import { sha256, stableJson } from '../util/hash'
 import { changePaths, findIncrementalSpec, layout } from './layout'
 
-/** 冻结契约：插件版本 + 规则/触发器哈希 + 等级定义哈希 + 技能版本。 */
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+/** 冻结时实际生效的判定配置子集（规则/触发器/等级/限制）。 */
+export function contractConfigSnapshot(config: FlowgateConfig): ContractConfigSnapshot {
+  return {
+    rules: clone(config.rules),
+    triggers: clone(config.triggers),
+    levels: clone(config.levels),
+    limits: clone(config.limits),
+  }
+}
+
+/**
+ * 把当前配置叠加到基线配置上，得到某个变更「应当按哪份规则判定」。
+ *
+ * 有 contract.snapshot 时返回冻结快照（在途变更不受后续配置修改影响）；
+ * 旧状态没有快照时回退到基线（当前配置）。
+ */
+export function frozenContractConfig(
+  base: FlowgateConfig,
+  contract?: ContractSnapshot | null,
+): FlowgateConfig {
+  const snapshot = contract?.snapshot
+  if (!snapshot) return base
+  return {
+    ...base,
+    rules: clone(snapshot.rules),
+    triggers: clone(snapshot.triggers),
+    levels: clone(snapshot.levels),
+    limits: clone(snapshot.limits),
+  }
+}
+
+/** 冻结契约：插件版本 + 规则/触发器哈希 + 等级定义哈希 + 技能版本 + 判定快照。 */
 export function freezeContract(
   config: FlowgateConfig,
   pluginVersion: string,
@@ -32,6 +73,7 @@ export function freezeContract(
     levels: sha256(stableJson({ levels: config.levels, limits: config.limits })),
     skills: skillHashes,
     createdAt: at,
+    snapshot: contractConfigSnapshot(config),
   }
 }
 
@@ -133,6 +175,40 @@ export function assertNotFrozen(change: ChangeStatus, path: string): { frozen: b
   const at = frozen[key]!.at
   return {
     frozen: true,
-    hint: `「${key}」已在 ${at} 冻结：这是本次变更已批准的产物，不能直接修改。确需变更请走返工流程（声明返工类型）或新建变更。`,
+    hint: `「${key}」已在 ${at} 冻结：这是本次变更已批准的产物，不能直接修改。确需变更请走返工流程（/flow rework …）或新建变更。`,
   }
+}
+
+/**
+ * 人工门批准后把产物原文哈希合并进 `change.frozen`（幂等：内容没变的 key 保留
+ * 原冻结时间，内容变化的 key 更新哈希与时间）。返回本次新增/更新的 key。
+ */
+export function freezeArtifacts(
+  change: ChangeStatus,
+  bundle: ArtifactBundle,
+  at: string,
+): string[] {
+  const fingerprint = artifactsFingerprint(bundle)
+  const frozen = { ...(change.frozen ?? {}) }
+  const changed: string[] = []
+  for (const [key, hash] of Object.entries(fingerprint)) {
+    if (frozen[key]?.hash === hash) continue
+    frozen[key] = { hash, at }
+    changed.push(key)
+  }
+  if (Object.keys(frozen).length > 0) change.frozen = frozen
+  return changed.sort()
+}
+
+/**
+ * 返工/计划修订批准后解除冻结：不传 keys 时全部解除，否则只解除指定产物。
+ * 返回实际解除的 key。
+ */
+export function unfreezeArtifacts(change: ChangeStatus, keys?: string[]): string[] {
+  const frozen = change.frozen ?? {}
+  const target = keys === undefined ? Object.keys(frozen) : keys.filter((key) => key in frozen)
+  if (target.length === 0) return []
+  for (const key of target) delete frozen[key]
+  change.frozen = frozen
+  return target.sort()
 }
