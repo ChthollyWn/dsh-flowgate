@@ -185,7 +185,8 @@ export function fingerprintAction(action: Action): string {
   return sha256(stableJson(payload))
 }
 
-function mutatesRepository(action: Action): boolean {
+/** True when the action changes repository files or runs a mutating/dangerous command. */
+export function mutatesRepository(action: Action): boolean {
   if (isFileAction(action)) return action.kind !== 'read'
   if (action.kind === 'shell') {
     const command = action.command

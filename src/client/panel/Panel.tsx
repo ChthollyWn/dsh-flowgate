@@ -148,6 +148,25 @@ export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
               {stageIndex(model.stage, t)} {stageLabel(model.stage, t)}
             </span>
           ) : null}
+          {model.flowPlan !== undefined ? (
+            <span
+              data-flowgate="panel-flow-route"
+              data-route={model.flowPlan.route}
+              data-auto={model.flowPlan.autoApprove ? 'true' : 'false'}
+              data-verdict={model.flowPlan.verdict}
+              title={model.flowPlan.reasons.join('\n')}
+              style={{
+                fontSize: 10.5,
+                lineHeight: '16px',
+                color: COLORS.dim,
+                border: `0.5px solid ${COLORS.border}`,
+                borderRadius: 999,
+                padding: '0 6px',
+              }}
+            >
+              {t('panel.flowRoute', { route: model.flowPlan.route })}
+            </span>
+          ) : null}
           {model.off ? <span style={{ fontSize: 11, color: COLORS.fail }}>{t('tone.blocked')}</span> : null}
         </div>
       </header>

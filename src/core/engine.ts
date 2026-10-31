@@ -35,6 +35,8 @@ import type {
   ExceptionRecord,
   ExecutionPlan,
   FlowgateConfig,
+  FlowPlan,
+  FlowRoute,
   GateCheckContext,
   GateId,
   GateRecord,
@@ -116,6 +118,7 @@ import {
   fingerprintAction,
   actionFromToolCall,
   BLOCKED_DELEGATION_TOOLS,
+  mutatesRepository,
   explainDecision,
   ruleMisfireRate,
   shouldDowngradeRule,
@@ -140,6 +143,7 @@ import {
 } from './evidence'
 import { invalidateOnRework, type ReworkKind } from './revision'
 import { computeMetrics } from './metrics'
+import { reviewFlowAssessment } from './flow/routing'
 import { renderChangeReport } from './report'
 import { renderDashboard } from './dashboard'
 import { mergeIncrementalSpec, capabilityDirName } from './archive'
@@ -1010,6 +1014,19 @@ export class FlowEngine {
     // `/flow new <描述>` only carries a title; G0 requires a one-line goal. Default the
     // summary to the title instead of failing G0 on a human-typed command.
     const summary = input.summary?.trim() ? input.summary.trim() : title
+    // v0.5 自动流程：模型自评 + 宿主 auto-review 决定 route/autoApprove。
+    // 旧调用（/flow new、未提交 assessment）保持既有行为，不自动降级/放行。
+    const flowPlan: FlowPlan | undefined =
+      input.assessment !== undefined && (input.kind ?? 'change') === 'change'
+        ? reviewFlowAssessment({
+            title,
+            summary,
+            assessment: input.assessment,
+            complexity,
+            risk,
+            assessedAt: now,
+          })
+        : undefined
     const change = initialStatus({
       id: changeId,
       kind: input.kind ?? 'change',
@@ -1026,6 +1043,7 @@ export class FlowEngine {
       relatedTo: input.relatedTo,
     })
     change.contract = store.freezeContract(this.effectiveConfig(), this.pluginVersion, this.skillVersions(), now)
+    if (flowPlan !== undefined) change.flowPlan = flowPlan
     await store.ensureChangeDir(this.fs, this.root, change.id)
     const roadmapEntry =
       roadmapRef !== undefined ? this.roadmapDoc?.entries.find((entry) => entry.change === roadmapRef) : undefined
@@ -1050,6 +1068,16 @@ export class FlowEngine {
       await this.saveLeases()
     }
     await this.appendLedger('change.created', { changeId: change.id, kind: change.kind, title, complexity, risk })
+    if (flowPlan !== undefined) {
+      await this.appendLedger('flow.assessed', {
+        changeId: change.id,
+        route: flowPlan.route,
+        proposedRoute: flowPlan.proposedRoute,
+        autoApprove: flowPlan.autoApprove,
+        verdict: flowPlan.verdict,
+        reasons: flowPlan.reasons,
+      })
+    }
     if (roadmapRef !== undefined) await this.updateRoadmapStatus(change, '进行中')
     const g0 = await this.evaluateGate(change, 'G0')
     await this.recordGateResult(change, 'G0', g0, now)
@@ -1060,17 +1088,29 @@ export class FlowEngine {
     } else if (input.kind === 'analysis') {
       this.pushNotice(`已立分析任务 ${change.id}：只读排查，结论用 flow_submit_analysis 提交（必须带源码引用）。`)
     } else {
-      this.pushNotice(`已立项 ${change.id}（${complexityLabel(complexity)} · ${riskLabel(risk)}）。当前 S1 需求澄清：先读相关代码与规格，再用 ask_user_question 澄清，写 clarify.md / proposal.md / 增量规格。`)
+      if (flowPlan !== undefined) {
+        const auto = flowPlan.autoApprove ? '；G1/G3/G6 检查通过后自动通过（不再等人）' : ''
+        this.pushNotice(
+          `已立项 ${change.id}（${complexityLabel(complexity)} · ${riskLabel(risk)}）。自动流程：${this.flowRouteLabel(flowPlan.route)}${auto}。当前 S1 需求澄清。`,
+        )
+      } else {
+        this.pushNotice(`已立项 ${change.id}（${complexityLabel(complexity)} · ${riskLabel(risk)}）。当前 S1 需求澄清：先读相关代码与规格，再用 ask_user_question 澄清，写 clarify.md / proposal.md / 增量规格。`)
+      }
     }
+    const routeNote =
+      flowPlan !== undefined
+        ? `自动流程 ${flowPlan.route}${flowPlan.autoApprove ? '（自动放行）' : flowPlan.route === 'standard' ? '（合并 G1+G3 一次确认）' : '（人工门）'}${flowPlan.verdict === 'adjusted' ? `，auto-review 已调整：${flowPlan.reasons[flowPlan.reasons.length - 1] ?? ''}` : ''}`
+        : ''
     return {
       changeId: change.id,
       suggestion,
+      ...(flowPlan !== undefined ? { flowPlan } : {}),
       message:
         input.kind === 'analysis'
           ? `分析任务 ${change.id} 已创建：只读，不改代码。`
           : g0Failed
             ? `变更 ${change.id} 已创建，但 G0 未通过：${g0.failures.map((failure) => failure.label).join('；')}。修正后重新提交 G0。`
-            : `变更 ${change.id} 已创建并进入 S1 需求澄清（${complexityLabel(complexity)} · ${riskLabel(risk)}，建议等级，负责人可在 G1 确认或调整）。`,
+            : `变更 ${change.id} 已创建并进入 S1 需求澄清（${complexityLabel(complexity)} · ${riskLabel(risk)}${routeNote !== '' ? `；${routeNote}` : '，建议等级，负责人可在 G1 确认或调整'}）。`,
     }
   }
 
@@ -1148,6 +1188,28 @@ export class FlowEngine {
   private level(): LevelProfile {
     const change = this.current
     return levelProfile(change?.complexity ?? 'medium', change?.risk ?? 'normal', this.configFor(change).limits)
+  }
+
+  /** v0.5：fast 路由 = 检查通过后自动通过 G1/G3/G6（auto-review 已批准）。 */
+  private isFastFlow(change: ChangeStatus): boolean {
+    const plan = change.flowPlan
+    return plan?.route === 'fast' && plan.autoApprove === true
+  }
+
+  /** v0.5：standard 路由把 G1+G3 合并为一次人工确认（不因复杂度而退化）。 */
+  private mergesG1G3(change: ChangeStatus): boolean {
+    return change.flowPlan?.route === 'standard'
+  }
+
+  private flowRouteLabel(route: FlowRoute): string {
+    switch (route) {
+      case 'fast':
+        return 'fast（检查通过后自动放行）'
+      case 'standard':
+        return 'standard（合并 G1+G3 一次确认）'
+      default:
+        return 'full（全流程人工门）'
+    }
   }
 
   private async buildGateContext(change: ChangeStatus, gate: GateId): Promise<GateCheckContext> {
@@ -1334,32 +1396,105 @@ export class FlowEngine {
       }
     }
     const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
-    // 低复杂度快车道：G1 检查通过后不等人，自动进入 S2（T2.8）。
-    if (gate === 'G1' && level.mergedGates) {
+    const fastFlow = this.isFastFlow(change)
+    const mergedFlow = level.mergedGates || this.mergesG1G3(change)
+    // 低复杂度快车道 / standard 合并确认 / fast 自动流程：G1 检查通过后不等人，自动进入 S2。
+    if (gate === 'G1' && mergedFlow) {
       change.gates.G1 = {
         ...(change.gates.G1 ?? { state: 'passed', attempts: 0 }),
         state: 'passed',
         items: result.items,
         submittedAt: now,
         passedAt: now,
+        ...(fastFlow ? { approvedAt: now, approvedBy: 'auto' as const } : {}),
         attempts: (change.gates.G1?.attempts ?? 0) + 1,
       }
       Object.assign(change, enterStage(change, stageAfterGate('G1') ?? change.stage, now))
-      await this.appendLedger('gate.passed', { changeId: change.id, gate: 'G1', auto: true, merged: true })
+      await this.appendLedger('gate.passed', {
+        changeId: change.id,
+        gate: 'G1',
+        auto: true,
+        merged: !fastFlow,
+        ...(fastFlow ? { flowRoute: 'fast' } : {}),
+      })
       await this.appendLedger('stage.entered', { changeId: change.id, stage: change.stage })
       await this.saveChange(change)
-      this.pushNotice('G1 检查通过（低复杂度快车道）：自动进入 S2，G1 与 G3 将在方案确认卡一起获批。')
+      this.pushNotice(
+        fastFlow
+          ? 'G1 检查通过（fast 自动流程）：自动进入 S2。'
+          : 'G1 检查通过（低复杂度快车道）：自动进入 S2，G1 与 G3 将在方案确认卡一起获批。',
+      )
       return {
         gate,
         passed: true,
         items: result.items,
         failures: [],
         stage: change.stage,
-        message: 'G1 检查通过（低复杂度快车道，自动进入 S2）。',
+        message: fastFlow ? 'G1 检查通过（fast 自动流程，自动进入 S2）。' : 'G1 检查通过（低复杂度快车道，自动进入 S2）。',
       }
     }
     const human = isHumanGate(gate)
-    const merged = gate === 'G3' && level.mergedGates
+    const merged = gate === 'G3' && mergedFlow
+
+    // fast 自动流程：G3 检查通过 → 自动批准并进入 S4（不再生成授权卡片）。
+    if (gate === 'G3' && fastFlow) {
+      change.gates.G3 = {
+        ...(change.gates.G3 ?? { state: 'passed', attempts: 0 }),
+        state: 'passed',
+        items: result.items,
+        submittedAt: now,
+        passedAt: now,
+        approvedAt: now,
+        approvedBy: 'auto',
+        attempts: (change.gates.G3?.attempts ?? 0) + 1,
+      }
+      await this.appendLedger('gate.approved', { changeId: change.id, gate: 'G3', auto: true, flowRoute: 'fast' })
+      // 和人工批准保持一致：冻结产物，之后直接改已批准产物会被守卫拒绝。
+      await this.reloadArtifacts()
+      const frozenKeys = store.freezeArtifacts(change, this.artifacts, now)
+      if (frozenKeys.length > 0) {
+        await this.appendLedger('artifacts.frozen', { changeId: change.id, gate: 'G3', keys: frozenKeys })
+      }
+      Object.assign(change, enterStage(change, stageAfterGate('G3') ?? change.stage, now))
+      await this.appendLedger('stage.entered', { changeId: change.id, stage: change.stage })
+      if (change.stage === 'S4') await this.onEnterS4(change)
+      await this.saveChange(change)
+      this.pushNotice(`G3 检查通过（fast 自动流程）：已自动批准并进入 S4，按执行图开始任务。`)
+      return {
+        gate,
+        passed: true,
+        items: result.items,
+        failures: [],
+        stage: change.stage,
+        message: 'G3 检查通过（fast 自动流程，已自动批准，进入 S4）。',
+      }
+    }
+
+    // fast 自动流程：G6 检查通过 → 自动交付归档（不再等人）。
+    if (gate === 'G6' && fastFlow) {
+      change.gates.G6 = {
+        ...(change.gates.G6 ?? { state: 'passed', attempts: 0 }),
+        state: 'passed',
+        items: result.items,
+        submittedAt: now,
+        passedAt: now,
+        approvedAt: now,
+        approvedBy: 'auto',
+        attempts: (change.gates.G6?.attempts ?? 0) + 1,
+      }
+      await this.appendLedger('gate.approved', { changeId: change.id, gate: 'G6', auto: true, flowRoute: 'fast' })
+      Object.assign(change, enterStage(change, stageAfterGate('G6') ?? 'archived', now))
+      await this.archiveChange(change)
+      await this.saveChange(change)
+      return {
+        gate,
+        passed: true,
+        items: result.items,
+        failures: [],
+        stage: change.stage,
+        message: 'G6 检查通过（fast 自动流程）：已自动交付并归档。',
+      }
+    }
     if (human || merged) {
       Object.assign(change, applyGateAwaiting(change, gate, now))
       change.gates[gate] = {
@@ -1439,13 +1574,13 @@ export class FlowEngine {
 
     const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
     // T2.8 验收 #3：低复杂度 · 高风险的方案确认卡要逐项确认风险与回滚方案。
-    if (gate === 'G3' && level.mergedGates && change.risk === 'high' && options.confirmRisks !== true) {
+    if (gate === 'G3' && (level.mergedGates || this.mergesG1G3(change)) && change.risk === 'high' && options.confirmRisks !== true) {
       throw new FlowGateError(
         '低复杂度 · 高风险的方案确认卡需要逐项确认风险和回滚方案',
         '请在授权卡片上点「确认并推进」，逐项确认风险与回滚方案',
       )
     }
-    const approveG1Too = gate === 'G3' && level.mergedGates && change.gates.G1?.state === 'passed'
+    const approveG1Too = gate === 'G3' && (level.mergedGates || this.mergesG1G3(change)) && change.gates.G1?.state === 'passed'
     Object.assign(change, applyGateApproved(change, gate, now))
     change.gates[gate] = {
       ...(change.gates[gate] ?? { state: 'passed', attempts: 0 }),
@@ -1478,7 +1613,7 @@ export class FlowEngine {
       }
     }
     await this.saveChange(change)
-    this.pushNotice(`负责人已批准 ${gate}${approveG1Too ? '（同时批准 G1）' : ''}，当前阶段 ${change.stage}。`)
+    this.pushNotice(`负责人已批准 ${gate}${approveG1Too ? '（同时批准 G1，standard 合并确认）' : ''}，当前阶段 ${change.stage}。`)
     return {
       gate,
       passed: true,
@@ -1487,6 +1622,54 @@ export class FlowEngine {
       stage: change.stage,
       message: `已批准 ${gate}${approveG1Too ? '（与 G1 合并确认）' : ''}，进入 ${change.stage}。`,
     }
+  }
+
+  /**
+   * 负责人覆盖自动流程路由（v0.5）：/flow route <full|standard|fast> <理由>。
+   *
+   * auto-review 给出的是建议；负责人始终可以强制切换，但 fast 仍受“低复杂度 + 普通风险”
+   * 的硬约束，避免通过覆盖把高风险需求变成无人确认。
+   */
+  async setFlowRoute(route: FlowRoute, reason: string): Promise<string> {
+    const change = this.requireChange()
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
+    if (!reason.trim()) throw new FlowGateError('切换自动流程路由必须写理由', '用法：/flow route <full|standard|fast> <理由>')
+    if (!['S0', 'S1', 'S2', 'S3'].includes(change.stage)) {
+      throw new FlowGateError('自动流程路由只能在进入执行前调整', '当前已进入 S4/S5/S6；如需更严格流程请暂停后新建变更。')
+    }
+    const awaitingGate = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')?.[0]
+    if (awaitingGate !== undefined) {
+      throw new FlowGateError(`当前等待批准的 ${awaitingGate} 尚未处理`, '先批准或退回当前门，再切换自动流程路由，避免留下过期授权卡片。')
+    }
+    if (route === 'fast' && (change.complexity !== 'low' || change.risk !== 'normal')) {
+      throw new FlowGateError(
+        'fast 自动流程只适用于低复杂度 · 普通风险',
+        '先用 /flow complexity、/flow risk-level 调整等级；复杂或高风险需求请保持 standard/full。',
+      )
+    }
+    if (route === 'standard' && (change.complexity === 'high' || change.complexity === 'ultra' || change.risk === 'high')) {
+      throw new FlowGateError('standard 只适用于低/中复杂度 · 普通风险', '复杂或高风险需求必须走 full（全部人工门）。')
+    }
+    const now = isoNow(this.clock)
+    const previous = change.flowPlan
+    const autoApprove = route === 'fast'
+    change.flowPlan = {
+      route,
+      proposedRoute: previous?.proposedRoute ?? route,
+      autoApprove,
+      proposedAutoApprove: previous?.proposedAutoApprove ?? autoApprove,
+      verdict: 'adjusted',
+      complexity: change.complexity,
+      risk: change.risk,
+      checks: previous?.checks ?? [],
+      reasons: [...(previous?.reasons ?? []), `负责人覆盖路由：${reason}`],
+      assessedAt: now,
+      assessedBy: 'owner-override',
+    }
+    await this.appendLedger('flow.route_override', { changeId: change.id, route, reason, from: previous?.route })
+    await this.saveChange(change)
+    this.pushNotice(`负责人已把自动流程改为 ${this.flowRouteLabel(route)}。`)
+    return `自动流程已改为 ${this.flowRouteLabel(route)}；理由：${reason}。${autoApprove ? '后续 G1/G3/G6 检查通过后将自动通过。' : '仍保留人工确认。'}`
   }
 
   async rejectGate(gate: GateId, reason: string): Promise<GateResult> {
@@ -1945,13 +2128,28 @@ export class FlowEngine {
     }
 
     if (!change) {
-      // Managed project without an active change: protect plugin state and secrets only.
+      // Managed project without an active change: protect plugin state and secrets.
       const target = 'path' in action ? action.path : undefined
       if (target && (isUnder(target, '.flowgate') || isUnder(target, '.git'))) {
         return {
           effect: 'deny',
           rule: { ruleId: 'R-PROTECTED', decision: 'deny', why: 'FlowGate 状态与 git 内部文件不允许 agent 直接写。', unlock: '用 flow_* 工具修改状态。' },
           message: '拒绝：受保护路径（R-PROTECTED）。用 flow_* 工具修改状态。',
+        }
+      }
+      // 接管原则：FlowGate 启用后，任何会改变仓库的动作都必须挂在一个已立项的变更上。
+      // 否则「先改代码、后立项」会绕过阶段门、范围控制、证据链与审查。
+      if (mutatesRepository(action)) {
+        return {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-NO-CHANGE',
+            decision: 'deny',
+            why: 'FlowGate 已启用但当前没有进行中的变更：所有代码/文件/命令改动必须由 FlowGate 接管。',
+            unlock:
+              '先调用 flow_new_change 立项（或在输入框用 /flow new <需求>）：立项前先评估改动规模，在 assessment 里声明 route/autoApprove/clear/acceptance/scope/verify；简单需求可由 auto-review 自动放行。',
+          },
+          message: '拒绝：FlowGate 已启用但未立项（R-NO-CHANGE）。先 flow_new_change 立项，再按阶段推进。',
         }
       }
       return { effect: 'allow', message: '', notes: ['尚未立项：建议用 flow_new_change 立项'] }
@@ -4922,7 +5120,7 @@ export class FlowEngine {
         const text = `[FlowGate] 路线图已批准，但还没有立项变更。下一步：用 flow_new_change({ fromRoadmap: "${first}" }) 立项第一个变更（工程骨架 ${first}）；不要用无 fromRoadmap 的立项绕过路线图。`
         return { text, approxTokens: approx(text) }
       }
-      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更。下一步：用 flow_new_change 立项（负责人用一句话描述需求即可）。`
+      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更：任何改动都必须先立项（R-NO-CHANGE）。下一步：评估这次需求的大小与清晰度，然后调用 flow_new_change({ title, summary, assessment }) 立项。assessment 字段：route=full|standard|fast、autoApprove、clear、goal、acceptance[]、scope[]、verify、reasons[]；宿主 auto-review 会校验并可能调整：复杂/高风险/敏感面 → full；中等 → standard（合并 G1+G3 一次确认）；低复杂度且清晰可验证 → fast（G1/G3/G6 检查通过后自动放行，直到交付归档）。`
       return { text, approxTokens: approx(text) }
     }
     if (change.off) {
@@ -4931,6 +5129,12 @@ export class FlowEngine {
     }
     const lines: string[] = []
     lines.push(`[FlowGate] 变更 ${change.id}「${change.title}」｜阶段 ${change.stage} ${STAGE_LABELS[change.stage] ?? ''}｜${complexityLabel(change.complexity)} · ${riskLabel(change.risk)}`)
+    if (change.flowPlan !== undefined) {
+      const plan = change.flowPlan
+      lines.push(
+        `自动流程：${this.flowRouteLabel(plan.route)}${plan.autoApprove ? ' · 自动放行' : ''}${plan.verdict === 'adjusted' ? '（auto-review 已调整模型建议）' : ''}。`,
+      )
+    }
     if (this.state?.locked) {
       lines.push(`锁定模式：${this.state.locked.reason}。写操作被拒绝，等待负责人在授权卡片上修复。`)
       return { text: lines.join('\n'), approxTokens: approx(lines.join('\n')) }
@@ -5008,6 +5212,16 @@ export class FlowEngine {
       risk: change?.risk,
       stage: change?.stage,
       lifecycle: change?.lifecycle,
+      ...(change?.flowPlan !== undefined
+        ? {
+            flowPlan: {
+              route: change.flowPlan.route,
+              autoApprove: change.flowPlan.autoApprove,
+              verdict: change.flowPlan.verdict,
+              reasons: change.flowPlan.reasons.slice(-5),
+            },
+          }
+        : {}),
       awaitingGate,
       pendingGate: change ? gateForStage(change.stage) ?? undefined : undefined,
       pipeline,

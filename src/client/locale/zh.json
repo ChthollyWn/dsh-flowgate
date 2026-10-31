@@ -486,5 +486,7 @@
   "viz.railAria": "七阶段轨道",
   "viz.railNodeAria": "{stage} {label}：{status}",
   "viz.stageDetail": "{idx} {stage} · 阶段详情",
-  "viz.youAreHere": "你在这里"
+  "viz.youAreHere": "你在这里",
+  "dock.flowRoute": "自动流程 · {route}",
+  "panel.flowRoute": "自动流程 · {route}"
 }

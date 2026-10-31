@@ -256,6 +256,19 @@ function coerceSnapshot(raw: unknown): RuntimeSnapshot | null {
     risk: raw.risk as RiskLevel | undefined,
     stage: typeof raw.stage === 'string' ? (normalizeStage(raw.stage) as StageId) : undefined,
     lifecycle: raw.lifecycle as Lifecycle | undefined,
+    ...(isRecord(raw.flowPlan) &&
+    (raw.flowPlan.route === 'full' || raw.flowPlan.route === 'standard' || raw.flowPlan.route === 'fast')
+      ? {
+          flowPlan: {
+            route: raw.flowPlan.route,
+            autoApprove: raw.flowPlan.autoApprove === true,
+            verdict: raw.flowPlan.verdict === 'adjusted' ? ('adjusted' as const) : ('approved' as const),
+            reasons: Array.isArray(raw.flowPlan.reasons)
+              ? raw.flowPlan.reasons.filter((item): item is string => typeof item === 'string')
+              : [],
+          },
+        }
+      : {}),
     awaitingGate:
       typeof raw.awaitingGate === 'string' ? (raw.awaitingGate as unknown as RuntimeSnapshot['awaitingGate']) : undefined,
     pendingGate:
@@ -436,6 +449,8 @@ export interface DockModel {
   changeId?: string
   stage?: string
   awaitingGate?: string
+  /** v0.5 自动流程路由摘要（fast/standard/full + 是否自动放行）。 */
+  flowPlan?: NonNullable<RuntimeSnapshot['flowPlan']>
   /** Seven stages, never empty (placeholders while FlowGate is not enabled). */
   nodes: StageNodeModel[]
   progress: { done: number; total: number }
@@ -882,6 +897,7 @@ export function buildDockModel(proj: FlowgateProjection | null, t: TFn): DockMod
     changeId: snapshot?.changeId,
     stage,
     awaitingGate: snapshot?.awaitingGate,
+    flowPlan: snapshot?.flowPlan,
     nodes,
     progress: { done, total: nodes.length },
     next,
@@ -1032,6 +1048,8 @@ export interface PanelModel {
   lifecycle?: string
   /** Input-dock state (also drives the panel header rail). */
   flowState: DockState
+  /** v0.5 自动流程路由摘要；旧宿主/旧记录为 undefined。 */
+  flowPlan?: NonNullable<RuntimeSnapshot['flowPlan']>
   pipeline: StageNodeModel[]
   roadmap?: RoadmapSummary
   gate: GateModel
@@ -1621,6 +1639,7 @@ export function buildPanelModel(proj: FlowgateProjection | null, t: TFn): PanelM
     stage: snapshot?.stage !== undefined ? normalizeStage(snapshot.stage) : undefined,
     lifecycle: snapshot?.lifecycle,
     flowState: dockStateOf(snapshot),
+    flowPlan: snapshot?.flowPlan,
     pipeline: buildPipelineNodes(snapshot, t),
     roadmap: panel.roadmap,
     gate: buildGateModel(proj, t),

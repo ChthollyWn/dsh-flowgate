@@ -17,7 +17,6 @@ interface FlowgateProjection {
   snapshot: RuntimeSnapshot
   /** 面板补充数据（可选；没有时面板按 snapshot 降级显示） */
   panel?: PanelExtras
-  /** 学习模式；默认 'detail' */
   /** 单调递增的修订号，客户端用它做变更检测/重渲染 */
   revision: number
   /** 生成时间 ISO */
@@ -31,7 +30,13 @@ interface FlowgateProjection {
 }
 ```
 
-### 1.1 上下文占用（contextPct，可选）
+### 1.1 自动流程摘要（v0.5，可选）
+
+`snapshot.flowPlan?: { route: 'full' | 'standard' | 'fast'; autoApprove: boolean; verdict: 'approved' | 'adjusted'; reasons: string[] }`
+
+仅当变更创建时提交了 `assessment`（或负责人用 `/flow route` 覆盖）才出现；旧客户端 / 旧投影记录忽略即可。服务端以 `status.json` 的 `change.flowPlan` 为准，账本另有 `flow.assessed` / `flow.route_override`。
+
+### 1.2 上下文占用（contextPct，可选）
 
 host 从 DSH `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影读取：
 `sessionProjections.snapshot(session, ['contextPressure'])` 的 wire 值

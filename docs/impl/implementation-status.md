@@ -375,6 +375,24 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 **验证**：`pnpm lint` 绿；`npx vitest run` **117 files / 1669 tests**；coverage 86.31/76.23/86.88/89.37（阈值通过）；build（host 1.21MB / client 381.4KB）；verify:package 39 文件/1062.5KB；verify:client 18 插槽通过。真实 DSH Web 宿主（隔离 DSH_HOME、零模型请求）E2E **14/14**：10 tab；面板 0 个 `learning-mode` 锚点、header 无“学习模式”；Pipeline 无 `stage-card`/`glossary`，保留 `flow-map`/artifact chips/live-checks/next-step callout；`/flow help` 无 learn；`/flow learn brief` 报未知子命令；旧配置 `learning: brief` 仍可加载；0 pageerror/0 console.error/0 模型请求。截图 [37-panel-pipeline-v04](../screenshots/37-panel-pipeline-v04.png)。
 
+## 3.16 v0.5：自动流程接管 + auto-review（2026-11-01）
+
+负责人指令：启用后所有修改由 FlowGate 接管；模型在流程开始前智能判断改动大小并自动调整流程；设计 auto-review 决定是否需要人工确认、是否缩减合并流程。
+
+| 方向 | 实现 | 证据 |
+|---|---|---|
+| 接管 | `R-NO-CHANGE`：未立项时拒绝写/mutating shell/委派；只读与 `flow_*` 放行 | `src/core/engine.ts` evaluateAction + `src/core/rules/evaluate.ts#mutatesRepository`；`test/integration/engine.test.ts` |
+| 路由自评 | `flow_new_change.assessment`（route/autoApprove/clear/goal/acceptance/scope/verify/risks/reasons） | `src/host/tools/definitions.ts` |
+| auto-review | 确定性复核：高风险/high·ultra/敏感面→full；fast 只允许低复杂度且 clear+≥2 验收+合法 verify+1–5 scope；standard/full 强制 autoApprove=false | `src/core/flow/routing.ts`、`test/core/flow/routing.test.ts` |
+| 路由执行 | standard 合并 G1+G3；fast 的 G1/G3/G6 检查通过后自动通过（G3 冻结产物、G6 自动归档） | `test/integration/engine-auto-flow.test.ts` |
+| 覆盖/审计 | `/flow route`（owner-override）；账本 `flow.assessed` / `flow.route_override` / `gate.approved(auto)`；快照 `flowPlan` | `src/host/commands/index.ts`、`src/core/engine.ts` |
+| UI | dock/面板自动流程徽标（`data-flowgate="dock-flow-route"` / `"panel-flow-route"`） | `src/client/dock/StatusBar.tsx`、`src/client/panel/Panel.tsx`、`test/client/*` |
+| 文档 | `docs/impl/auto-flow.md`、需求 FR-4.13/FR-8.7、技术方案 §12.6、README/CHANGELOG | — |
+
+**限制**：真正的「跳过 S1–S3 直接开发」（direct 模式）未启用；fast 仍执行全部门禁检查，只省人工等待，以保证证据链与 G5/G6 可验证性（见 auto-flow §8）。auto-review 是确定性策略，不替代第二模型审查；负责人 `/flow route` 可一票否决。
+
+**验证**：`pnpm lint` 绿；`npx vitest run` **119 files / 1687 tests**（含 auto-review 8 类规则、fast 自动 G1→S4→归档、standard 合并确认、负责人覆盖/边界、接管守卫）；coverage 86.18/76.23/86.88/89.27；build（host 1.23MB / client 369.4KB）；verify:package 39 文件/1079.2KB；verify:client 18 插槽通过。真机零模型 E2E：自动流程徽标 7/7（dock+面板 `data-route=fast`）+ v0.4 回归 14/14，0 pageerror/0 console.error/0 模型请求；截图 [38-panel-auto-flow-v05](../screenshots/38-panel-auto-flow-v05.png)。
+
 ## 4. 剩余项（第六轮复验后，四分）
 
 > 第六轮独立复验确认第五轮"功能缺口全部闭环"结论不成立：7 项 P1 接线缺口已在 §3.12 修复；

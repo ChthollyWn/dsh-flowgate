@@ -486,5 +486,7 @@
   "viz.railAria": "Seven-stage rail",
   "viz.railNodeAria": "{stage} {label}: {status}",
   "viz.stageDetail": "{idx} {stage} · stage detail",
-  "viz.youAreHere": "You are here"
+  "viz.youAreHere": "You are here",
+  "dock.flowRoute": "Auto flow · {route}",
+  "panel.flowRoute": "Auto flow · {route}"
 }

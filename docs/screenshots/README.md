@@ -1,7 +1,7 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
 采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）；2026-11-01 00:16 追加"v0.2 图形化流程 + 卡片化授权 E2E"一轮（30–33 号，见下方分节）；2026-11-01 01:38 追加"v0.3 子代理拓扑 / 后台任务视图"一轮（34–36 号，见下方分节）。
-当前共 **33 张 PNG**（编号 01–10、12–26、30–37；11 与 27–29 号不存在）。
+当前共 **34 张 PNG**（编号 01–10、12–26、30–38；11 与 27–29 号不存在）。
 
 > **2026-11-01 v0.4**：学习模式已移除（面板不再有学习模式选择器/阶段学习卡/术语表，`/flow learn` 命令与 `learning` 配置/投影字段下线）。03/17/33 等历史截图里的学习模式与阶段卡保留为历史记录。环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
 复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
@@ -81,6 +81,16 @@
 | [37-panel-pipeline-v04.png](37-panel-pipeline-v04.png) | v0.4 面板 Pipeline：**面板头已无学习模式选择器**；图形流程页保留 hero/flow-map/产物 chips/实时检查项/下一步 callout；**不再渲染阶段学习卡与术语表** |
 
 本轮真实宿主断言 **14/14 PASS**：10 tab；面板 `[data-flowgate="learning-mode"]` count 0 且 header 文案无「学习模式」；Pipeline 无 `stage-card`/`glossary`，有 `flow-map`（14 个 artifact chips）与 next-step callout；`/flow help` 不含 learn；`/flow learn brief` 返回「未知子命令：learn」；旧 `.flowgate/config.yaml` 追加 `learning: brief` 后宿主重载仍正常；0 pageerror / 0 console.error / 0 模型请求。证据 `/tmp/fg-v2/v04-e2e.json`、脚本 `/tmp/fg-v04-e2e.cjs`。历史截图 03/17/33 等仍含学习模式/阶段卡，保留为历史记录。
+
+### 2026-11-01 追加（v0.5 自动流程徽标：真实 Web 宿主验证）
+
+采集时间 2026-11-01 02:31（Asia/Shanghai）。环境同上（隔离 `DSH_HOME=/tmp/fg-v2/dsh-home`、`flowgate-dev` profile、Playwright + 系统 Chrome、1600×1000）。构建：v0.5 自动流程，`lib/client.js` sha256 `baf51e8c…`、`lib/host.js` sha256 `ca4f7828…`。**零模型请求**。
+
+| 截图 | 内容 |
+|---|---|
+| [38-panel-auto-flow-v05.png](38-panel-auto-flow-v05.png) | v0.5 自动流程：面板头部 + 输入区 dock 显示「自动流程 · fast」中性徽标（`data-route="fast"`、`data-auto="true"`）；由 `/flow new`（低复杂度）+ `/flow route fast 理由` 产生，无人工门卡片 |
+
+本轮真实宿主断言 **7/7 PASS**：`/flow help` 列出 `/flow route`；变更创建成功；路由覆盖成功；dock `dock-flow-route` 与面板 `panel-flow-route` 均为 fast/auto；pipeline 正常；0 pageerror / 0 console.error / 0 模型请求。另跑 v0.4 回归 E2E **14/14 PASS**。证据 `/tmp/fg-v2/v05-e2e.json`、脚本 `/tmp/fg-v05-badge-e2e.cjs`。
 
 ## 说明
 

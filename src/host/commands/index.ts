@@ -11,7 +11,7 @@ import type { DshAgent, DshCommandDefinition, DshCommandRuntime, DshContext } fr
 import type { EngineLike } from '../types.js'
 import type { HostRuntime } from '../runtime.js'
 import { openLocalPath } from '../open.js'
-import type { Complexity, GateId, PendingItem, RiskLevel } from '../../core/types.js'
+import type { Complexity, FlowRoute, GateId, PendingItem, RiskLevel } from '../../core/types.js'
 import { HostError, describeError, toAgentError } from '../errors.js'
 import { approveHumanGate, confirmCardText, rejectCurrentGate } from '../gates/index.js'
 import { formatDoctorReport, runRepair } from '../doctor/index.js'
@@ -56,6 +56,7 @@ export const FLOW_COMMAND_HELP = [
   '/flow rework <defect|requirement|unknown> [任务id...] <理由> — 返工声明：按类型失效回执与审查',
   '/flow review waive <RV-n> <理由> — 负责人豁免误报的审查 findings（写账本）',
   '/flow exception add <规则id> <路径模式|-> <理由> | revoke <EX-n> [理由] | list — 规则例外管理',
+  '/flow route <full|standard|fast> <理由> — 覆盖自动流程路由（auto-review 建议；负责人可强制切换）',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
   '/flow risk-level <普通|高> [理由] — 改风险等级',
   '/flow metrics [--csv] — 指标',
@@ -141,6 +142,8 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
       return reviewCommand(runtime, args)
     case 'unblock':
       return unblockCommand(runtime, args)
+    case 'route':
+      return routeCommand(runtime, args)
     case 'complexity':
       return complexityCommand(runtime, rest)
     case 'risk-level':
@@ -580,6 +583,18 @@ async function riskCommand(runtime: HostRuntime, rest: string): Promise<string> 
   const result = await engine.changeRiskLevel(level, reason === '' ? undefined : reason)
   runtime.emit()
   return result.message || `风险等级已改为 ${level}。`
+}
+
+async function routeCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const route = (args[0] ?? '').toLowerCase()
+  if (route !== 'full' && route !== 'standard' && route !== 'fast') {
+    throw new HostError('用法：/flow route <full|standard|fast> <理由>', 'full=全流程人工门；standard=合并 G1+G3 一次确认；fast=检查通过后自动放行')
+  }
+  const reason = args.slice(1).join(' ').trim()
+  const engine = await engineFor(runtime)
+  const text = await engine.setFlowRoute(route as FlowRoute, reason)
+  runtime.emit()
+  return text
 }
 
 async function parallelCommand(runtime: HostRuntime, args: string[]): Promise<string> {

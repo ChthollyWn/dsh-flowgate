@@ -121,6 +121,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 | `/flow handoff` | 立即生成交接摘要，准备开新会话 |
 | `/flow board` | 打开跨会话看板 `dashboard.html` |
 | `/flow parallel <数量>` | 调整并行上限（只影响之后启动的批次） |
+| `/flow route <full\|standard\|fast> <理由>` | 负责人覆盖自动流程路由（auto-review 建议；fast 仍受低复杂度·普通风险硬约束） |
 | `/flow allow-once <规则 id 或 last> <理由>` | 单次放行（`OV-n`，只放行下一次匹配的动作） |
 | `/flow scope approve\|reject <SC-n> [理由]` | 处理范围变更申请 |
 | `/flow risk approve\|reject <RK-n> [理由]` | 处理风险接管项 |
@@ -222,6 +223,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 专项单测（并行槽位补位、检查点修复任务与重试、`run: main` 路由、行级读取覆盖、同 diff 去重、终审三份结论、检查点任务验证+全量测试）；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
 | 图形化流程可视化（输入区 dock / 面板流程页 / 会话内工具轨道） | ✅ 2026-11-01 v0.2：输入区 dock 改为七阶段动画轨道 + 下一步 chip + 图形化状态卡（demo/locked/off/idle/active/awaiting/pending/blocked 8 态）；右侧栏新增 `panel-rail` 与图形流程页（hero 进度环、纵向时间线、人工/自动门徽标、「你在这里」、下一步 callout、默认折叠的学习卡）；会话内每个 `flow_*` 工具调用渲染迷你七阶段轨道；动画只动 transform/opacity/stroke，遵守 `prefers-reduced-motion`；**卡片与面板统一使用 DSH 原生 `--dsw-*` 设计 token，授权卡与原生 plan 审批卡同构（warn strip + 白卡 + 黑白主按钮/outline），宽度严格对齐 `--dsh-chat-content-width`（真实宿主实测 dock/授权卡 844.8px，±0px）**；真实宿主截图见 [docs/screenshots](docs/screenshots/README.md) |
 | 卡片优先交互（点击即授权 + 原生提问卡片） | ✅ 2026-11-01 v0.2：人工门 / 待处理项（SC·RK·PC·RL·TM·CF·BL）/ 非 agent 改动确认 / 启用 / 修复全部为可点击授权卡；点击经 `ctx.remote.commands.execute` 直接执行等价命令（`sessions.binding().session.command` 兜底），**输入框不再被填入命令**；FlowGate preset 组合原生 `ask_user_question`，澄清与选择走提问卡片；host/core 中面向用户的 `/flow` 提示已清理为卡片导向（仅保留 help / 用法错误 / doctor 诊断）；真实宿主点击流程见 [docs/screenshots](docs/screenshots/README.md) |
+| FlowGate 全量接管 + 自动流程路由 + auto-review | ✅ 2026-11-01 v0.5：项目启用后无进行中变更时，写文件/mutating shell 一律被 `R-NO-CHANGE` 拒绝（只读与 `flow_*` 放行），所有改动必须先立项；模型在 `flow_new_change` 的 `assessment` 里自评规模/清晰度并建议 `route`：`full`（全流程人工门）/`standard`（合并 G1+G3 一次确认）/`fast`（低复杂度且清晰可验证，G1/G3/G6 检查通过后自动放行直到交付归档）。宿主确定性 auto-review 独立校验：高风险/复杂/敏感面强制 full；fast 要求 clear + ≥2 验收 + 合法 verify + 1–5 条 scope；负责人可用 `/flow route ...` 覆盖。审计事件 `flow.assessed` / `flow.route_override`；dock/面板显示自动流程徽标 |
 | 学习模式 / 阶段学习卡（已移除） | 🗑 2026-11-01 v0.4 按负责人要求移除：面板头部的学习模式选择器、阶段学习卡（做什么/为什么/方法来源/反模式/正反例）、术语表，`/flow learn` 命令、`learning` 配置与投影字段一并下线；旧 `.flowgate/config.yaml` 里遗留的 `learning:` 键加载时忽略；保留实时门禁检查项与产物 chips。 |
 | 运行可视化：子代理拓扑（工作流图 / 树）+ 后台任务清单 | ✅ 2026-11-01 v0.3：面板新增「子代理」「后台」两个视图。子代理视图读取 DSH 原生 `subagentCatalog` 会话投影 + 实时 running 状态，并与 FlowGate 任务/批次/worktree 关联，提供**工作流图（自上而下，560/719px 侧栏实测 0 横向溢出）/ 树**双模式；后台任务视图复用 DSH 原生 `ctx.jobs` 服务，展示状态、**退出码**、耗时、**实时输出**（展开流式观察）与**两段式强制终止**；样式全部 `--dsw-*` 原生 token/中性色。限制：真机 populated 需模型运行，本轮真实宿主只验证空态/组合（22/22），populated 截图为组件级假数据（34–36）。 |
 | 右侧栏 10 视图面板（台账/流程/门禁/任务/子代理/后台/追溯/风险/拦截/指标） | ✅ 已在真实 DSH Web 宿主走查：10 视图、会话内切换工程模式 preset、面板审批、待处理项处理、例外列表/撤销、非 agent 改动确认；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；GREEN 过期按输入哈希显示；执行图节点可点击并展开任务详情（scope/验证组/covers）；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），并标注精确判定以宿主实际拦截为准；拦截视图误判反馈仍为组件级验证 |
@@ -236,6 +238,8 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 **v0.3（2026-11-01，运行可视化：子代理拓扑 + 后台任务）：** `pnpm lint` / `npx vitest run`（**118 文件 / 1683 用例**）/ `pnpm coverage`（86.39 / 76.25 / 86.93 / 89.47，阈值通过）/ `pnpm build`（host 1.21MB / client 411.6KB）/ `verify:package` / `verify:client` 全绿；真实 DSH Web 宿主零模型 smoke **22/22**（10 tab、新视图空态、旧视图/授权卡无回归、0 pageerror/console.error/模型请求）；子代理工作流图在 560px / 719px 侧栏 **0 横向溢出**（508/508、667/667）。真机 populated 需模型，34–36 为组件级证据（已如实标注）。
 
 **v0.4（2026-11-01，移除学习模式）：** `pnpm lint` / `npx vitest run`（**117 文件 / 1669 用例**）/ `pnpm coverage`（86.31 / 76.23 / 86.88 / 89.37，阈值通过）/ `pnpm build`（host 1.21MB / client 381.4KB）/ `verify:package`（39 文件 / 1062.5KB）/ `verify:client` 全绿；真实 DSH Web 宿主零模型 E2E **14/14**（面板无 learning-mode 锚点、Pipeline 无 stage-card/glossary/术语表、`/flow help` 无 learn、`/flow learn` 报未知子命令、旧 config learning 键可加载、0 pageerror/console.error/模型请求）；面板不再渲染学习模式选择器/阶段学习卡/术语表，`/flow learn` 作为未知子命令报错，旧配置的 `learning:` 键被忽略；图形流程页保留实时检查项、产物 chips 与下一步 callout。
+
+**v0.5（2026-11-01，自动流程接管 + auto-review）：** `R-NO-CHANGE` 接管未立项写入；`flow_new_change.assessment` 自评 + 宿主 auto-review 决定 full/standard/fast；fast 路由 G1/G3/G6 检查通过后自动通过并交付归档，standard 合并 G1+G3 一次人工确认；新增 `/flow route` 负责人覆盖。验证：`pnpm lint` 绿；`npx vitest run`（119 文件 / 1687 用例，含 auto-review 8 类规则 + fast/standard 状态机集成）；coverage 86.18 / 76.23 / 86.88 / 89.27（阈值通过）；build（host 1.23MB / client 369.4KB）；verify:package（39 文件 / 1079.2KB）/ verify:client 全绿；真机零模型 E2E：自动流程徽标 7/7（dock + 面板 `data-route=fast`）+ v0.4 回归 14/14，0 pageerror/console.error/模型请求（见 docs/impl/auto-flow.md）。
 
 ## 界面
 
@@ -255,9 +259,11 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 
 > 34–36 为**组件级 populated 证据**（真实组件 + 真实 `--dsw-*` token CSS + 假数据；零模型请求下真机无法产生子代理/后台 job），真实宿主空态与组合另有 22/22 断言证据；树模式见 [35-panel-subagents-tree.png](docs/screenshots/35-panel-subagents-tree.png)。说明与限制见 [docs/screenshots/README.md](docs/screenshots/README.md) 与 [docs/impl/runtime-visualization.md](docs/impl/runtime-visualization.md)。
 
-| v0.4：移除学习模式后的面板（无选择器/阶段卡/术语表） | 历史：v0.2 面板（含学习模式） |
+| v0.5：自动流程徽标（dock + 面板） | v0.4：移除学习模式后的面板（无选择器/阶段卡/术语表） |
 |---|---|
-| ![v0.4 panel](docs/screenshots/37-panel-pipeline-v04.png) | ![v0.2 panel](docs/screenshots/33-panel-flow-map.png) |
+| ![v0.5 auto-flow](docs/screenshots/38-panel-auto-flow-v05.png) | ![v0.4 panel](docs/screenshots/37-panel-pipeline-v04.png) |
+
+> v0.2 面板历史截图：![v0.2 panel](docs/screenshots/33-panel-flow-map.png)
 
 旧版文字状态条与 8 视图面板的历史截图保留在 [docs/screenshots](docs/screenshots/README.md)（01–26 号）。
 

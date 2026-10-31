@@ -243,7 +243,7 @@ describe('engine.load — 损坏 status.json 进入锁定模式（03 §14）', (
 // ---------------------------------------------------------------------------
 
 describe('engine.repair — 状态损坏后的恢复', () => {
-  it('从账本快照重建 status.json 后解锁、写操作恢复', async () => {
+  it('从账本快照重建 status.json 后解锁：写操作改由 FlowGate 接管', async () => {
     const h = makeHarness()
     const changeId = await setupCorruptedChange(h)
     const locked = reload(h, 'session-corruption-repair')
@@ -261,10 +261,11 @@ describe('engine.repair — 状态损坏后的恢复', () => {
     expect(restored?.title).toBe('状态损坏演练')
 
     expect(locked.snapshot().locked).toBe(false)
-    // 解锁后普通源码写恢复放行（已无进行中的变更时也允许，且不再 R-LOCKED）。
+    // v0.5 接管：解锁后不再 R-LOCKED，但没有进行中的变更时普通源码写被 R-NO-CHANGE 接管。
     const decision = await locked.evaluateAction(WRITE_SRC, CALLER)
     expect(decision.message).not.toContain('R-LOCKED')
-    expect(decision.effect).toBe('allow')
+    expect(decision.effect).toBe('deny')
+    expect(decision.rule?.ruleId).toBe('R-NO-CHANGE')
 
     // 新引擎重新加载也不会回到锁定。
     const reloaded = reload(h, 'session-corruption-after-repair')

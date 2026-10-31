@@ -57,6 +57,18 @@ function count(html: string, pattern: RegExp): number {
 }
 
 describe('dock DOM contract', () => {
+  it('renders the auto-flow route chip from snapshot.flowPlan', () => {
+    const projection = makeProjection({
+      snapshot: {
+        flowPlan: { route: 'fast', autoApprove: true, verdict: 'approved', reasons: ['需求清晰'] },
+      },
+    })
+    const html = render(projection)
+    expect(html).toContain('data-flowgate="dock-flow-route"')
+    expect(html).toContain('data-route="fast"')
+    expect(html).toContain('自动流程 · fast')
+  })
+
   it('renders the root, seven-node rail and next-step chip with data-* anchors', () => {
     const html = render(makeActiveProjection())
     expect(html).toContain('data-flowgate="flow-dock"')

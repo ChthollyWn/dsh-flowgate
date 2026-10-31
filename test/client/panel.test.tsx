@@ -65,6 +65,18 @@ describe('panel surface', () => {
     expect(html).not.toContain('Learning mode')
   })
 
+  it('shows the auto-flow route badge from snapshot.flowPlan', () => {
+    const projection = makeProjection({
+      snapshot: {
+        flowPlan: { route: 'fast', autoApprove: true, verdict: 'approved', reasons: ['需求清晰、范围小'] },
+      },
+    })
+    const html = renderSurface('pipeline', buildPanelModel(projection, zh))
+    expect(html).toContain('data-flowgate="panel-flow-route"')
+    expect(html).toContain('data-route="fast"')
+    expect(html).toContain('自动流程 · fast')
+  })
+
   it('shows the not-enabled banner and empty states for an uninitialized project', () => {
     const html = renderSurface('ledger', buildPanelModel(makeEmptyProjection(), zh))
     expect(html).toContain('data-flowgate="panel-demo"')

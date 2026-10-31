@@ -313,6 +313,18 @@ export function DockView({ model, t, onAction, onOpen, busy = false, notice }: D
             {...(openPanel !== undefined ? { onSelectStage: () => openPanel() } : {})}
           />
           <span style={{ flex: '1 1 auto', minWidth: 4 }} />
+          {model.flowPlan !== undefined ? (
+            <span
+              data-flowgate="dock-flow-route"
+              data-route={model.flowPlan.route}
+              data-auto={model.flowPlan.autoApprove ? 'true' : 'false'}
+              data-verdict={model.flowPlan.verdict}
+              className="fg-dock-route"
+              title={model.flowPlan.reasons.join('\n')}
+            >
+              {t('dock.flowRoute', { route: model.flowPlan.route })}
+            </span>
+          ) : null}
           {model.changeId !== undefined ? (
             <span data-flowgate="dock-change" className="fg-dock-change">
               {model.changeId}

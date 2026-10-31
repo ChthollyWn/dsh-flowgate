@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { flush, setupPlugin, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
-import { executeFlowCommand, parseFlowCommand } from '../../src/host/commands/index.js'
+import { FLOW_COMMAND_HELP, executeFlowCommand, parseFlowCommand } from '../../src/host/commands/index.js'
 
 let harness: PluginHarness | null = null
 
@@ -35,6 +35,14 @@ describe('解析 /flow 命令', () => {
 
   it('verb 大小写不敏感', () => {
     expect(parseFlowCommand('APPROVE G1').verb).toBe('approve')
+  })
+})
+
+describe('/flow route 帮助与解析', () => {
+  it('help 列出 /flow route，解析出 full|standard|fast', () => {
+    expect(FLOW_COMMAND_HELP).toContain('/flow route ')
+    expect(FLOW_COMMAND_HELP).toContain('覆盖自动流程路由')
+    expect(parseFlowCommand('route fast 简单清晰')).toMatchObject({ verb: 'route', args: ['fast', '简单清晰'] })
   })
 })
 

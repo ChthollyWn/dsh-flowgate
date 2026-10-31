@@ -48,6 +48,60 @@ export type BatchMode = 'sequential' | 'parallel'
 export type BatchStatus = 'pending' | 'running' | 'checkpoint' | 'done' | 'failed' | 'blocked'
 export type DispatchMode = 'auto' | 'subagent' | 'inline'
 
+/**
+ * 自动流程路由（v0.5）：由模型在立项时按需求规模/清晰度自评，宿主 auto-review 校验后定稿。
+ *
+ * - full：严格全流程，人工门照旧（复杂/高风险默认）。
+ * - standard：合并 G1+G3 为一次人工确认（中等需求；缩减但不丢人工判断）。
+ * - fast：需求清晰且小，G1/G3/G6 检查通过后自动通过（无人工确认），直到交付自动归档。
+ */
+export type FlowRoute = 'full' | 'standard' | 'fast'
+
+/** 模型在 flow_new_change 里提交的自动流程自评（auto-review 的输入）。 */
+export interface FlowAssessment {
+  /** 建议路由；省略时按复杂度推导（low/medium→standard，high/ultra→full）。 */
+  route?: FlowRoute
+  /** fast 路由下是否允许自动通过 G1/G3/G6（fast 强制为 true；其他路由强制 false）。 */
+  autoApprove?: boolean
+  /** 需求是否已经足够清晰、无需再澄清（fast/direct 的必要条件）。 */
+  clear?: boolean
+  /** 一句话目标（写入流程计划与产物）。 */
+  goal?: string
+  /** 可测量的验收要点（fast 至少 2 条）。 */
+  acceptance?: string[]
+  /** 预计改动范围（仓库相对路径或 glob；fast 至少 1 条、至多 5 条）。 */
+  scope?: string[]
+  /** 任务验证命令（形如 `pnpm test`；fast 必填）。 */
+  verify?: string
+  /** 风险信号（如涉及支付/权限/迁移）；auto-review 会把高风险降级为 full。 */
+  risks?: string[]
+  /** 自评理由，写入流程计划供负责人复核。 */
+  reasons?: string[]
+}
+
+/** auto-review 的单项检查结果。 */
+export interface FlowPlanCheck {
+  id: string
+  label: string
+  passed: boolean
+  detail?: string
+}
+
+/** 定稿的流程计划（变更创建时写入 status.json 与账本）。 */
+export interface FlowPlan {
+  route: FlowRoute
+  proposedRoute: FlowRoute
+  autoApprove: boolean
+  proposedAutoApprove: boolean
+  verdict: 'approved' | 'adjusted'
+  complexity: Complexity
+  risk: RiskLevel
+  checks: FlowPlanCheck[]
+  reasons: string[]
+  assessedAt: string
+  assessedBy: 'auto-review' | 'owner-override'
+}
+
 export type PendingKind =
   | 'risk'
   | 'scope'
@@ -692,6 +746,8 @@ export interface GateRecord {
   approvedAt?: string
   rejectedAt?: string
   rejectedReason?: string
+  /** 人工门由谁批准：owner=负责人；auto=auto-review 按 fast 路由自动通过（有账本记录）。 */
+  approvedBy?: 'owner' | 'auto'
   attempts: number
 }
 
@@ -879,6 +935,8 @@ export interface ChangeStatus {
   originalSnapshots?: { taskId: string; path: string; kind: 'delete' | 'rename'; storedPath: string; at: string }[]
   /** Highest artifact hashes frozen at gate approval. */
   frozen?: Record<string, { hash: string; at: string }>
+  /** 自动流程计划（v0.5）：模型自评 + 宿主 auto-review 的定稿；旧状态没有。 */
+  flowPlan?: FlowPlan
   createdAt: string
   updatedAt: string
 }
@@ -1018,6 +1076,8 @@ export type LedgerEventType =
   | 'lock.released'
   | 'flow.off'
   | 'flow.on'
+  | 'flow.assessed'
+  | 'flow.route_override'
   | 'level.changed'
   | 'clarify.asked'
   | 'clarify.answered'
@@ -1116,6 +1176,8 @@ export interface RuntimeSnapshot {
   risk?: RiskLevel
   stage?: StageId
   lifecycle?: ChangeLifecycle
+  /** 自动流程路由摘要（v0.5）：客户端用于显示「自动流程」徽标。 */
+  flowPlan?: { route: FlowRoute; autoApprove: boolean; verdict: 'approved' | 'adjusted'; reasons: string[] }
   awaitingGate?: HumanGateId
   pendingGate?: GateId
   pipeline: StageProgress[]
@@ -1216,6 +1278,8 @@ export interface NewChangeInput {
   relatedTo?: string
   project?: boolean
   reason?: string
+  /** 模型对本次需求规模/清晰度的自评（auto-review 校验后决定流程路由）。 */
+  assessment?: FlowAssessment
 }
 
 export interface LevelSuggestion {
@@ -1228,6 +1292,8 @@ export interface NewChangeOutcome {
   changeId: string
   suggestion: LevelSuggestion
   awaiting?: 'owner'
+  /** auto-review 定稿的流程计划（仅在提交了 assessment 时返回）。 */
+  flowPlan?: FlowPlan
   message: string
 }
 

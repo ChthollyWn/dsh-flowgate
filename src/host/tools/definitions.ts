@@ -99,7 +99,9 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     defineHostTool({
       name: 'flow_new_change',
       description:
-        '立项：创建新的变更（默认）或分析任务。未立项时使用。会返回建议的复杂度与风险及理由（等级最终由负责人确认）。',
+        '立项：创建新的变更（默认）或分析任务。FlowGate 启用后所有改动都必须先立项。' +
+        '立项前先评估本次需求的大小与清晰度，用 assessment 声明自动流程路由，宿主 auto-review 会校验并可能调整：' +
+        '复杂/高风险/敏感面 → full（人工门）；中等 → standard（合并 G1+G3 一次确认）；低复杂度且清晰可验证 → fast（G1/G3/G6 检查通过后自动通过，直到交付归档）。',
       parameters: {
         title: { type: 'string', required: true, description: '一句话标题，例如「续费回调幂等」' },
         summary: { type: 'string', description: '补充说明：为什么做、影响范围' },
@@ -109,6 +111,22 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         fromRoadmap: { type: 'string', description: '从路线图条目立项，如 "C2"' },
         relatedTo: { type: 'string', description: '关联的分析任务 id，如 "A-001"' },
         project: { type: 'boolean', description: '声明新项目：先做项目级澄清与路线图' },
+        assessment: {
+          type: 'object',
+          description:
+            '本次需求的规模/清晰度自评（auto-review 的输入）。越清晰、范围越小，越可能获得 fast 自动流程；不确定就写 full。',
+          properties: {
+            route: { type: 'string', enum: ['full', 'standard', 'fast'], description: '建议路由；省略时按复杂度推导（low/medium→standard，high/ultra→full）' },
+            autoApprove: { type: 'boolean', description: 'fast 下是否自动通过 G1/G3/G6（fast 强制为 true）' },
+            clear: { type: 'boolean', description: '需求是否已足够清晰、无需再澄清（fast 必要条件）' },
+            goal: { type: 'string', description: '一句话目标（写入流程计划）' },
+            acceptance: { type: 'array', items: { type: 'string' }, description: '可测量的验收要点（fast 至少 2 条）' },
+            scope: { type: 'array', items: { type: 'string' }, description: '预计改动的路径/glob（fast 1–5 条）' },
+            verify: { type: 'string', description: '任务验证命令，如 `pnpm test`（fast 必填）' },
+            risks: { type: 'array', items: { type: 'string' }, description: '风险信号（支付/权限/迁移等）；命中敏感面会被降级为 full' },
+            reasons: { type: 'array', items: { type: 'string' }, description: '自评理由，写入流程计划供负责人复核' },
+          },
+        },
       },
       execute: async (args) => {
         const engine = await requireEngine(runtime)
@@ -120,6 +138,20 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         if (typeof args.fromRoadmap === 'string') input.fromRoadmap = args.fromRoadmap
         if (typeof args.relatedTo === 'string') input.relatedTo = args.relatedTo
         if (args.project === true) input.project = true
+        if (args.assessment !== null && typeof args.assessment === 'object' && !Array.isArray(args.assessment)) {
+          const raw = args.assessment as Record<string, unknown>
+          const assessment: NonNullable<import('../../core/types.js').NewChangeInput['assessment']> = {}
+          if (raw.route === 'full' || raw.route === 'standard' || raw.route === 'fast') assessment.route = raw.route
+          if (typeof raw.autoApprove === 'boolean') assessment.autoApprove = raw.autoApprove
+          if (typeof raw.clear === 'boolean') assessment.clear = raw.clear
+          if (typeof raw.goal === 'string') assessment.goal = raw.goal
+          if (Array.isArray(raw.acceptance)) assessment.acceptance = toStringArray(raw.acceptance)
+          if (Array.isArray(raw.scope)) assessment.scope = toStringArray(raw.scope)
+          if (typeof raw.verify === 'string') assessment.verify = raw.verify
+          if (Array.isArray(raw.risks)) assessment.risks = toStringArray(raw.risks)
+          if (Array.isArray(raw.reasons)) assessment.reasons = toStringArray(raw.reasons)
+          input.assessment = assessment
+        }
         const outcome = await engine.newChange(input)
         runtime.emit()
         const suggestion = outcome.suggestion
@@ -128,8 +160,14 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           lines.push(`建议复杂度：${suggestion.complexity}（${suggestion.reasons.complexity.join('；') || '无'}）`)
           lines.push(`建议风险：${suggestion.risk}（${suggestion.reasons.risk.join('；') || '无'}）`)
         }
+        if (outcome.flowPlan !== undefined) {
+          const plan = outcome.flowPlan
+          lines.push(`自动流程：${plan.route}（${plan.verdict === 'approved' ? 'auto-review 通过模型建议' : 'auto-review 已调整'}；autoApprove=${plan.autoApprove}）`)
+          for (const reason of plan.reasons) lines.push(`- ${reason}`)
+          for (const check of plan.checks.filter((item) => !item.passed)) lines.push(`! ${check.label}：${check.detail ?? ''}`)
+        }
         if (outcome.awaiting === 'owner') lines.push('等级需要负责人确认：等待负责人在授权卡片或面板上确认，或直接继续。')
-        return ok(lines.join('\n'), { changeId: outcome.changeId, suggestion, awaiting: outcome.awaiting })
+        return ok(lines.join('\n'), { changeId: outcome.changeId, suggestion, awaiting: outcome.awaiting, flowPlan: outcome.flowPlan })
       },
     }),
   )

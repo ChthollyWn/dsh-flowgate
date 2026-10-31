@@ -14,6 +14,7 @@ export {
   explainDecision,
   actionTargetPath,
   actionKindOf,
+  mutatesRepository,
 } from './evaluate'
 export type { RuleFeedback } from './misfire'
 export {

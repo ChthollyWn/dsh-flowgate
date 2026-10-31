@@ -447,6 +447,17 @@ button.fg-rail-node {
   color: var(--dsw-alias-label-tertiary, #81858c);
 }
 
+.fg-dock-route {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 6px;
+  border: 0.5px solid var(--dsw-alias-border-l2, #e5e5e5);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  white-space: nowrap;
+}
+
 .fg-dock-panel-btn {
   flex: 0 0 auto;
   width: 24px;

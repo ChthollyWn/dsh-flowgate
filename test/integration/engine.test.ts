@@ -98,6 +98,36 @@ describe('FlowEngine pipeline', () => {
     expect(harness.engine.snapshot().statusLine).toContain('FlowGate')
   })
 
+  it('FlowGate 启用后未立项不允许改代码（R-NO-CHANGE），只读与 flow_* 不受影响', async () => {
+    const { engine } = harness
+    await engine.init()
+    const write = await engine.evaluateAction({ kind: 'write', tool: 'write', path: 'src/index.ts' }, { tool: 'write', agentRole: 'main' })
+    expect(write.effect).toBe('deny')
+    expect(write.rule?.ruleId).toBe('R-NO-CHANGE')
+
+    const mutatingShell = await engine.evaluateAction(
+      { kind: 'shell', tool: 'bash', command: 'pnpm install' },
+      { tool: 'bash', agentRole: 'main' },
+    )
+    expect(mutatingShell.effect).toBe('deny')
+    expect(mutatingShell.rule?.ruleId).toBe('R-NO-CHANGE')
+
+    const readOnly = await engine.evaluateAction(
+      { kind: 'shell', tool: 'bash', command: 'git status --short' },
+      { tool: 'bash', agentRole: 'main' },
+    )
+    expect(readOnly.effect).toBe('allow')
+
+    const flowTool = await engine.evaluateAction({ kind: 'other', tool: 'flow_new_change' }, { tool: 'flow_new_change', agentRole: 'main' })
+    expect(flowTool.effect).toBe('allow')
+
+    // 立项后按正常阶段规则放行/拦截。
+    await engine.newChange({ title: '验证接管', complexityHint: 'low' })
+    const afterProject = await engine.evaluateAction({ kind: 'write', tool: 'write', path: 'src/index.ts' }, { tool: 'write', agentRole: 'main' })
+    expect(afterProject.effect).toBe('deny')
+    expect(afterProject.rule?.ruleId).toBe('R-STAGE-SRC')
+  })
+
   it('完整流程 S0 → S6：立项、四道人工门、任务门、归档', async () => {
     const { engine, fs } = harness
     await engine.init()

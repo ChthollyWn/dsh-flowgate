@@ -6,6 +6,25 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.5 自动流程接管 + auto-review，2026-11-01）
+
+> 负责人指令：启用 FlowGate 后所有修改由 FlowGate 接管；模型在流程开始前判断改动大小并自动调整流程——复杂全流程、中等合并、简单不人工确认；设计 auto-review 决定是否需要人工确认与是否缩减流程。
+
+### Added
+
+- **全量接管 `R-NO-CHANGE`**：项目启用后无进行中变更时，写文件 / mutating shell / 委派一律拒绝；只读动作与 `flow_*` 放行。解锁话术指向 `flow_new_change`。
+- **流程路由 `flowPlan`**：`flow_new_change` 新增 `assessment` 参数（route/autoApprove/clear/goal/acceptance/scope/verify/risks/reasons）；宿主 `reviewFlowAssessment` 确定性 auto-review 后定稿 `route=full|standard|fast`，写 `change.flowPlan`、账本 `flow.assessed`、快照 `snapshot.flowPlan`。
+- **按路由自动推进**：`standard` 合并 G1+G3 一次人工确认；`fast` 在检查全部通过后自动通过 G1/G3/G6（G3 自动批准冻结产物、G6 自动交付归档），不再生成授权卡片。人工门检查仍全部执行。
+- **负责人覆盖**：`/flow route <full|standard|fast> <理由>`（账本 `flow.route_override`）；fast 仍受低复杂度·普通风险硬约束，复杂/高风险必须 full。
+- **UI**：dock `data-flowgate="dock-flow-route"` 与面板 `data-flowgate="panel-flow-route"` 中性徽标，`title` 显示 auto-review 理由。
+- **文档/测试**：`docs/impl/auto-flow.md`、需求 FR-4.13/FR-8.7、技术方案 §12.6；新增 auto-review 规则单测（8 类）与 engine fast/standard 集成测试、接管守卫测试、UI/命令测试。
+
+### Verification
+
+- `pnpm lint` 绿；`npx vitest run` **119 files / 1687 tests** 全绿；`pnpm coverage` 86.18 / 76.23 / 86.88 / 89.27（阈值通过）；`pnpm build`（host 1.23MB / client 369.4KB）；`verify:package` 39 文件 / 1079.2KB；`verify:client` 18 插槽通过。
+- 真机零模型 E2E：自动流程徽标 **7/7**（`/flow help` 含 route、低复杂度变更 `/flow route fast` 后 dock `dock-flow-route` + 面板 `panel-flow-route` 均为 `data-route=fast`、`data-auto=true`、文案「自动流程 · fast」、pipeline 正常）+ v0.4 回归 E2E **14/14**；0 pageerror / 0 console.error / 0 模型请求。截图 [38-panel-auto-flow-v05](docs/screenshots/38-panel-auto-flow-v05.png)。
+- 接管拒绝本身在 engine 集成测试覆盖（守卫级，真机零模型无法触发模型写入工具）；路由行为由 auto-review 单测 + engine fast/standard 集成测试覆盖。
+
 ## [Unreleased]（v0.4 移除学习模式，2026-11-01）
 
 > 未发版：负责人决定去掉学习模式（产品简化、少文字）。只做移除，不新增能力。
