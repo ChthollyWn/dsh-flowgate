@@ -92,7 +92,7 @@ Remote 非降级路径 → **v0.1 决策不做**（Typert Remote 需构建期生
 
 ### 5.2 发布（2026-10-31 已完成）
 
-npm publish 与 tag `v0.1.0` 前移已于 **2026-10-31 完成**（方案 A：前移 tag、保持版本 0.1.0；GitHub Release 见仓库 Releases）。仍待办：awesome-dsh-plugin 收录、V2EX/即刻反馈、demo 动图、干净机器 10 分钟快速开始验收。
+npm publish 与 tag `v0.1.0` 前移已于 **2026-10-31 完成**（方案 A：前移 tag 到 `c193e98`、保持版本 0.1.0；本地 `npm publish`，无 provenance；隔离 `DSH_HOME` 安装验证通过）。**GitHub Release 待补建**。仍待办：awesome-dsh-plugin 收录、V2EX/即刻反馈、demo 动图、干净机器 10 分钟快速开始验收。
 
 ### 5.3 自举（04 §9，负责人决策项）
 

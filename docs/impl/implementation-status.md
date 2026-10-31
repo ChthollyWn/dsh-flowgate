@@ -14,7 +14,7 @@
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期；接管后旧会话写拒绝（R-LEASE）与接续快照对比；篡改检测；返工失效；evidence.md/review.md（第五轮补） |
 | M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | `run: main` 路由、检查点修复任务与重试、计划修订、S5 回退、终审生产者、run/health 运行证据、风险提高效应、检查点任务验证+全量测试已闭环（第五轮补）；第六轮补：并行 worktree 执行根、S5 `runFullSuite` 回归判定、跨会话任务卡注入与压缩重注入、派发双结算防护（§3.12）；真实并行合并结算仍受 headless 环境限制（§4.1） |
 | M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 完成 | 真实 Web 宿主走查 25 张截图；第五轮补：规则统计用实际生效规则、例外可撤销、非 agent 改动确认、GREEN 过期按输入哈希、看板随状态重生成、report/board 尝试系统打开；第六轮补：执行图节点可点击 + 任务详情；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），固定标注精确判定以宿主实际拦截为准，本地无法判定的项目自定义规则会列出（§3.12） |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 对照评测 18/18 + 4 项主观指标评分完成；第六轮本地门禁全绿：**112 files / 1522 tests**、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat **13/13**、startup **+16.2ms**、uninstall 通过；CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功。**npm `dsh-flowgate@0.1.0` 已于 2026-10-31 发布**；Desktop 未走查 |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 对照评测 18/18 + 4 项主观指标评分完成；第六轮本地门禁全绿：**112 files / 1522 tests**、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat **13/13**、startup **+16.2ms**、uninstall 通过；CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功。**npm `dsh-flowgate@0.1.0` 已于 2026-10-31 发布**（本地 `npm publish`，无 provenance；隔离 `DSH_HOME` 安装验证通过）；GitHub Release 待补建；Desktop 未走查 |
 
 ## 2. 可复现验证（截至本报告）
 
@@ -352,7 +352,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 ### 4.3 需负责人决策
 
-- **发布（已完成）**：2026-10-31 采用方案 A（前移 `v0.1.0`、保持版本 0.1.0）发布 npm `dsh-flowgate@0.1.0`。仍可后续补做发布物料：demo 动图、干净机器 10 分钟快速开始验收、awesome-dsh-plugin 收录/社区反馈。
+- **发布（基本完成）**：2026-10-31 采用方案 A（前移 `v0.1.0` 到 `c193e98`、保持版本 0.1.0）发布 npm `dsh-flowgate@0.1.0`（本地 `npm publish`，无 provenance；隔离 `DSH_HOME` 安装验证通过）。**GitHub Release 待补建**（`gh release create v0.1.0 --verify-tag --notes-file docs/release/v0.1.0.md` 或网页创建）。仍可后续补做：demo 动图、干净机器 10 分钟快速开始验收、awesome-dsh-plugin 收录/社区反馈。
 - **自举（04 §9）**：用 FlowGate 管本仓库开发；M3 出口 `v0.5.0` tag、M6/v1.0 发布证据都不存在。做/不做需拍板；不做则从 backlog 移除并同步文档。
 - **T2.1 字面口径**："每种产物 10 正/反例"当前以 52 项检查逐项正反例 + 解析边界用例覆盖，未逐产物准备 10×样本；是否单开一轮补 fixture。
 

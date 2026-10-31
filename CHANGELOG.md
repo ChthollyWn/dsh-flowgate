@@ -4,7 +4,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 > **发布状态（2026-10-31）**：npm 已发布 [dsh-flowgate@0.1.0](https://www.npmjs.com/package/dsh-flowgate)；仓库 tag `v0.1.0` 已前移到本次发布提交（发布说明见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
-> 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。
+> 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
 ## [0.1.0] - 2026-10-31
 
