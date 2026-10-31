@@ -137,7 +137,7 @@ import {
   parseTestOutput,
   detectEvidenceKind,
 } from './evidence'
-import { invalidateOnRework } from './revision'
+import { invalidateOnRework, type ReworkKind } from './revision'
 import { computeMetrics } from './metrics'
 import { renderChangeReport } from './report'
 import { renderDashboard } from './dashboard'
@@ -2581,15 +2581,38 @@ export class FlowEngine {
     }
 
     // 4. Review.
-    if (level.reviewRoundsPerTask > 0 && this.config.review.enabled && this.config.review.requireForTaskGate) {
-      const reviews = change.reviews.filter((review) => review.taskId === taskId && (review.verdict === 'pass' || review.waived))
-      if (reviews.length < level.reviewRoundsPerTask) {
+    if (this.config.review.enabled && this.config.review.requireForTaskGate) {
+      const taskReviews = change.reviews.filter((review) => review.taskId === taskId)
+      // 负责人豁免（waived）的记录不阻塞；critical/major 即使 verdict=pass 也不放行（T3.4）。
+      const blocking = taskReviews.filter(
+        (review) =>
+          !review.waived && review.findings.some((finding) => finding.severity === 'critical' || finding.severity === 'major'),
+      )
+      if (blocking.length > 0) {
         failures.push({
-          item: 'review',
-          label: `${taskId} 需要 ${level.reviewRoundsPerTask} 轮审查`,
+          item: 'review:findings',
+          label: `${taskId} 的审查还有 ${blocking.length} 条未处理的 critical / major`,
           passed: false,
-          hint: '运行 flow_request_review（或由插件按风险自动审查），审查通过后再 flow_task_done。',
+          hint: `修复 findings 后重新审查；确属误报可由负责人 /flow review waive <RV-n> <理由> 豁免：${blocking
+            .flatMap((review) =>
+              review.findings
+                .filter((finding) => finding.severity === 'critical' || finding.severity === 'major')
+                .map((finding) => `${finding.file}${finding.line !== undefined ? `:${finding.line}` : ''} ${finding.message}`),
+            )
+            .slice(0, 5)
+            .join('；')}`,
         })
+      }
+      if (level.reviewRoundsPerTask > 0) {
+        const reviews = taskReviews.filter((review) => review.verdict === 'pass' || review.waived)
+        if (reviews.length < level.reviewRoundsPerTask) {
+          failures.push({
+            item: 'review',
+            label: `${taskId} 需要 ${level.reviewRoundsPerTask} 轮审查`,
+            passed: false,
+            hint: '运行 flow_request_review（或由插件按风险自动审查），审查通过后再 flow_task_done。',
+          })
+        }
       }
     }
 
@@ -2935,6 +2958,107 @@ export class FlowEngine {
       this.pushNotice(`审查发现 critical 问题（${review.id}），任务门不会通过，必须修复。`)
     }
     return review
+  }
+
+  /**
+   * 负责人豁免一条审查记录（T3.4）：误报的 critical/major 不再阻塞任务门，
+   * 豁免必须写理由并留在账本里（可审计）。
+   */
+  async waiveReview(reviewId: string, reason: string): Promise<ReviewRecord> {
+    const change = this.requireChange()
+    if (!reason.trim()) throw new FlowGateError('豁免审查必须写理由', '用法：/flow review waive <RV-n> <理由>')
+    const review = change.reviews.find((item) => item.id === reviewId)
+    if (!review) throw new FlowGateError(`没有审查记录 ${reviewId}`, '运行 /flow 查看审查记录')
+    if (review.waived === true) return review
+    review.waived = true
+    review.waivedReason = reason
+    await this.appendLedger('review.waived', { changeId: change.id, reviewId, reason })
+    await this.saveChange(change)
+    await this.refreshReviewDoc()
+    this.pushNotice(`审查记录 ${reviewId} 已被负责人豁免：${reason}`)
+    return review
+  }
+
+  /**
+   * 返工声明（T3.8）：按类型失效受影响任务的回执与审查，并解除产物冻结。
+   * - defect：只失效指定任务及其下游（未指定时保守全失效），测试回执与审查作废；
+   * - requirement：全部失效、回到 S1、解冻全部产物（需求/方案变了要重走澄清）；
+   * - unknown：全部失效，阶段不变，解冻产物等负责人决定。
+   */
+  async declareRework(input: {
+    kind: ReworkKind
+    taskIds?: string[]
+    sharedInputsChanged?: string[]
+    reason: string
+  }): Promise<{ invalidatedTasks: string[]; keptTasks: string[]; stage: StageId }> {
+    const change = this.requireChange()
+    if (!input.reason.trim()) throw new FlowGateError('返工声明必须写理由', '用法：/flow rework <defect|requirement|unknown> [任务...] <理由>')
+    if (change.stage === 'archived') throw new FlowGateError('已归档的变更不能声明返工', '新建关联变更后返工')
+    const tasks = this.getTasks()
+    const dependsOn: Record<string, string[]> = {}
+    for (const task of tasks) dependsOn[task.id] = task.dependsOn
+    const outcome = invalidateOnRework(change, {
+      kind: input.kind,
+      taskIds: input.taskIds,
+      sharedInputsChanged: input.sharedInputsChanged,
+      dependsOn,
+    })
+    const invalidated = new Set(outcome.invalidatedTasks)
+    for (const taskId of outcome.invalidatedTasks) {
+      const state = change.tasks[taskId]
+      if (!state) continue
+      state.evidenceIds = []
+      state.reviewIds = []
+      state.tdd = 'none'
+      state.redObserved = false
+      state.failureCount = 0
+      if (state.status === 'done' || state.status === 'failed' || state.status === 'blocked') state.status = 'pending'
+      state.finishedAt = undefined
+      state.startedAt = undefined
+      const batch = change.batches.find((item) => item.id === state.batch)
+      if (batch && batch.status === 'done') {
+        batch.status = 'pending'
+        batch.completedAt = undefined
+        if (batch.checkpoint) batch.checkpoint = { ...batch.checkpoint, attempts: 0 }
+      }
+    }
+    // 审查失效：缺陷返工只清受影响任务；需求/影响不明清全部（含终审/安全审查）。
+    if (input.kind === 'requirement' || input.kind === 'unknown') {
+      change.reviews = []
+    } else {
+      change.reviews = change.reviews.filter((review) => review.taskId === undefined || !invalidated.has(review.taskId))
+    }
+    // 产物冻结解除：需求/影响不明必须允许重写规格与计划；缺陷返工保留已批准产物。
+    if (input.kind === 'requirement' || input.kind === 'unknown') {
+      for (const key of store.unfreezeArtifacts(change)) {
+        await this.appendLedger('artifact.unfrozen', { changeId: change.id, artifact: key, reason: input.kind })
+      }
+    }
+    if (outcome.stage !== change.stage && input.kind === 'requirement') {
+      const now = isoNow(this.clock)
+      Object.assign(change, enterStage(change, 'S1', now))
+      change.gates.G1 = { state: 'pending', attempts: 0 }
+      change.gates.G2 = { state: 'pending', attempts: 0 }
+      change.gates.G3 = { state: 'pending', attempts: 0 }
+      change.plan = undefined
+      change.tasks = {}
+      change.batches = []
+      change.frozen = {}
+      await this.appendLedger('stage.entered', { changeId: change.id, stage: 'S1', reason: 'rework-requirement' })
+      this.pushNotice(`需求返工：已回到 S1，全部回执与审查失效、产物解冻；补齐澄清/规格后重新过 G1–G3。`)
+    }
+    await this.appendLedger('rework.declared', {
+      changeId: change.id,
+      kind: input.kind,
+      invalidatedTasks: outcome.invalidatedTasks,
+      keptTasks: outcome.keptTasks,
+      reason: input.reason,
+    })
+    await this.saveChange(change)
+    if (input.kind !== 'requirement') {
+      this.pushNotice(`返工声明（${input.kind}）：失效任务 ${outcome.invalidatedTasks.join('、') || '无'}；保留任务 ${outcome.keptTasks.join('、') || '无'}。`)
+    }
+    return outcome
   }
 
   private async checkBatchProgress(change: ChangeStatus, now: string): Promise<void> {

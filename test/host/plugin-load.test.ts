@@ -67,7 +67,7 @@ describe('插件导出形态', () => {
   it('已注册 /flow 命令、15 个工具、flowgate 投影、守卫与系统提示段', async () => {
     harness = await setupPlugin()
     expect(harness.commands.state.commands.has('flow')).toBe(true)
-    expect(harness.tools.state.tools.size).toBe(15) // 14 个 flow_* + flow_dispatch_next
+    expect(harness.tools.state.tools.size).toBe(16) // 15 个 flow_* + flow_dispatch_next
     expect(harness.tools.state.tools.has('flow_status')).toBe(true)
     expect(harness.tools.state.tools.has('flow_dispatch_next')).toBe(true)
     expect(harness.projections.state.definitions.has('flowgate')).toBe(true)

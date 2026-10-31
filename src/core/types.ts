@@ -1063,6 +1063,8 @@ export type LedgerEventType =
   | 'skill.loaded'
   | 'citation.verified'
   | 'original.snapshot'
+  | 'review.waived'
+  | 'rework.declared'
   | 'tamper.cleared'
 
 export interface LedgerEvent {

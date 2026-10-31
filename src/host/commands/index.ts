@@ -53,6 +53,8 @@ export const FLOW_COMMAND_HELP = [
   '/flow conflict approve|reject <CF-n> [理由] — 集成检查点冲突/失败：approve=确认已修好并重试检查点，reject=放弃自动重试',
   '/flow tamper approve|reject <TM-n> [理由] — 疑似篡改（跳过测试/删断言/改测试基础设施）：approve=确认是合法重构',
   '/flow external confirm [路径|all] — 确认非 agent 改动（编辑器/格式化），G6 前必须清零',
+  '/flow rework <defect|requirement|unknown> [任务id...] <理由> — 返工声明：按类型失效回执与审查',
+  '/flow review waive <RV-n> <理由> — 负责人豁免误报的审查 findings（写账本）',
   '/flow exception add <规则id> <路径模式|-> <理由> | revoke <EX-n> [理由] | list — 规则例外管理',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
   '/flow risk-level <普通|高> [理由] — 改风险等级',
@@ -134,6 +136,10 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
       return externalCommand(runtime, args)
     case 'exception':
       return exceptionCommand(runtime, args)
+    case 'rework':
+      return reworkCommand(runtime, args)
+    case 'review':
+      return reviewCommand(runtime, args)
     case 'unblock':
       return unblockCommand(runtime, args)
     case 'complexity':
@@ -356,6 +362,39 @@ async function externalCommand(runtime: HostRuntime, args: string[]): Promise<st
   return confirmed === 0
     ? `没有匹配的待确认非 agent 改动：${args.join(' ')}。运行 /flow 查看列表。`
     : `已确认 ${confirmed} 处非 agent 改动。`
+}
+
+/** `/flow rework <defect|requirement|unknown> [任务...] <理由>`（T3.8）。 */
+async function reworkCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const engine = await engineFor(runtime)
+  const kind = (args[0] ?? '').toLowerCase()
+  if (kind !== 'defect' && kind !== 'requirement' && kind !== 'unknown') {
+    throw new HostError('用法：/flow rework <defect|requirement|unknown> [任务id...] <理由>', '例：/flow rework defect T2 回调幂等有缺陷')
+  }
+  const taskIds: string[] = []
+  let index = 1
+  while (index < args.length && /^[TtA-Za-z]+-?\d+/.test(args[index]!)) {
+    taskIds.push(args[index]!.toUpperCase())
+    index += 1
+  }
+  const reason = args.slice(index).join(' ')
+  if (reason.trim() === '') throw new HostError('返工声明必须写理由', '说明缺陷/需求变更与影响范围')
+  const result = await engine.declareRework({ kind, ...(taskIds.length > 0 ? { taskIds } : {}), reason })
+  runtime.emit()
+  return `返工已声明（${kind}）：失效任务 ${result.invalidatedTasks.join('、') || '无'}；保留任务 ${result.keptTasks.join('、') || '无'}；阶段 ${result.stage}。`
+}
+
+/** `/flow review waive <RV-n> <理由>`（T3.4 负责人豁免）。 */
+async function reviewCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const action = (args[0] ?? '').toLowerCase()
+  if (action !== 'waive') throw new HostError('用法：/flow review waive <RV-n> <理由>', '运行 /flow 查看审查记录')
+  const id = args[1]
+  const reason = args.slice(2).join(' ')
+  if (!id || reason.trim() === '') throw new HostError('豁免审查必须写 id 与理由', '例：/flow review waive RV-2 该 finding 是误报，已有等价测试')
+  const engine = await engineFor(runtime)
+  const review = await engine.waiveReview(id, reason)
+  runtime.emit()
+  return `审查记录 ${review.id} 已豁免：${reason}`
 }
 
 /**

@@ -564,6 +564,36 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     }),
   )
 
+  // 15) flow_declare_rework --------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_declare_rework',
+      description: 'T3.8 返工声明：按类型失效受影响任务的回执与审查（缺陷返工沿 depends_on 向下扩散；需求/影响不明全部失效并解冻产物）。必须写理由。',
+      parameters: {
+        kind: { type: 'string', required: true, enum: ['defect', 'requirement', 'unknown'], description: '返工类型' },
+        tasks: { type: 'array', description: '缺陷返工时受影响的任务 id；省略则保守地让全部任务失效', items: { type: 'string' } },
+        reason: { type: 'string', required: true, description: '返工原因（关联的缺陷/需求变更）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const kind = String(args.kind)
+        if (kind !== 'defect' && kind !== 'requirement' && kind !== 'unknown') {
+          return fail('kind 只能是 defect / requirement / unknown', '例：flow_declare_rework({ kind: "defect", tasks: ["T2"], reason: "回调幂等有缺陷" })')
+        }
+        const result = await engine.declareRework({
+          kind,
+          ...(Array.isArray(args.tasks) ? { taskIds: toStringArray(args.tasks) } : {}),
+          reason: String(args.reason ?? ''),
+        })
+        runtime.emit()
+        return ok(
+          `返工已声明（${kind}）：失效任务 ${result.invalidatedTasks.join('、') || '无'}；保留任务 ${result.keptTasks.join('、') || '无'}；阶段 ${result.stage}。`,
+          { invalidatedTasks: result.invalidatedTasks, keptTasks: result.keptTasks, stage: result.stage },
+        )
+      },
+    }),
+  )
+
   // 14) flow_diff -------------------------------------------------------
   tools.push(
     defineHostTool({
@@ -631,6 +661,7 @@ export const FLOW_TOOL_NAMES = [
   'flow_investigate',
   'flow_submit_analysis',
   'flow_diff',
+  'flow_declare_rework',
 ] as const
 
 /** 参数 schema 自检（测试用）。 */

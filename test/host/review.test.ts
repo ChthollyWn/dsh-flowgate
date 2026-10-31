@@ -253,6 +253,7 @@ describe('结构化结论归一化', () => {
     const outcome = await runTaskReview(h.runtime, 'T1')
     expect(outcome.ok).toBe(true)
     expect(outcome.verdict).toBe('changes-required')
+
     expect(outcome.coverageOk).toBe(true)
     expect(outcome.message).toBe('审查完成：需要修改（4 条发现，第 1 次尝试）')
     expect(outcome.findings).toEqual([
@@ -542,7 +543,7 @@ describe('S5 终审生产者', () => {
     expect(promptText(spec)).toContain('相对 S2 基线')
   })
 
-  it('高风险：同一结论同时登记 final 与 security', async () => {
+  it('高风险：依次登记「规格符合 / 代码质量 / 安全」三份结论（T4.3）', async () => {
     const engine = s5Engine('high')
     const subagents = subagentsReturning(reviewResult(passStructured()), 'child-final-high')
     const h = await start({
@@ -553,9 +554,10 @@ describe('S5 终审生产者', () => {
 
     const outcome = await runFinalReview(h.runtime)
     expect(outcome.ok).toBe(true)
-    expect(recordedKinds(engine)).toEqual(['final', 'security'])
-    expect(outcome.message).toContain('安全审查')
-    expect(promptText(specAt(subagents, 0))).toContain('安全')
+    expect(recordedKinds(engine)).toEqual(['final', 'final', 'security'])
+    expect(outcome.message).toContain('三份终审结论')
+    expect(promptText(specAt(subagents, 0))).toContain('规格符合性')
+    expect(promptText(specAt(subagents, 2))).toContain('安全与合规')
   })
 
   it('flow_submit G5 在 S5 自动先跑终审，再提交门禁', async () => {
@@ -571,7 +573,7 @@ describe('S5 终审生产者', () => {
     expect(value.ok).toBe(true)
     expect(value.summary).toContain('终审：')
     expect(value.summary).toContain('已提交 G5（fake）')
-    expect(value.data?.finalReview).toContain('终审完成')
+    expect(value.data?.finalReview).toContain('通过')
     expect(recordedKinds(engine)).toEqual(['final'])
   })
 
@@ -600,4 +602,34 @@ describe('S5 终审生产者', () => {
     // 终审记录仍会落账（coverageOk=false），供 /flow status/报告查看。
     expect(recordedKinds(engine)).toEqual(['final'])
   })
+})
+
+describe('同一 diff 去重（T3.4）', () => {
+    it('同一 diff 已审查通过时直接复用结论，不再启动子 agent（T3.4）', async () => {
+      const engine = makeEngine()
+      const state = engineState(engine)
+      state.current = makeChange({
+        reviews: [
+          {
+            id: 'RV-9',
+            changeId: 'C-001',
+            taskId: 'T1',
+            kind: 'task',
+            verdict: 'pass',
+            findings: [],
+            coverageOk: true,
+            diffFingerprint: sha256Hex(DIFF),
+            createdAt: '2026-01-01T00:00:00.000Z',
+            attempts: 1,
+          },
+        ],
+      })
+      const subagents = subagentsReturning(reviewResult(passStructured()), 'child-dedupe')
+      const h = await start({ engine, services: { subagents, sessionQuery: sessionQueryWith({ 'child-dedupe': ['src/a.ts'] }) } })
+      withDiff(h)
+      const outcome = await runTaskReview(h.runtime, 'T1')
+      expect(outcome.ok).toBe(true)
+      expect(outcome.message).toContain('复用')
+      expect((subagents as unknown as { state: { started: unknown[] } }).state.started).toHaveLength(0)
+    })
 })

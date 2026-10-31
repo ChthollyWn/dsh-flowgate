@@ -180,6 +180,24 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
   }
   const { diff, files } = await collectDiff(runtime, taskId)
   const diffFingerprint = sha256Hex(diff)
+  // T3.4：同一 diff 不重复审查（去重指纹此前只写不读）。
+  const previousReview = change.reviews.find(
+    (review) =>
+      review.taskId === taskId &&
+      review.diffFingerprint === diffFingerprint &&
+      review.coverageOk &&
+      review.verdict === 'pass' &&
+      review.waived !== true,
+  )
+  if (previousReview) {
+    return {
+      ok: true,
+      verdict: 'pass',
+      findings: previousReview.findings,
+      coverageOk: true,
+      message: `同一 diff 已审查过（${previousReview.id}），复用结论。`,
+    }
+  }
   const criteria = reviewCriteria()
   // 删除/重命名的 git 原内容（T3.1）：作为审查输入，避免"删掉的东西没人看过"。
   const originals: { path: string; content: string }[] = []
@@ -243,7 +261,7 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
       await enforceChildReadOnly(runtime, String(activation.childId))
       const result = await activation.result
       const structured = parseReviewResult(result)
-      const coverage = await checkReadCoverage(runtime, String(activation.childId), files)
+      const coverage = await checkReadCoverage(runtime, String(activation.childId), files, diff)
       const coverageOk = structured.readFilesSatisfied && coverage.ok
       const findings = structured.findings
       const verdict = structured.verdict
@@ -308,6 +326,8 @@ function finalReviewCriteria(riskHigh: boolean): string[] {
 function buildFinalReviewPrompt(input: {
   changeTitle: string
   riskHigh: boolean
+  /** 本份结论的阶段标题（规格符合 / 代码质量 / 安全与合规）。 */
+  phaseTitle?: string
   criteria: string[]
   diff: string
   files: string[]
@@ -317,6 +337,7 @@ function buildFinalReviewPrompt(input: {
   const lines: string[] = [
     '你是 FlowGate 的独立终审者（只读取证模式）。这是 S5 交付前的整体终审，只输出结构化结论。',
     '',
+    `本次结论：${input.phaseTitle ?? '整体终审'}`,
     `变更：${input.changeTitle}`,
     `风险等级：${input.riskHigh ? '高（必须同时给出安全/合规结论）' : '普通'}`,
     '',
@@ -389,14 +410,88 @@ export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOu
   }
   const diffFingerprint = sha256Hex(diff)
   const riskHigh = change.risk === 'high'
-  const prompt = buildFinalReviewPrompt({
-    changeTitle: `${change.id} ${change.title}`,
-    riskHigh,
-    criteria: finalReviewCriteria(riskHigh),
-    diff,
-    files,
-  })
+  // T4.3 验收：高风险要依次产出「规格符合 / 代码质量 / 安全」三份结论；普通风险合并为一份终审。
+  const phases: { title: string; recordKind: 'final' | 'security'; criteria: string[] }[] = riskHigh
+    ? [
+        { title: '规格符合性（需求、场景、验收标准）', recordKind: 'final', criteria: finalReviewCriteria(false) },
+        { title: '代码质量（错误处理、边界、测试真实性、可维护性）', recordKind: 'final', criteria: finalReviewCriteria(false) },
+        { title: '安全与合规（鉴权、密钥、敏感数据、供应链）', recordKind: 'security', criteria: finalReviewCriteria(true) },
+      ]
+    : [{ title: '终审（规格符合 + 代码质量）', recordKind: 'final', criteria: finalReviewCriteria(false) }]
 
+  const allFindings: ReviewFinding[] = []
+  const messages: string[] = []
+  let ok = true
+  for (const phase of phases) {
+    const phaseOutcome = await runOneFinalPhase({
+      runtime,
+      parent,
+      subagents,
+      engine,
+      change,
+      phaseTitle: phase.title,
+      recordKind: phase.recordKind,
+      criteria: phase.criteria,
+      diff,
+      files,
+      diffFingerprint,
+    })
+    if (phaseOutcome.kind === 'unavailable') {
+      return { ok: false, verdict: 'changes-required', findings: phaseOutcome.findings, coverageOk: false, message: phaseOutcome.message }
+    }
+    allFindings.push(...phaseOutcome.findings)
+    messages.push(`${phase.title}：${phaseOutcome.verdict === 'pass' ? '通过' : '需要修改'}（${phaseOutcome.findings.length} 条发现）`)
+    if (!phaseOutcome.ok) ok = false
+    if (!phaseOutcome.coverageOk) {
+      return {
+        ok: false,
+        verdict: 'changes-required',
+        findings: allFindings,
+        coverageOk: false,
+        message: `${messages.join('；')}；读取覆盖不足：${phaseOutcome.message}`,
+      }
+    }
+  }
+  return {
+    ok,
+    verdict: ok ? 'pass' : 'changes-required',
+    findings: allFindings,
+    coverageOk: ok,
+    message: `${messages.join('；')}${messages.length > 1 ? '；三份终审结论已登记' : ''}`,
+  }
+}
+
+/** 跑一份终审结论（一个阶段），带 1 次重试；覆盖不足返回 coverageOk=false 但记录仍落账。 */
+async function runOneFinalPhase(input: {
+  runtime: HostRuntime
+  parent: NonNullable<ReturnType<HostRuntime['mainAgent']>>
+  subagents: DshSubagentRuntime
+  engine: EngineLike
+  change: NonNullable<ReturnType<EngineLike['currentChange']>>
+  phaseTitle: string
+  recordKind: 'final' | 'security'
+  criteria: string[]
+  diff: string
+  files: string[]
+  diffFingerprint: string
+}): Promise<{
+  kind: 'result' | 'unavailable'
+  ok: boolean
+  verdict: 'pass' | 'changes-required'
+  findings: ReviewFinding[]
+  coverageOk: boolean
+  message: string
+}> {
+  const { runtime, parent, subagents, engine } = input
+  const riskHigh = input.recordKind === 'security'
+  const prompt = buildFinalReviewPrompt({
+    changeTitle: `${input.change.id} ${input.change.title}`,
+    riskHigh,
+    phaseTitle: input.phaseTitle,
+    criteria: input.criteria,
+    diff: input.diff,
+    files: input.files,
+  })
   let lastError: unknown = null
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const controller = new AbortController()
@@ -405,15 +500,15 @@ export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOu
     let activation: { childId: unknown; result: Promise<DshSubagentResult>; dispose(): Promise<void> } | null = null
     try {
       activation = await subagents.startActivation({
-        provider: capability.provider,
-        label: `flowgate-final-review-${attempt}`,
+        provider: reviewCapability(runtime).provider!,
+        label: `flowgate-final-${input.recordKind}-${attempt}`,
         request: {
           parent,
           agentPreset: FLOWGATE_PRESETS.reviewer,
           prompt,
           outputSchema: REVIEW_OUTPUT_SCHEMA,
           signal: controller.signal,
-          ...(root ? { cwd: root } : {}),
+          ...(runtime.root() ? { cwd: runtime.root() as string } : {}),
         },
         signal: controller.signal,
         delivery: 'caller',
@@ -422,38 +517,34 @@ export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOu
       await enforceChildReadOnly(runtime, String(activation.childId))
       const result = await activation.result
       const structured = parseReviewResult(result)
-      const coverage = await checkReadCoverage(runtime, String(activation.childId), files)
+      const coverage = await checkReadCoverage(runtime, String(activation.childId), input.files, input.diff)
       const coverageOk = structured.readFilesSatisfied && coverage.ok
       try {
         await engine.recordReview({
-          kind: 'final',
+          kind: input.recordKind,
           verdict: structured.verdict,
           findings: structured.findings,
           coverageOk,
-          diffFingerprint,
+          diffFingerprint: input.diffFingerprint,
           attempts: attempt,
         })
-        if (riskHigh) {
-          await engine.recordReview({
-            kind: 'security',
-            verdict: structured.verdict,
-            findings: structured.findings,
-            coverageOk,
-            diffFingerprint,
-            attempts: attempt,
-          })
-        }
       } catch (error) {
-        runtime.noteFeature('review', `终审记录失败：${toAgentError(error).error}`)
+        runtime.noteFeature('review', `${input.phaseTitle} 记录失败：${toAgentError(error).error}`)
       }
       runtime.emit()
-      const message = coverageOk
-        ? `终审完成：${structured.verdict === 'pass' ? '通过' : '需要修改'}（${structured.findings.length} 条发现${riskHigh ? '，已登记安全审查' : ''}，第 ${attempt} 次尝试）`
-        : `终审未覆盖全部改动文件（读取覆盖不足）：${coverage.detail ?? '读取覆盖不足'}。本次不消耗轮次。`
-      return { ok: coverageOk, verdict: structured.verdict, findings: structured.findings, coverageOk, message }
+      return {
+        kind: 'result',
+        ok: coverageOk && structured.verdict === 'pass',
+        verdict: structured.verdict,
+        findings: structured.findings,
+        coverageOk,
+        message: coverageOk
+          ? `${input.phaseTitle} 完成：${structured.verdict === 'pass' ? '通过' : '需要修改'}`
+          : `读取覆盖不足：${coverage.detail ?? '读取覆盖不足'}`,
+      }
     } catch (error) {
       lastError = error
-      runtime.noteFeature('review', `终审子 agent 第 ${attempt} 次启动/执行失败（不消耗轮次）：${toAgentError(error).error}`)
+      runtime.noteFeature('review', `${input.phaseTitle} 第 ${attempt} 次启动/执行失败（不消耗轮次）：${toAgentError(error).error}`)
     } finally {
       clearTimeout(timer)
       if (activation) {
@@ -466,6 +557,7 @@ export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOu
     }
   }
   return {
+    kind: 'unavailable',
     ok: false,
     verdict: 'changes-required',
     findings: [],
@@ -513,10 +605,102 @@ function parseReviewResult(result: DshSubagentResult): ParsedReview {
 }
 
 /** 用 sessionQuery 核对审查者实际读过哪些文件（H24）。 */
+/** 审查者实际读过的行范围（从 sessionQuery 事件里的 read 工具调用提取）。 */
+export interface ReadRange {
+  file: string
+  start: number
+  end: number
+}
+
+function visitObjects(value: unknown, depth: number, visit: (record: Record<string, unknown>) => void): void {
+  if (depth > 8 || value === null || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    for (const item of value) visitObjects(item, depth + 1, visit)
+    return
+  }
+  const record = value as Record<string, unknown>
+  visit(record)
+  for (const child of Object.values(record)) visitObjects(child, depth + 1, visit)
+}
+
+/** 从工具调用事件里抽取 read/read_file 的 path + offset/limit。 */
+export function readRangesFromEvents(events: unknown[]): ReadRange[] {
+  const ranges: ReadRange[] = []
+  for (const event of events) {
+    visitObjects(event, 0, (record) => {
+      const name = typeof record.name === 'string' ? record.name : typeof record.tool === 'string' ? record.tool : ''
+      if (!/^(read|read_file|fs_read)$/i.test(name)) return
+      const argsRaw = record.arguments ?? record.input ?? record.args ?? record.params
+      if (argsRaw === null || typeof argsRaw !== 'object' || Array.isArray(argsRaw)) return
+      const args = argsRaw as Record<string, unknown>
+      const file = typeof args.file_path === 'string' ? args.file_path : typeof args.path === 'string' ? args.path : ''
+      if (file === '') return
+      const offset = typeof args.offset === 'number' && Number.isFinite(args.offset) && args.offset > 0 ? args.offset : 1
+      const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) && args.limit > 0 ? args.limit : Number.POSITIVE_INFINITY
+      ranges.push({ file: file.replace(/\\/g, '/').replace(/^\.\//, ''), start: offset, end: offset + limit - 1 })
+    })
+  }
+  return ranges
+}
+
+/** 从 unified diff 计算每个文件改动后的行号（新增行；纯删除用上下文行）。 */
+export function changedLinesFromDiff(diff: string): Record<string, number[]> {
+  const out: Record<string, number[]> = {}
+  let current = ''
+  for (const line of diff.split('\n')) {
+    const fileMatch = /^\+\+\+ b\/(.+)$/.exec(line)
+    if (fileMatch) {
+      current = fileMatch[1]!.trim()
+      out[current] = out[current] ?? []
+      continue
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line)
+    if (!hunk || current === '') continue
+    const start = Number.parseInt(hunk[1]!, 10)
+    const count = hunk[2] !== undefined ? Number.parseInt(hunk[2], 10) : 1
+    if (count > 0) {
+      for (let index = 0; index < count; index += 1) out[current]!.push(start + index)
+    } else {
+      out[current]!.push(Math.max(1, start - 1), Math.max(1, start))
+    }
+  }
+  return out
+}
+
+/** 每个文件的改动行是否都被审查者读过；返回未覆盖明细。 */
+export function uncoveredChangedLines(
+  diff: string,
+  ranges: ReadRange[],
+): { file: string; lines: number[] }[] {
+  const changed = changedLinesFromDiff(diff)
+  const byFile = new Map<string, ReadRange[]>()
+  for (const range of ranges) {
+    const list = byFile.get(range.file) ?? []
+    list.push(range)
+    byFile.set(range.file, list)
+  }
+  const uncovered: { file: string; lines: number[] }[] = []
+  for (const [file, lines] of Object.entries(changed)) {
+    if (lines.length === 0) continue
+    const fileRanges = byFile.get(file) ?? []
+    if (fileRanges.length === 0) {
+      uncovered.push({ file, lines: [...new Set(lines)].sort((a, b) => a - b).slice(0, 20) })
+      continue
+    }
+    const missing = [...new Set(lines)].filter(
+      (line) => !fileRanges.some((range) => line >= range.start && line <= range.end),
+    )
+    if (missing.length > 0) uncovered.push({ file, lines: missing.sort((a, b) => a - b).slice(0, 20) })
+  }
+  return uncovered
+}
+
+/** 用 sessionQuery 核对审查者实际读过哪些文件/行（H24 / T3.4 验收 #3）。 */
 export async function checkReadCoverage(
   runtime: HostRuntime,
   childSessionId: string,
   requiredFiles: string[],
+  diff?: string,
 ): Promise<{ ok: boolean; readFiles: string[]; detail?: string }> {
   const query = runtime.getService<DshSessionQueryEngine>('sessionQuery')
   if (!query || (typeof query.readSession !== 'function' && typeof query.observeSession !== 'function')) {
@@ -537,11 +721,29 @@ export async function checkReadCoverage(
   } catch (error) {
     return { ok: false, readFiles: [], detail: `读取子会话失败：${toAgentError(error).error}` }
   }
+  // 先做文件名级覆盖（文件名必须出现在事件里）。
   const serialized = JSON.stringify(events)
   const readFiles = requiredFiles.filter((file) => serialized.includes(file))
   const missing = requiredFiles.filter((file) => !serialized.includes(file))
   if (missing.length > 0) {
     return { ok: false, readFiles, detail: `未读到：${missing.slice(0, 5).join('、')}` }
+  }
+  // 再核对行覆盖（T3.4 验收 #3）：只读了文件前 200 行、但改动在第 300 行 → 不算有效审查。
+  if (diff !== undefined && diff.trim() !== '') {
+    const ranges = readRangesFromEvents(events)
+    if (ranges.length > 0) {
+      const uncovered = uncoveredChangedLines(diff, ranges).filter((entry) => requiredFiles.some((file) => entry.file.endsWith(file) || file.endsWith(entry.file)))
+      if (uncovered.length > 0) {
+        return {
+          ok: false,
+          readFiles,
+          detail: `改动行未被审查覆盖：${uncovered
+            .slice(0, 5)
+            .map((entry) => `${entry.file}:${entry.lines.slice(0, 8).join(',')}`)
+            .join('；')}`,
+        }
+      }
+    }
   }
   return { ok: true, readFiles }
 }

@@ -413,3 +413,57 @@ describe('删除/重命名原内容快照（T3.1）', () => {
     await expect(harness.engine.taskStart('T1')).rejects.toThrow('原内容')
   })
 })
+
+describe('审查豁免与返工失效（T3.4 / T3.8）', () => {
+  it('critical finding 阻塞任务门；负责人豁免后只由其它项决定', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    const { engine } = harness
+    await engine.taskStart('T1')
+    const review = await engine.recordReview({
+      taskId: 'T1',
+      kind: 'task',
+      verdict: 'pass',
+      coverageOk: true,
+      findings: [{ severity: 'critical', file: 'src/index.ts', line: 1, rule: 'spec', message: '缺少幂等' }],
+    })
+    const blocked = await engine.taskDone('T1')
+    expect(blocked.passed).toBe(false)
+    expect(blocked.failures.some((failure) => failure.item === 'review:findings')).toBe(true)
+
+    await expect(engine.waiveReview(review.id, '')).rejects.toThrow('理由')
+    await engine.waiveReview(review.id, '误报：已有幂等测试')
+    const after = await engine.taskDone('T1')
+    expect(after.failures.some((failure) => failure.item === 'review:findings')).toBe(false)
+  })
+
+  it('缺陷返工：只失效指定任务及其下游，保留其它任务回执', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    const { engine } = harness
+    const change = engine.currentChange()!
+    change.tasks.T1 = { ...change.tasks.T1!, status: 'done', evidenceIds: ['E-1'], reviewIds: ['RV-1'] }
+    change.tasks.T2 = { ...change.tasks.T2!, status: 'done', evidenceIds: ['E-2'], reviewIds: ['RV-2'] }
+    const outcome = await engine.declareRework({ kind: 'defect', taskIds: ['T1'], reason: 'T1 逻辑缺陷' })
+    expect(outcome.invalidatedTasks).toEqual(['T1'])
+    const updated = engine.currentChange()!
+    expect(updated.tasks.T1!.evidenceIds).toEqual([])
+    expect(updated.tasks.T2!.evidenceIds).toEqual(['E-2'])
+    expect(updated.reviews).toHaveLength(0)
+    expect(updated.tasks.T1!.status).toBe('pending')
+  })
+
+  it('需求返工：全部失效、回 S1、产物解冻', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    const { engine } = harness
+    const change = engine.currentChange()!
+    change.frozen = { tasks: { hash: 'sha256:x', at: '2026-11-01T09:00:00+08:00' } }
+    await engine.declareRework({ kind: 'requirement', reason: '需求变更' })
+    const updated = engine.currentChange()!
+    expect(updated.stage).toBe('S1')
+    expect(updated.frozen).toEqual({})
+    expect(updated.reviews).toEqual([])
+    expect(updated.tasks).toEqual({})
+  })
+})
