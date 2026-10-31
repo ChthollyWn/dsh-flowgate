@@ -660,7 +660,8 @@ export class HostRuntime {
     if (!engine) return
     // 预算触发器：token-meter 可用时把累计用量上报给引擎（超预算会生成 RK 并暂停写操作）。
     const tokensUsed = this.tokenUsage()
-    if (tokensUsed !== undefined) {
+    // 假引擎/旧注入可能没有该方法：预算触发器是可选增强，不能影响投影。
+    if (tokensUsed !== undefined && typeof engine.recordTokenUsage === 'function') {
       void engine.recordTokenUsage(tokensUsed).catch(() => undefined)
     }
     try {
