@@ -143,7 +143,7 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 | 审查/派发失败 | doctor 里 `✗ 子 agent startActivation`；改用 inline 模式 |
 | 账本校验失败 | 锁定模式：先 `/flow repair`；仍失败则备份 `.flowgate/` 后联系负责人 |
 | 账本某行被截断/JSON 非法 | 锁定模式且 `/flow doctor` 报出精确行号与「不是合法的账本事件 JSON」；`/flow repair` 会明确拒绝自动修复（不静默重写坏账本）。先备份 `.flowgate/state/ledger.jsonl`：能恢复该行内容则人工补齐，否则从备份/会话日志重建后再 `/flow repair` |
-| `changes/<id>/status.json` 损坏（非法 JSON） | 当前 HEAD：坏文件会被加载器跳过（宿主不崩、不进入锁定模式，`/flow doctor` 也不单独提示——**与 03 §14 的锁定语义有已知偏差，待修复**）；恢复路径是 `/flow repair`（从账本里的 `change.updated` 快照重建 status.json 与台账），本轮故障注入用例已验证可恢复 |
+| `changes/<id>/status.json` 损坏（非法 JSON） | 已修（2026-10-31）：坏文件不再被静默跳过——`engine.load` 汇总损坏清单并进入锁定模式，`/flow doctor` 显示路径与修复入口；`/flow repair` 从账本里的 `change.updated` 快照重建 status.json 与台账（故障注入用例已覆盖）。同类：`state/sessions.json` 损坏/截断也走"锁定 + doctor + `/flow repair`"路径（第三轮 P0-6），不再 fail-open |
 | 配置语义非法（如未知 `levels.complexity`） | 宿主仍能启动，但引擎以默认配置降级并进入锁定模式；`/flow doctor` 的「配置：错误」给出字段路径（语义错误无行号）与修复提示，改好 `config.yaml` 后重开会话即恢复 |
 
 ## 6. 清理
@@ -210,6 +210,6 @@ node tools/admin.js /path/to/demo-repo status
   provider 需要 `DEEPSEEK_API_KEY` 环境变量（credentials 文件只对 web 组合生效）。
 - headless 的 `agent/created` 同样会触发自动接续；同一目录只能有一个活动变更，否则自动接续会拒绝（用 admin `pause-id`/`resume` 调整）。
 - 真实 `ts-todo-api`、`java-renewal` 目录不是 git 仓库：任务门自动提交、G3 cleanWorktree 会走降级分支；需要完整 git 语义（派发/worktree）时先 `git init` + 初始提交。
-- 验证审查子 agent：保持 `review.enabled=true`，但把 `review.requireForTaskGate` 设为 `false`（审查失败不阻断任务门，便于观察真实结果）；到 G5 前把 `review.enabled` 改回 `false`——当前终审记录没有自动生产者（`g5.finalReview` 只读记录），真机 headless 里开着会死锁。
+- 验证审查子 agent：保持 `review.enabled=true`，可把 `review.requireForTaskGate` 设为 `false`（审查失败不阻断任务门，便于观察真实结果）。**2026-10-31 第三轮后不再需要"到 G5 前把 review.enabled 改回 false"**：`flow_submit G5` 会在 S5 自动运行终审子 agent 并登记 `kind:'final'`（高风险同时登记 `security`）记录；只有在宿主完全没有子 agent 时才需要 `review.enabled=false`。
 - 验证派发/worktree：`config.dispatch` 用默认 `auto`，S4 让模型调用 `flow_dispatch_next`；`tasks.md` 的 `execution.batches[].mode` 决定顺序或并行（并行批次会为每个任务建 `.flowgate/worktrees/<变更>/<任务>/` 并合并回变更分支）。
 - `flow_dispatch_next` 的结构化 data 里 `worktree` 应为实际创建路径（2026-10-31 修复：此前回填的是派发前快照的空字段）。

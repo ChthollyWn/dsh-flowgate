@@ -118,6 +118,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 | `/flow risk approve\|reject <RK-n> [理由]` | 处理风险接管项 |
 | `/flow plan approve\|reject <PC-n> [理由]` | 处理计划修订申请 |
 | `/flow rule approve\|reject <RL-n> [理由]` | 处理规则沉淀提议 |
+| `/flow conflict approve\|reject <CF-n> [理由]` | 处理集成检查点冲突/失败：approve=确认冲突或测试失败已修好并重试检查点；reject=放弃该批次自动重试（写理由） |
 | `/flow unblock [BL-n\|任务 id] [理由]` | 解除连续失败熔断（T-FAILURE-LIMIT）：清零失败计数、把暂停的任务恢复为运行中，并一并关闭该任务残留的 BL 待处理项；无参时作用于当前变更唯一的 open blocker |
 | `/flow complexity <级别> [理由]` / `/flow risk-level <级别> [理由]` | 调整流程等级；降低必须由人执行并写理由 |
 | `/flow learn <detail\|brief\|off>` | 学习模式详细度 |

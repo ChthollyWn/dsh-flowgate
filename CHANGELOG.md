@@ -45,6 +45,18 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - **GR 批准在重载后丢失**：`approveGate('GR')` 把 PROJECT 标记 archived 后走 `saveChange`，而 `saveChange` 对 archived 直接跳过 status.json 写入（假设目录已被归档移走），导致磁盘仍是 active/awaiting、新会话再次要求批准 GR；现在直接写 status.json + 台账并释放租约（见 Added）。
 - **宿主重启后投影 revision 回退**（见 Added 中的进程 epoch）；**greenfield 演练暴露的 unittest 解析缺口与 PROJECT 接续缺口**（见 Added）。
 
+#### 2026-10-31 第三轮（P0 修复，7 项）
+
+- **P0-4 计划修订落地**：`applyPlanAmendment` 真正解析 `add` 任务卡片段、追加顺序批次并应用 `reorder`（未开始任务可重排，已开始/完成拒绝），`flow_request_plan_change` 批准后执行计划不再"只 `void item`"。新增 `parseTaskCardFragment` 与集成回归。
+- **P0-2/P0-3 集成检查点可修复、可重试**：integration 命令失败时解析失败输出（兜底批次任务范围）自动生成 `FIX-n` 顺序修复批次（`autoRepair` 任务豁免 TDD、`fix` 验证组只接测试类命令，保证真实 `flow_task_done` 可完成）；修复完成后 `dispatchNext` 返回 `retryCheckpoint`，宿主重跑合并+集成命令；连续失败达 `triggers.consecutive_failure_limit` 转负责人闸门（`blocked`），新增 `/flow conflict approve|reject CF-n`（headless 可释放；approve 重置 attempts 后重试，reject 放弃自动重试）；合并冲突写 `merge.conflict` 账本事件并保留 worktree；成功重试自动关闭对应 conflict 项。
+- **P0-1 `run: main` 路由**：`dispatchNext` 返回 `mainTasks` 交由主会话 `flow_task_start` 领取（并行批次可与子 agent 任务并行），不再把主会话任务派给执行者子 agent；`flow_dispatch_next` 结构化 data 带 `mainTasks`。
+- **P0-5 终审/安全审查生产者**：`flow_submit({gate:"G5"})` 在 S5 自动运行只读终审子 agent 并登记 `kind:'final'` 记录（高风险同时登记 `kind:'security'`），修复"开着 `review.enabled` 提交 G5 必然缺终审记录"；终审不可用时返回可执行提示。
+- **P0-7 S5 验证失败回退 S4**：`g5.fullTests` / `g5.lintBuild` / 终审 critical-major findings 触发回退 S4 并生成 `FIX-n` 修复批次；纯证据类失败（`g5.runtime` 等）仍留在 S5 补证据。
+- **任务门审查轮次补齐（复核发现的 pre-existing Major）**：host `flow_task_done`/派发结算不再"有一条 pass 就短路"，按 `requiredReviewRounds()`（高风险 2 轮）从已有 pass 数补跑审查；修复高风险任务门永久缺一轮、默认配置下无法完成任务的问题。
+- **P0-6 `sessions.json` 损坏 fail-closed**：租约文件损坏/截断不再让 `engine.load` 抛错（此前 → 宿主 markInert → 守卫放行）；改为汇总损坏状态文件、进入锁定模式、doctor 显示路径、`/flow repair` 重建空租约并解锁；损坏态不自动改写租约。
+- **测试稳定性**：`test/host/plugin-load.test.ts` 引擎初始化等待改用 `waitForEngine()`（原固定 `flush()` 在 coverage 插桩下偶发 `engine()===null`），修掉本轮复现的 flake。
+- **测试**：第三轮 P0 修复后实测 **93 个测试文件 / 1322 个用例**全绿（新增 3 个集成测试文件 + host/故障注入用例共 33 例）；`pnpm coverage` thresholds（80/80/80/70）通过；`pnpm build`、`verify:package`（39 文件 / 915.7KB）、`verify:client` 通过。
+
 ### Tests
 
 - 测试规模（本轮最终提交实测）：**90 个测试文件 / 1289 个用例**全绿（约 3.5s），较 43d18e5 的 69 files / 995 tests 新增 21 files / 294 tests；新增覆盖：派发并行 27、熔断恢复 18、状态损坏 14、unittest 解析 25、覆盖率补缺 158、投影 epoch 6、PROJECT 接续 4、依赖内容判定 35、路线图首个变更 4 等。

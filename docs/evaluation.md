@@ -89,7 +89,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 ### 5.3 已知边界（首次真跑前需要知道）
 
 1. **澄清不可自动模拟**：headless 一次性任务没有交互式澄清；若 host 组合缺结构化提问服务，agent 会退化为写假设。档案表"被问到才答"的协议在真人交互评测里才完全成立，自动跑测的是"无人工澄清"分支，需人工复盘事件流。
-2. **人工门由脚本扮演负责人**：`--owner auto` 记录的 M-13 是门禁次数，不是真人响应时间；要真实人工负担数据时用 `--owner manual` 或人工在 DSH 里批准。
+2. **人工门由脚本扮演负责人**：`--owner auto` 记录的 M-13 是门禁次数，不是真人响应时间；要真实人工负担数据时用 `--owner manual` 或人工在 DSH 里批准。`--auto-pending` 默认不含 `conflict`：集成检查点冲突需负责人执行 `/flow conflict approve CF-n`（headless 可用命令）；显式加入 `conflict` 会自动重试检查点，慎用。
 3. **B 组默认 `dispatch=inline`、`review.enabled=false`**：精简 headless 没有 subagent provider；并行派发与独立审查要用带 provider 的组合后再跑，`--dispatch auto` 在精简组合里可能降级或被拒。
 4. **README 消毒有边界**：脚本按 `<!-- PUBLIC -->` 标记或"隐藏需求/答案表/预期基线/已知缺陷"等标题移除评分材料，但仓库里的已知缺陷测试文件（`test/known-bugs.mjs` 等）本身保留——它是 bug 任务的客观验收依据，属于基准设计的一部分。
 5. **B 组人工门自动批准路径尚未在真模型闭环中验证**：它与 `tools/admin.js` 走同一个 `engine.approveGate`，代码路径一致，但首次真跑前仍应先用 `--owner manual` 或小任务试点确认。
