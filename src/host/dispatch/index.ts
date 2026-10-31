@@ -320,7 +320,14 @@ async function startExecutor(
       worktree = created.repoRelative
     } catch (error) {
       runtime.noteFeature('dispatch', `worktree 创建失败，批次降级为顺序执行：${toAgentError(error).error}`)
-      // 降级：仍在主工作区执行（H21 不成立时的文档行为）。
+      // 降级：仍在主工作区执行（H21 不成立时的文档行为），但必须把降级原因标到执行图。
+      if (typeof engine.markBatchDowngraded === 'function') {
+        try {
+          await engine.markBatchDowngraded(envelope.batch, 'worktree 不可用，降级在主工作区执行')
+        } catch {
+          // 标注失败不影响派发。
+        }
+      }
     }
   }
 
@@ -398,6 +405,10 @@ function buildExecutorPrompt(envelope: DispatchTaskEnvelope, worktree?: string):
     task.changes.length > 0 ? `删除/重命名：${task.changes.map((change) => `${change.path}${change.to ? `→${change.to}` : ''}`).join('、')}` : '',
     `TDD：${envelope.tdd ? '必须（先写失败测试并运行到 RED，再实现到 GREEN）' : '可选'}`,
     `验证组：${envelope.verifyGroups.map((group) => `${group.group} = ${group.command}`).join('；') || '（无）'}`,
+    envelope.coveredScenarios.length > 0
+      ? `负责覆盖的验收场景：${envelope.coveredScenarios.map((scenario) => `${scenario.id} ${scenario.title}`).join('；')}`
+      : '',
+    task.runReason !== undefined ? `派发理由（任务卡 run_reason）：${task.runReason}` : '',
     '',
     '纪律：',
     '- 只改任务范围内文件；越界会被守卫拒绝并记违规。',
@@ -596,7 +607,20 @@ async function runIntegrationCheckpointInner(
         break
       }
     }
-    // 2) 集成命令（config.commands.integration）。
+    // 2) 集成检查点验证：任务验证组 + 全量测试（T4.9 验收 #3）。
+    if (failures.length === 0 && typeof engine.runCheckpointVerification === 'function') {
+      try {
+        const verification = await engine.runCheckpointVerification(batchId)
+        if (!verification.ok) {
+          failureKind = 'integration'
+          failures.push(`集成检查点验证失败：${verification.detail}`)
+        }
+      } catch (error) {
+        failureKind = 'integration'
+        failures.push(`集成检查点验证无法执行：${toAgentError(error).error}`)
+      }
+    }
+    // 3) 集成命令（config.commands.integration）。
     const integration = engine.getConfig().commands.integration
     if (failures.length === 0 && integration && integration !== 'none' && ports.commandRunner) {
       const result = await ports.commandRunner.run(integration, { cwd: root, timeoutMs: 20 * 60_000 })

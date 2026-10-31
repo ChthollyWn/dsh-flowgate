@@ -442,7 +442,9 @@ describe('只读调查子 agent', () => {
     const outcome = await runInvestigation(h.runtime, { questions: ['为什么慢？'], benefit: '减少超时' })
     expect(outcome.ok).toBe(true)
     expect(outcome.report).toBe('报告：缓存命中率低')
-    expect(outcome.message).toContain('调查完成（completed）')
+    expect(outcome.message).toContain('调查完成')
+    expect(outcome.message).toContain('耗时')
+    expect(outcome.message).toContain('token：未知')
     const spec = specAt(subagents, 0)
     expect(spec.request.agentPreset).toBe(FLOWGATE_PRESETS.reviewer)
     expect(spec.delivery).toBe('caller')
@@ -632,4 +634,36 @@ describe('同一 diff 去重（T3.4）', () => {
       expect(outcome.message).toContain('复用')
       expect((subagents as unknown as { state: { started: unknown[] } }).state.started).toHaveLength(0)
     })
+})
+
+describe('调查并发上限（T4.10）', () => {
+  it('默认最多 2 个并发调查子 agent', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const subagents = createFakeSubagents({
+      start: async () => ({
+        childId: 'child-inv',
+        result: (async () => {
+          await gate
+          return {
+            output: [{ type: 'text', text: '调查报告' }],
+            structured: null,
+            stopReason: 'completed',
+          } as unknown as DshSubagentResult
+        })(),
+        dispose: async () => {},
+      }),
+    })
+    const h = await start({ engine: makeEngine(), services: { subagents } })
+    const first = runInvestigation(h.runtime, { questions: ['q1'], benefit: 'b' })
+    const second = runInvestigation(h.runtime, { questions: ['q2'], benefit: 'b' })
+    const third = await runInvestigation(h.runtime, { questions: ['q3'], benefit: 'b' })
+    expect(third.ok).toBe(false)
+    expect(third.message).toContain('最多 2 个')
+    release()
+    const results = await Promise.all([first, second])
+    expect(results.every((result) => result.ok)).toBe(true)
+  })
 })

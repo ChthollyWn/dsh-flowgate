@@ -749,10 +749,29 @@ export async function checkReadCoverage(
 }
 
 /** 只读调查（flow_investigate）：返回报告文本并记录为调查任务输出。 */
+/** 并发调查上限（T4.10 默认最多 2 个）。 */
+export const MAX_CONCURRENT_INVESTIGATIONS = 2
+const activeInvestigations = new WeakMap<object, number>()
+
+export function activeInvestigationCount(runtime: HostRuntime): number {
+  return activeInvestigations.get(runtime as unknown as object) ?? 0
+}
+
 export async function runInvestigation(
   runtime: HostRuntime,
   input: { questions: string[]; benefit: string; taskId?: string },
 ): Promise<{ ok: boolean; report: string; message: string }> {
+  const key = runtime as unknown as object
+  const running = activeInvestigations.get(key) ?? 0
+  if (running >= MAX_CONCURRENT_INVESTIGATIONS) {
+    return {
+      ok: false,
+      report: '',
+      message: `同时最多 ${MAX_CONCURRENT_INVESTIGATIONS} 个调查子 agent；当前已有 ${running} 个在运行，等其中一个结束再派。`,
+    }
+  }
+  activeInvestigations.set(key, running + 1)
+  const startedAt = Date.now()
   const capability = reviewCapability(runtime)
   if (!capability.available || !capability.provider) {
     return { ok: false, report: '', message: `调查子 agent 不可用：${capability.reason ?? '未知原因'}` }
@@ -800,10 +819,13 @@ export async function runInvestigation(
       .join('\n')
       .trim()
     if (report === '') return { ok: false, report: '', message: '调查子 agent 没有输出报告' }
-    return { ok: true, report, message: `调查完成（${result.stopReason}）` }
+    const elapsed = Date.now() - startedAt
+    runtime.noteFeature('investigation', `调查完成：${elapsed}ms（token 用量宿主未提供，标未知）`)
+    return { ok: true, report, message: `调查完成（${result.stopReason}；耗时 ${elapsed}ms；token：未知）` }
   } catch (error) {
     return { ok: false, report: '', message: `调查子 agent 失败：${toAgentError(error).error}` }
   } finally {
+    activeInvestigations.set(key, Math.max(0, (activeInvestigations.get(key) ?? 1) - 1))
     clearTimeout(timer)
     if (activation) {
       try {

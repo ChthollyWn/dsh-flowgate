@@ -722,6 +722,8 @@ export interface BatchState {
   tasks: string[]
   startedAt?: string
   completedAt?: string
+  /** 运行时降级标注（如 worktree 不可用 → 在主工作区顺序执行），执行图上显示。 */
+  downgraded?: string
   /** Set on auto-generated repair batches: the failed batch this batch repairs. */
   retryOf?: string
   checkpoint?: {

@@ -93,6 +93,20 @@ export async function onEngineReady(runtime: HostRuntime, agent: DshAgent, engin
       `[FlowGate] 已接续变更 ${change.id}「${change.title}」｜阶段 ${change.stage}｜${change.stage === 'S4' ? 'S4 执行' : '按注入的下一步继续'}`,
     ]
     if (change.handoff?.text) parts.push(`交接摘要：${change.handoff.text}`)
+    // T4.8：新会话第一步注入当前任务卡（范围/验证组/TDD），agent 可直接接着做。
+    const activeTask = Object.values(change.tasks ?? {}).find((task) => task.status === 'running' || task.status === 'review')
+    if (activeTask !== undefined) {
+      const card = engine.getTask(activeTask.id)
+      if (card) {
+        parts.push(
+          `当前任务卡 ${card.id}「${card.title}」：范围 ${[...card.scope, ...card.newFiles].join('、') || '—'}；验证组 ${
+            card.verify.map((group) => `${group.group}=${group.command}`).join('；') || '—'
+          }；TDD ${card.tdd}；run ${card.run}。`,
+        )
+      } else {
+        parts.push(`当前任务 ${activeTask.id} 状态 ${activeTask.status}（任务卡解析失败）。`)
+      }
+    }
     if (notices.length > 0) parts.push(`通知：${notices.join('；')}`)
     const text = parts.join('\n')
     try {

@@ -59,6 +59,7 @@ import type {
   ReviewRecord,
   RiskLevel,
   RoadmapDoc,
+  Rule,
   RuntimeSnapshot,
   SessionLease,
   StageId,
@@ -227,6 +228,8 @@ export class FlowEngine {
   private foreignLease: SessionLease | null = null
   private notices: string[] = []
   private evidenceCounter = 0
+  /** 负责人批准的项目规则（.flowgate/rules/*.json），创建新变更时并入契约。 */
+  private projectRules: Rule[] = []
 
   constructor(options: EngineOptions) {
     this.ports = options
@@ -326,6 +329,7 @@ export class FlowEngine {
       }
 
       this.receipts = await this.loadReceipts()
+      await this.loadProjectRules()
       this.project = await loadProjectDoc(this.fs, this.root)
       this.roadmapDoc = await this.loadRoadmapDoc()
       await this.rebuildCounters()
@@ -541,6 +545,34 @@ export class FlowEngine {
     } catch {
       return null
     }
+  }
+
+  /** 读取 `.flowgate/rules/*.json`（负责人批准的规则沉淀），失败时保持空。 */
+  private async loadProjectRules(): Promise<void> {
+    const dir = store.layout(this.root).rulesDir
+    try {
+      if (!(await this.fs.exists(dir))) return
+      const names = (await this.fs.readdir(dir)).filter((name) => name.endsWith('.json')).sort()
+      const rules: Rule[] = []
+      for (const name of names) {
+        try {
+          const raw = await this.fs.readFile(posixJoin(dir, name))
+          const parsed = JSON.parse(raw) as Rule
+          if (parsed && typeof parsed.id === 'string' && parsed.id !== '') rules.push(parsed)
+        } catch {
+          // 单条规则损坏不影响其它规则。
+        }
+      }
+      this.projectRules = rules
+    } catch {
+      this.projectRules = []
+    }
+  }
+
+  /** 当前生效配置（含已批准的项目规则）；创建新变更时用它冻结契约。 */
+  private effectiveConfig(): FlowgateConfig {
+    if (this.projectRules.length === 0) return this.config
+    return { ...this.config, rules: [...this.config.rules, ...this.projectRules] }
   }
 
   private async loadReceipts(): Promise<EvidenceReceipt[]> {
@@ -887,11 +919,11 @@ export class FlowEngine {
         risk: 'normal',
         stage: 'roadmap',
         at: now,
-        config: this.config,
+        config: this.effectiveConfig(),
         pluginVersion: this.pluginVersion,
         skills: this.skillVersions(),
       })
-      change.contract = store.freezeContract(this.config, this.pluginVersion, this.skillVersions(), now)
+      change.contract = store.freezeContract(this.effectiveConfig(), this.pluginVersion, this.skillVersions(), now)
       await store.ensureChangeDir(this.fs, this.root, change.id)
       this.state.changes.push(change)
       this.current = change
@@ -942,17 +974,21 @@ export class FlowEngine {
       risk,
       stage: 'S0',
       at: now,
-      config: this.config,
+      config: this.effectiveConfig(),
       pluginVersion: this.pluginVersion,
       skills: this.skillVersions(),
       roadmap: roadmapRef,
       relatedTo: input.relatedTo,
     })
-    change.contract = store.freezeContract(this.config, this.pluginVersion, this.skillVersions(), now)
+    change.contract = store.freezeContract(this.effectiveConfig(), this.pluginVersion, this.skillVersions(), now)
     await store.ensureChangeDir(this.fs, this.root, change.id)
     const roadmapEntry =
       roadmapRef !== undefined ? this.roadmapDoc?.entries.find((entry) => entry.change === roadmapRef) : undefined
-    await this.writeChangeTemplates(change, roadmapEntry)
+    const relatedAnalysis = input.relatedTo !== undefined ? await this.loadArchivedAnalysis(input.relatedTo) : null
+    if (input.relatedTo !== undefined && relatedAnalysis === null) {
+      this.pushNotice(`关联分析 ${input.relatedTo} 没有找到归档结论：S1 需要自行核对。`)
+    }
+    await this.writeChangeTemplates(change, roadmapEntry, relatedAnalysis ?? undefined)
     this.state.changes.push(change)
     this.current = change
     if (this.sessionId) {
@@ -1027,13 +1063,30 @@ export class FlowEngine {
     await this.fs.writeFile(layout.roadmap, roadmap)
   }
 
+  /** 读取已归档分析任务（A-xxx）的结论，供 relatedTo 立项继承（T4.10）。 */
+  private async loadArchivedAnalysis(analysisId: string): Promise<{ id: string; content: string } | null> {
+    const archiveDir = store.layout(this.root).archiveDir
+    try {
+      if (!(await this.fs.exists(archiveDir))) return null
+      const entries = await this.fs.readdir(archiveDir)
+      const match = entries.filter((name) => name.endsWith(`-${analysisId}`)).sort().pop()
+      if (match === undefined) return null
+      const path = posixJoin(archiveDir, match, 'analysis.md')
+      if (!(await this.fs.exists(path))) return null
+      return { id: analysisId, content: await this.fs.readFile(path) }
+    } catch {
+      return null
+    }
+  }
+
   private async writeChangeTemplates(
     change: ChangeStatus,
     roadmapEntry?: { goal: string; capability: string; acceptance: string },
+    relatedAnalysis?: { id: string; content: string },
   ): Promise<void> {
     const paths = store.changePaths(this.root, change.id)
     const clarifyGoal = roadmapEntry?.goal !== undefined && roadmapEntry.goal !== '' ? roadmapEntry.goal : ''
-    const clarifyTemplate = `# 澄清记录：${change.title}\n\n## 原始描述\n\n${clarifyGoal !== '' ? `${clarifyGoal}（来自已批准的路线图）` : '<!-- 负责人原始描述 -->'}\n\n## 已知事实\n\n<!-- 每条写 文件:起止行 引用形式；没有引用只能算假设 -->\n\n## 六要素\n\n| 要素 | 结论 | 来源 | 状态 |\n|---|---|---|---|\n| 目标 |  |  |  |\n| 边界（做 / 不做） |  |  |  |\n| 角色与权限 |  |  |  |\n| 验收标准 |  |  |  |\n| 约束（非功能） |  |  |  |\n| 未知与假设 |  |  |  |\n\n## 问答记录\n\n| 问题 | 选项 | 回答 | 这个回答改变了什么 |\n|---|---|---|---|\n\n## 已接受的假设\n\n## 未决问题\n`
+    const clarifyTemplate = `# 澄清记录：${change.title}\n\n## 原始描述\n\n${clarifyGoal !== '' ? `${clarifyGoal}（来自已批准的路线图）` : '<!-- 负责人原始描述 -->'}\n\n## 已知事实\n\n<!-- 每条写 文件:起止行 引用形式；没有引用只能算假设 -->\n\n## 六要素\n\n| 要素 | 结论 | 来源 | 状态 |\n|---|---|---|---|\n| 目标 |  |  |  |\n| 边界（做 / 不做） |  |  |  |\n| 角色与权限 |  |  |  |\n| 验收标准 |  |  |  |\n| 约束（非功能） |  |  |  |\n| 未知与假设 |  |  |  |\n\n## 问答记录\n\n| 问题 | 选项 | 回答 | 这个回答改变了什么 |\n|---|---|---|---|\n\n## 已接受的假设\n\n## 未决问题\n${relatedAnalysis !== undefined ? `\n## 关联分析结论（${relatedAnalysis.id}）\n\n${relatedAnalysis.content.slice(0, 4_000)}\n` : ''}`
     const proposalTemplate =
       roadmapEntry !== undefined && (roadmapEntry.goal !== '' || roadmapEntry.acceptance !== '')
         ? `# 变更提案：${change.title}\n\n## 为什么\n\n${roadmapEntry.goal !== '' ? roadmapEntry.goal : '<!-- 要解决的问题与证据 -->'}\n\n## 改什么\n\n${roadmapEntry.capability !== '' ? roadmapEntry.capability : '<!-- 功能列表，配套增量规格 -->'}\n\n## 影响\n\n<!-- 受影响的模块、接口、数据 -->\n\n## 不做\n\n<!-- 明确排除的范围 -->\n\n## 验收要点（来自已批准的路线图）\n\n${roadmapEntry.acceptance !== '' ? roadmapEntry.acceptance : '<!-- 验收要点 -->'}\n`
@@ -1103,6 +1156,14 @@ export class FlowEngine {
     if (passed) {
       await this.appendLedger('gate.passed', { changeId: change.id, gate, items: itemsSummary(result.items) })
       await this.advanceAfterAutoGate(change, gate, at)
+      // T4.8：每通过一个门生成交接摘要（新会话/压缩后优先注入）。
+      if (change.lifecycle === 'active' && change.stage !== 'roadmap' && this.current?.id === change.id) {
+        try {
+          await this.generateHandoff()
+        } catch {
+          // 交接摘要失败不影响门禁。
+        }
+      }
     } else {
       await this.appendLedger('gate.failed', {
         changeId: change.id,
@@ -2632,6 +2693,12 @@ export class FlowEngine {
     taskState.status = 'done'
     taskState.finishedAt = now
     await this.appendLedger('task.done', { changeId: change.id, taskId, batch: taskState.batch })
+    // T4.8：每完成一个任务生成交接摘要。
+    try {
+      await this.generateHandoff()
+    } catch {
+      // 交接摘要失败不影响任务完成。
+    }
     let committed = false
     if (this.config.git.auto_commit && this.git) {
       try {
@@ -3101,6 +3168,60 @@ export class FlowEngine {
    * - `merge`/unknown failure: owner conflict pending; the host retries the
    *   checkpoint on the next `flow_dispatch_next` call (`retryCheckpoint`).
    */
+  /** 并行批次降级标注（worktree 不可用等）：执行图上显示降级原因（T4.9）。 */
+  async markBatchDowngraded(batchId: string, reason: string): Promise<void> {
+    const change = this.current
+    if (!change) return
+    const batch = change.batches.find((item) => item.id === batchId)
+    if (!batch || batch.downgraded === reason) return
+    batch.downgraded = reason
+    await this.appendLedger('checkpoint.failed', { changeId: change.id, batch: batchId, note: `downgraded:${reason}` })
+    await this.saveChange(change)
+    this.pushNotice(`批次 ${batchId} 降级：${reason}。`)
+  }
+
+  /**
+   * 集成检查点的验证部分（T4.9 验收 #3）：按任务卡逐个跑验证组，再跑全量测试；
+   * 全通过才允许批次进入下一批。宿主在合并成功后调用（integration 命令额外再跑）。
+   */
+  async runCheckpointVerification(batchId: string): Promise<{ ok: boolean; detail: string; receiptIds: string[] }> {
+    const change = this.current
+    if (!change) return { ok: false, detail: '没有进行中的变更', receiptIds: [] }
+    const batch = change.batches.find((item) => item.id === batchId)
+    if (!batch) return { ok: false, detail: `没有批次 ${batchId}`, receiptIds: [] }
+    const tasks = this.getTasks().filter((task) => batch.tasks.includes(task.id))
+    const failures: string[] = []
+    const receiptIds: string[] = []
+    for (const task of tasks) {
+      for (const group of task.verify) {
+        try {
+          const receipt = await this.runVerify({ taskId: task.id, group: group.group })
+          receiptIds.push(receipt.id)
+          if (receipt.exitCode !== 0) failures.push(`${task.id}/${group.group} 失败（exit=${receipt.exitCode}）`)
+        } catch (error) {
+          failures.push(`${task.id}/${group.group} 无法执行：${(error as Error).message}`)
+        }
+      }
+    }
+    const commands = this.configFor(change).commands
+    const fullCommand = commands.integration ?? commands.test
+    if (fullCommand !== undefined && fullCommand !== 'none') {
+      try {
+        const receipt = await this.runProjectCommand(fullCommand, 'test', 'checkpoint', this.baselineInputs())
+        receiptIds.push(receipt.id)
+        if (receipt.exitCode !== 0) failures.push(`全量测试失败（${fullCommand}，exit=${receipt.exitCode}）`)
+      } catch (error) {
+        failures.push(`全量测试无法执行：${(error as Error).message}`)
+      }
+    }
+    await this.saveChange(change)
+    return {
+      ok: failures.length === 0,
+      detail: failures.length === 0 ? `任务验证组与全量测试通过（${tasks.length} 个任务）` : failures.join('；'),
+      receiptIds,
+    }
+  }
+
   async completeCheckpoint(
     batchId: string,
     result: {
@@ -3803,10 +3924,22 @@ export class FlowEngine {
 
   private async persistRule(item: PendingItem): Promise<void> {
     const layout = store.layout(this.root)
-    const ruleId = String(item.data?.ruleId ?? `RL-${item.id}`)
-    const path = posixJoin(layout.rulesDir, `${ruleId}.md`)
+    // item.id 本身就是 RL-n；不能再次拼前缀（旧实现会写出 RL-RL-1.md）。
+    const ruleId = String(item.data?.ruleId ?? item.id)
     const md = `# 项目规则 ${ruleId}\n\n## 问题\n\n${String(item.data?.finding ?? item.detail)}\n\n## 规则\n\n${String(item.data?.rule ?? '')}\n\n## 正确写法示例\n\n${String(item.data?.example ?? '')}\n\n## 适用范围\n\n${String(item.data?.scope ?? '')}\n`
-    await this.fs.writeFile(path, md)
+    await this.fs.writeFile(posixJoin(layout.rulesDir, `${ruleId}.md`), md)
+    // 同时写机器可读规则，供 loadProjectRules 在新建变更时并入契约并挂到当前阶段。
+    const stage = this.current?.stage
+    const rule: Rule = {
+      id: ruleId,
+      when: stage !== undefined && stage !== 'archived' ? { stage: [stage] } : {},
+      decision: 'human',
+      why: String(item.data?.rule ?? item.detail),
+      unlock: String(item.data?.example ?? '负责人确认后继续；确需长期放行请改 config/例外'),
+      source: `规则沉淀 ${ruleId}（负责人批准）`,
+    }
+    await this.fs.writeFile(posixJoin(layout.rulesDir, `${ruleId}.json`), `${JSON.stringify(rule, null, 2)}\n`)
+    this.projectRules = [...this.projectRules.filter((entry) => entry.id !== ruleId), rule]
   }
 
   /**
@@ -4583,7 +4716,47 @@ export class FlowEngine {
     const path = posixJoin(store.layout(this.root).metricsDir, `${change.id}.json`)
     await this.fs.writeFile(path, `${JSON.stringify(set, null, 2)}\n`)
     await this.appendLedger('metrics.snapshot', { changeId: change.id, metrics: set.metrics })
+    await this.writeRetro(change, ledgerEvents, set)
     return set
+  }
+
+  /** 复盘日志（T4.5）：把拦截最多规则、误判、阶段耗时、返工原因追加到 .flowgate/retro.md。 */
+  private async writeRetro(change: ChangeStatus, ledgerEvents: LedgerEvent[], metrics: MetricSet): Promise<void> {
+    try {
+      const layout = store.layout(this.root)
+      const events = ledgerEvents.filter((event) => event.data?.changeId === change.id || event.data?.change === change.id)
+      const denied = events.filter((event) => event.type === 'rule.denied' || event.type === 'rule.human')
+      const counts = new Map<string, number>()
+      for (const event of denied) {
+        const ruleId = String(event.data?.ruleId ?? 'unknown')
+        counts.set(ruleId, (counts.get(ruleId) ?? 0) + 1)
+      }
+      const topRules = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+      const stageDurations: { stage: string; ms: number }[] = []
+      const entries = events.filter((event) => event.type === 'stage.entered')
+      for (let index = 0; index < entries.length; index += 1) {
+        const start = Date.parse(entries[index]!.at)
+        const next = entries[index + 1]?.at ?? metrics.generatedAt
+        const end = Date.parse(next)
+        if (Number.isFinite(start) && Number.isFinite(end) && end >= start) stageDurations.push({ stage: String(entries[index]!.data?.stage ?? '?'), ms: end - start })
+      }
+      const slowest = stageDurations.sort((a, b) => b.ms - a.ms)[0]
+      const reworks = events.filter((event) => event.type === 'rework.declared')
+      const lines = [
+        '',
+        `## ${metrics.generatedAt} · ${change.id} ${change.title}`,
+        '',
+        `- 阶段：${change.stage}；复杂度 ${complexityLabel(change.complexity)} · 风险 ${riskLabel(change.risk)}`,
+        `- 拦截最多的规则：${topRules.length > 0 ? topRules.map(([rule, count]) => `${rule}×${count}`).join('、') : '无'}`,
+        `- M-5 误判率：${metrics.metrics['M-5'] !== undefined ? String(metrics.metrics['M-5']) : '未知'}`,
+        `- 最慢阶段：${slowest !== undefined ? `${slowest.stage}（约 ${Math.round(slowest.ms / 60000)} 分钟）` : '未知'}`,
+        `- 返工：${reworks.length > 0 ? reworks.map((event) => `${String(event.data?.kind ?? '')}：${String(event.data?.reason ?? '')}`).join('；') : '无'}`,
+        '',
+      ].join('\n')
+      await this.fs.appendFile(layout.retro, lines)
+    } catch {
+      // 复盘日志写失败不影响指标/报告。
+    }
   }
 
   async generateReport(): Promise<{ path: string; html: string }> {

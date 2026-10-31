@@ -467,3 +467,81 @@ describe('审查豁免与返工失效（T3.4 / T3.8）', () => {
     expect(updated.tasks).toEqual({})
   })
 })
+
+describe('复盘日志与规则沉淀（T4.5）', () => {
+  it('规则批准写出 RL-n.md/.json（不再 RL-RL），新变更契约带上项目规则', async () => {
+    const harness = await createHarness()
+    const { engine, fs } = harness
+    await engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    const item = await engine.proposeRule({
+      finding: '同一请求重复回调导致重复续费',
+      rule: '回调必须按流水号幂等',
+      example: '先查流水号再写入',
+      scope: '本项目',
+    })
+    await engine.decidePending(item.id, 'approved', '采纳')
+    expect(fs.listFiles()).toContain(`.flowgate/rules/${item.id}.md`)
+    expect(fs.listFiles()).toContain(`.flowgate/rules/${item.id}.json`)
+    expect(fs.listFiles().some((file) => file.includes('RL-RL'))).toBe(false)
+
+    await engine.pauseChange()
+    await engine.newChange({ title: '下一个变更', summary: '复用规则' })
+    expect(engine.currentChange()?.contract?.snapshot?.rules.some((rule) => rule.id === item.id)).toBe(true)
+  })
+
+  it('生成指标时追加 retro.md（拦截最多规则/最慢阶段/返工）', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    await harness.engine.generateMetrics()
+    expect(harness.fs.listFiles()).toContain('.flowgate/retro.md')
+    const retro = await harness.fs.readFile('.flowgate/retro.md')
+    expect(retro).toContain('拦截最多的规则')
+    expect(retro).toContain('最慢阶段')
+  })
+})
+
+describe('关联分析立项继承（T4.10）', () => {
+  it('analysis 归档后，relatedTo 新变更的澄清记录带入结论', async () => {
+    const harness = await createHarness()
+    const { engine, fs } = harness
+    await engine.newChange({ title: '排查到期日错误', summary: '只读排查', kind: 'analysis' })
+    const analysisId = engine.currentChange()!.id
+    const submitted = await engine.submitAnalysis({
+      conclusion: '到期日多算一天来自时区处理',
+      proposal: '按 UTC 归一化',
+      limitations: [],
+      citations: [{ file: 'src/index.ts', startLine: 1, endLine: 1, quote: 'export const answer = 42' }],
+    })
+    expect(submitted.ok).toBe(true)
+
+    await engine.newChange({ title: '修复到期日', summary: '按分析结论修复', relatedTo: analysisId })
+    const fixId = engine.currentChange()!.id
+    const clarify = await fs.readFile(`.flowgate/changes/${fixId}/clarify.md`)
+    expect(clarify).toContain(`关联分析结论（${analysisId}）`)
+    expect(clarify).toContain('到期日多算一天来自时区处理')
+  })
+})
+
+describe('集成检查点验证与降级标注（T4.9）', () => {
+  it('runCheckpointVerification 跑任务验证组 + 全量测试；失败则 ok=false', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    const { engine, runner } = harness
+    await engine.taskStart('T1')
+    const ok = await engine.runCheckpointVerification('B1')
+    expect(ok.ok).toBe(true)
+    expect(ok.receiptIds.length).toBeGreaterThan(0)
+
+    runner.enqueue({ match: 'pnpm test', exitCode: 1, stdout: 'FAIL test/renewal.test.ts > renewal' })
+    const failed = await engine.runCheckpointVerification('B1')
+    expect(failed.ok).toBe(false)
+    expect(failed.detail).toContain('失败')
+  })
+
+  it('markBatchDowngraded 把降级原因写进执行图状态', async () => {
+    const harness = await createHarness()
+    await toS4(harness)
+    await harness.engine.markBatchDowngraded('B1', 'worktree 不可用')
+    expect(harness.engine.snapshot().batches.find((batch) => batch.id === 'B1')?.downgraded).toBe('worktree 不可用')
+  })
+})

@@ -1075,6 +1075,10 @@ export async function checkTaskCards(ctx: GateCheckContext): Promise<CheckOutcom
       }
     }
     if (task.title.trim() === '') problems.push(`任务 ${id} 缺少标题`)
+    // T4.6：派子 agent 必须写理由（run: subagent + run_reason）。
+    if (task.run === 'subagent' && (task.runReason ?? '').trim() === '') {
+      problems.push(`任务 ${id} 声明 run: subagent 但没有 run_reason：派子 agent 必须说明为什么需要独立上下文`)
+    }
   }
   const cycle = dependencyCycle(tasks)
   if (cycle) problems.push(`任务依赖成环：${cycle.join(' → ')}`)
