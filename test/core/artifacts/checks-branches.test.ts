@@ -579,6 +579,10 @@ describe('artifacts/checks — G5 / G6', () => {
       checkG5FinalReview(reviews([{ id: 'R1', kind: 'final', verdict: 'changes-required', findings: [], coverageOk: true, diffFingerprint: '', createdAt: '2', attempts: 1 }])),
       'changes-required',
     )
+    expectFail(
+      checkG5FinalReview(reviews([{ id: 'R1', kind: 'final', verdict: 'pass', findings: [], coverageOk: false, diffFingerprint: '', createdAt: '2', attempts: 1 }])),
+      '读取覆盖不足',
+    )
     const critical = checkG5FinalReview(
       reviews([
         {
@@ -609,6 +613,18 @@ describe('artifacts/checks — G5 / G6', () => {
         ),
       ),
       '安全审查未通过',
+    )
+    expectFail(
+      checkG5FinalReview(
+        reviews(
+          [
+            { id: 'R1', kind: 'final', verdict: 'pass', findings: [], coverageOk: true, diffFingerprint: '', createdAt: '1', attempts: 1 },
+            { id: 'R2', kind: 'security', verdict: 'pass', findings: [], coverageOk: false, diffFingerprint: '', createdAt: '2', attempts: 1 },
+          ],
+          'high',
+        ),
+      ),
+      '安全审查读取覆盖不足',
     )
     expect(
       checkG5FinalReview(

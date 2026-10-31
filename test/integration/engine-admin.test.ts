@@ -124,12 +124,92 @@ describe('engine administration', () => {
     expect((await h.engine.evaluateAction(action, { tool: 'write', agentRole: 'main' })).effect).toBe('deny')
   })
 
+  it('计划修订：新增任务卡进入执行计划、reorder 生效且已开始任务不可重排', async () => {
+    const h = await harness()
+    await toS4(h)
+    const card = (id: string, title: string): string =>
+      [
+        `## ${id} ${title}`,
+        '',
+        '```yaml',
+        'covers: [R1.S1]',
+        'scope: [src/index.ts]',
+        'tests: [test/regression.test.ts]',
+        'new_files: []',
+        'depends_on: []',
+        'tdd: optional',
+        'tdd_reason: 文档任务',
+        'verify:',
+        '  - group: unit',
+        '    command: pnpm test',
+        '    inputs: [src/index.ts]',
+        'size: S',
+        'run: auto',
+        '```',
+        '',
+        '补充回归验证。',
+      ].join('\n')
+    const planRequest = await h.engine.requestPlanChange({ add: [card('T9', '补充回归一'), card('T10', '补充回归二')], reason: '发现遗漏任务' })
+    expect(planRequest.id).toMatch(/^PC-/)
+    await h.engine.decidePending(planRequest.id, 'approved', '同意追加')
+    const ids = h.engine.getTasks().map((task) => task.id)
+    expect(ids).toEqual(expect.arrayContaining(['T1', 'T9', 'T10']))
+    const plan = h.engine.getPlan()
+    const addedBatch = plan.batches.find((batch) => batch.tasks.includes('T9'))
+    expect(addedBatch?.tasks).toEqual(['T9', 'T10'])
+    expect(addedBatch?.mode).toBe('sequential')
+    const addedState = h.engine.currentChange()?.tasks['T9']
+    expect(addedState?.status).toBe('pending')
+    expect(addedState?.batch).toBe(addedBatch?.batch)
+
+    // reorder applies to not-yet-started tasks inside their batch.
+    const reorder = await h.engine.requestPlanChange({ reorder: ['T10', 'T9'], reason: '先跑 T10' })
+    await h.engine.decidePending(reorder.id, 'approved', '同意')
+    expect(h.engine.getPlan().batches.find((batch) => batch.batch === addedBatch?.batch)?.tasks).toEqual(['T10', 'T9'])
+    expect(h.engine.currentChange()?.batches.find((batch) => batch.id === addedBatch?.batch)?.tasks).toEqual(['T10', 'T9'])
+
+    // Started tasks cannot be reordered.
+    await h.engine.taskStart('T1')
+    const bad = await h.engine.requestPlanChange({ reorder: ['T9', 'T1'], reason: '换顺序' })
+    await expect(h.engine.decidePending(bad.id, 'approved', '试试')).rejects.toThrow('已开始或已完成')
+
+    // Unknown ids / unparsable fragments are rejected instead of silently ignored.
+    const unknown = await h.engine.requestPlanChange({ reorder: ['T99'], reason: 'x' })
+    await expect(h.engine.decidePending(unknown.id, 'approved', 'x')).rejects.toThrow('未知任务')
+    const broken = await h.engine.requestPlanChange({ add: ['not-a-task-card'], reason: 'x' })
+    await expect(h.engine.decidePending(broken.id, 'approved', 'x')).rejects.toThrow('无法解析新增任务卡片段')
+    // 应用失败时待处理项保持 open（不能出现"已批准但计划没变"的假状态）。
+    expect(h.engine.currentChange()?.pending.find((item) => item.id === broken.id)?.status).toBe('open')
+  })
+
+  it('requiredReviewRounds 按等级返回（高风险 2 轮、低复杂度 0 轮）', async () => {
+    const h = await harness()
+    await toS4(h)
+    const change = h.engine.currentChange()!
+    change.complexity = 'medium'
+    change.risk = 'high'
+    expect(h.engine.requiredReviewRounds()).toBe(2)
+    change.complexity = 'low'
+    change.risk = 'normal'
+    expect(h.engine.requiredReviewRounds()).toBe(0)
+  })
+
+  it('S5 迟到批准计划修订被拒绝（避免不可派发的 pending 批次）', async () => {
+    const h = await harness()
+    await toS4(h)
+    const pc = await h.engine.requestPlanChange({ reorder: ['T1'], reason: '流程后期发现顺序问题' })
+    h.engine.currentChange()!.stage = 'S5'
+    await expect(h.engine.decidePending(pc.id, 'approved', '批准')).rejects.toThrow('只有 S4')
+    expect(h.engine.currentChange()?.pending.find((item) => item.id === pc.id)?.status).toBe('open')
+  })
+
   it('计划修订与规则沉淀：待处理项生命周期', async () => {
     const h = await harness()
     await toS4(h)
-    const planRequest = await h.engine.requestPlanChange({ add: ['T9'], reason: '发现遗漏任务' })
+    const planRequest = await h.engine.requestPlanChange({ reorder: ['T1'], reason: '确认顺序' })
     expect(planRequest.id).toMatch(/^PC-/)
-    await h.engine.decidePending(planRequest.id, 'approved', '同意追加')
+    await h.engine.decidePending(planRequest.id, 'approved', '同意')
+    expect(h.engine.getPlan().batches[0]?.tasks).toEqual(['T1'])
     const rule = await h.engine.proposeRule({ finding: '重复代码', rule: '抽公共函数', example: 'extract()', scope: 'S4' })
     await h.engine.decidePending(rule.id, 'approved', '沉淀')
     const files = h.fs.listFiles()

@@ -104,6 +104,22 @@ describe('命令注册与执行', () => {
     expect(engineState(harness.engine).calls.decidePending[0]).toMatchObject({ id: 'SC-1', decision: 'approved' })
   })
 
+  it('/flow conflict approve 走 decidePending（headless 负责人释放检查点闸门）', async () => {
+    harness = await setupPlugin()
+    const text = await executeFlowCommand(harness.runtime, 'conflict approve CF-1 冲突已修好', harness.agent)
+    expect(engineState(harness.engine).calls.decidePending[0]).toMatchObject({
+      id: 'CF-1',
+      decision: 'approved',
+      reason: '冲突已修好',
+    })
+    expect(text).toContain('集成检查点冲突')
+  })
+
+  it('/flow conflict reject 必须写理由', async () => {
+    harness = await setupPlugin()
+    await expect(executeFlowCommand(harness.runtime, 'conflict reject CF-1', harness.agent)).rejects.toThrow('退回必须写理由')
+  })
+
   it('/flow learn brief 合并写回 config.yaml 并 refresh', async () => {
     harness = await setupPlugin()
     const text = await executeFlowCommand(harness.runtime, 'learn brief', harness.agent)

@@ -305,15 +305,28 @@ export interface VerificationFailureInput {
 /**
  * S5 verification failed: go back to S4 and draft repair task cards whose scope
  * only contains the files/tests involved in the failure (T1.1).
+ *
+ * `startIndex` lets callers continue the `FIX-n` numbering of already-generated
+ * repair tasks (S5 retries / integration-checkpoint repairs in the same change).
  */
 export function applyVerificationFailure(
   change: ChangeStatus,
   failed: VerificationFailureInput[],
   at: string,
+  startIndex = 0,
 ): { change: ChangeStatus; tasks: TaskCard[] } {
   const next = enterStage(change, 'S4', at)
-  const tasks = failed.map((failure, index) => draftRepairTask(change, failure, index))
+  const tasks = draftRepairTasks(change, failed, startIndex)
   return { change: next, tasks }
+}
+
+/** Draft `FIX-n` repair task cards without touching the change/stage. */
+export function draftRepairTasks(
+  change: ChangeStatus,
+  failed: VerificationFailureInput[],
+  startIndex = 0,
+): TaskCard[] {
+  return failed.map((failure, index) => draftRepairTask(change, failure, startIndex + index))
 }
 
 function draftRepairTask(

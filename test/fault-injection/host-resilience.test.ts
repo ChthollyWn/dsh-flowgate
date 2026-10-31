@@ -319,3 +319,59 @@ describe('故障注入：配置语义非法（未知 complexity 值）', () => {
     expect(doctorText).toContain('/flow repair')
   })
 })
+
+describe('故障注入：会话租约文件损坏（sessions.json 被截断）', () => {
+  it('宿主仍能启动、engine 锁定而非 fail-open；doctor 可见，/flow repair 重建租约并解锁', async () => {
+    const h = makeEngineHarness()
+    await h.engine.init()
+    const created = await h.engine.newChange({ title: '租约损坏演练', summary: '验证 sessions.json 损坏 fail-closed' })
+    const sessionsPath = '.flowgate/state/sessions.json'
+    const rawSessions = await h.fs.readFile(sessionsPath)
+    // 模拟磁盘写到一半崩溃：租约文件截断成非法 JSON。
+    await h.fs.writeFile(sessionsPath, rawSessions.slice(0, Math.max(5, Math.floor(rawSessions.length / 2))))
+
+    // 关键回归：此前 readLeases 抛错会让 engine.load 失败 → 宿主 markInert → 守卫放行（fail-open）。
+    const realEngine = makeReloadedEngine(h, 'session-fault-injection-lease')
+    harness = await setupPlugin({ engine: realEngine })
+    expect(harness.runtime.engine()).toBe(realEngine)
+    expect(harness.runtime.inertReasons.some((reason) => reason.stage.includes('引擎'))).toBe(false)
+    expect(realEngine.snapshot().initialized).toBe(true)
+    expect(realEngine.snapshot().locked).toBe(true)
+    // 变更本身仍能加载（损坏只在租约文件，不该丢变更）。
+    expect(realEngine.allChanges().map((change) => change.id)).toContain(created.changeId)
+
+    // 损坏状态下显式接续/恢复要明确失败，不能"假成功"返回空 current。
+    await expect(realEngine.attachSession()).rejects.toThrow('状态文件损坏')
+    await expect(realEngine.resumeChange(created.changeId)).rejects.toThrow('状态文件损坏')
+
+    // 门禁内写入 fail-closed，而不是"engine 未就绪 → 放行"。
+    const decision = await realEngine.evaluateAction(
+      { kind: 'write', tool: 'write', path: 'src/index.ts' },
+      { tool: 'write', agentRole: 'main' },
+    )
+    expect(decision.effect).toBe('deny')
+    expect(decision.message).toContain('R-LOCKED')
+
+    const doctor = await realEngine.doctor()
+    expect(doctor.ledgerOk).toBe(true)
+    expect(doctor.message).toContain('锁定模式')
+    expect(doctor.message).toContain('sessions.json')
+    expect(doctor.message).toContain('/flow repair')
+
+    // /flow repair 可用（不再因 engine inert 而报"引擎未就绪"），重建租约后解锁。
+    const repairText = await executeFlowCommand(harness.runtime, 'repair', harness.agent)
+    expect(repairText).toContain('修复完成')
+    expect(repairText).toContain('会话租约')
+    expect(realEngine.snapshot().locked).toBe(false)
+    const repaired = JSON.parse(await h.fs.readFile(sessionsPath)) as { version?: number; leases?: unknown[] }
+    expect(Array.isArray(repaired.leases)).toBe(true)
+    // 解锁后可以正常接续。
+    await expect(realEngine.attachSession()).resolves.toBeTruthy()
+    // 解锁后写判定恢复正常（不再被 R-LOCKED 拦截）。
+    const afterRepair = await realEngine.evaluateAction(
+      { kind: 'write', tool: 'write', path: 'src/index.ts' },
+      { tool: 'write', agentRole: 'main' },
+    )
+    expect(afterRepair.message).not.toContain('R-LOCKED')
+  })
+})

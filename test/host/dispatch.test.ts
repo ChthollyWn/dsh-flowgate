@@ -231,26 +231,30 @@ describe('派发前的能力检查', () => {
     expect(String(value.data?.hint)).toContain('/flow init')
   })
 
-  it('宿主没有 subagents 服务时返回降级错误且不调用 engine.dispatchNext', async () => {
+  it('宿主没有 subagents 服务但队列为空时不提前失败（run:main 路由仍可用）', async () => {
     const engine = makeEngine()
-    const dispatchCalls = stubDispatch(engine, () => Promise.reject(new Error('不应被调用')))
+    const dispatchCalls = stubDispatch(engine, { dispatched: [], message: '当前没有可派发的任务（fake）。' })
     const h = await start({ engine, services: { subagents: undefined } })
     const { value } = await runTool(h, 'flow_dispatch_next', {})
-    expect(value.ok).toBe(false)
-    expect(value.data?.error).toBe('宿主不支持派发子 agent')
-    expect(String(value.data?.hint)).toContain('ctx.subagents.startActivation')
-    expect(String(value.data?.hint)).toContain('inline')
-    expect(value.data?.validValues).toEqual({ dispatch: ['inline', 'auto', 'subagent'] })
-    expect(dispatchCalls.count).toBe(0)
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('当前没有可派发的任务')
+    expect(dispatchCalls.count).toBe(1)
     expect(subagentsStarted(h)).toBe(0)
   })
 
-  it('宿主有 subagents 服务但没有可用 provider 时返回降级错误', async () => {
-    const h = await start({ engine: makeEngine(), services: { subagents: createFakeSubagents({ providers: [] }) } })
+  it('宿主没有可用 provider 且仍有子 agent 任务时降级失败并回滚任务', async () => {
+    const engine = makeEngine()
+    const state = engineState(engine)
+    stubDispatch(engine, { dispatched: [makeEnvelope('T1')], batchId: 'B1', mode: 'sequential', message: '已派发任务 T1。' })
+    const h = await start({ engine, services: { subagents: createFakeSubagents({ providers: [] }) } })
     const { value } = await runTool(h, 'flow_dispatch_next', {})
     expect(value.ok).toBe(false)
     expect(value.data?.error).toBe('宿主不支持派发子 agent')
     expect(String(value.data?.hint)).toContain('没有可用的子 agent provider')
+    expect(String(value.data?.hint)).toContain('inline')
+    // core 侧已标记 running 的任务要回滚为失败，避免挂起。
+    expect(state.calls.taskFailed.map((entry) => entry.taskId)).toEqual(['T1'])
+    expect(subagentsStarted(h)).toBe(0)
   })
 })
 

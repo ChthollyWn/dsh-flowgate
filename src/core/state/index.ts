@@ -52,6 +52,7 @@ export {
   applyGateRejected,
   enterStage,
   applyVerificationFailure,
+  draftRepairTasks,
   lockChange,
   unlockChange,
   initialStatus,

@@ -436,6 +436,12 @@ export interface TaskCard {
   verify: VerifyGroup[]
   run: 'main' | 'subagent' | 'auto'
   runReason?: string
+  /**
+   * Runtime-only marker for auto-generated repair tasks (FIX-n). They use the
+   * failing command as a `fix` verify group instead of RED→GREEN TDD, and are
+   * exempt from `levels.tddRequiredAll` (high risk) so they stay completable.
+   */
+  autoRepair?: boolean
   risk: string[]
   size: 'S' | 'M' | 'L'
   choreReason?: string
@@ -452,6 +458,8 @@ export interface ExecutionBatch {
   why: string
   /** Runtime annotation when a batch was downgraded (e.g. parallel -> sequential). */
   downgraded?: string
+  /** Set on auto-generated repair batches: the failed batch this batch repairs. */
+  retryOf?: string
 }
 
 export interface ExecutionPlan {
@@ -692,10 +700,14 @@ export interface BatchState {
   tasks: string[]
   startedAt?: string
   completedAt?: string
+  /** Set on auto-generated repair batches: the failed batch this batch repairs. */
+  retryOf?: string
   checkpoint?: {
     status: 'passed' | 'failed' | 'conflict'
     at: string
     detail?: string
+    /** Number of failed integration-checkpoint attempts (repair-loop guard). */
+    attempts?: number
   }
 }
 
@@ -989,11 +1001,13 @@ export type LedgerEventType =
   | 'worktree.removed'
   | 'checkpoint.passed'
   | 'checkpoint.failed'
+  | 'checkpoint.retry_requested'
   | 'merge.conflict'
   | 'verify.receipt'
   | 'review.coverage_failed'
   | 'plan.amend_requested'
   | 'plan.amended'
+  | 'plan.repair_added'
   | 'rule.proposed'
   | 'rule.adopted'
   | 'analysis.submitted'
@@ -1196,6 +1210,17 @@ export interface DispatchOutcome {
   mode?: BatchMode
   message: string
   blocked?: PendingItem
+  /**
+   * Tasks whose card says `run: main`: the main session must claim them with
+   * `flow_task_start` instead of the host starting an executor subagent.
+   */
+  mainTasks?: { taskId: string; batch: string; mode: BatchMode }[]
+  /**
+   * Set when a batch is waiting for its integration checkpoint (failed retry,
+   * merge conflict, or a completed repair batch). The host must retry
+   * `runIntegrationCheckpoint` for this batch instead of starting subagents.
+   */
+  retryCheckpoint?: { batchId: string; attempts: number }
 }
 
 export interface VerifyRequest {

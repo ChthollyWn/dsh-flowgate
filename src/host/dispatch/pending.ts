@@ -68,7 +68,7 @@ export function pendingHint(item: PendingItem): string {
     case 'rule':
       return `/flow rule approve ${item.id} 或 /flow rule reject ${item.id} <理由>`
     case 'conflict':
-      return '集成检查点失败/冲突：修复冲突或测试失败后重新派发；详情见 /flow status'
+      return `/flow conflict approve ${item.id}（确认冲突/失败已修好并重试检查点）或 /flow conflict reject ${item.id} <理由>（放弃自动重试）`
     case 'blocker':
       return '任务失败/中断：决定重试或调整执行计划；详情见 /flow status'
     default:

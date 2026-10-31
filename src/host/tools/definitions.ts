@@ -11,7 +11,7 @@ import type { CitationRef, EvidenceReceipt } from '../../core/types.js'
 import { defineHostTool, fail, ok, type HostToolValue, type ParamSpecs } from './schema.js'
 import { HostError, toAgentError } from '../errors.js'
 import { captureTaskStartSnapshot } from '../postcheck/index.js'
-import { readTaskDiff, reviewCapability, runInvestigation, runTaskReview } from '../review/index.js'
+import { readTaskDiff, reviewCapability, runFinalReview, runInvestigation, runTaskReview, taskReviewRounds } from '../review/index.js'
 
 /** 取引擎（工具调用时引擎一定已初始化；仍做兜底）。 */
 async function requireEngine(runtime: HostRuntime): Promise<EngineLike> {
@@ -145,9 +145,38 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
       execute: async (args) => {
         const engine = await requireEngine(runtime)
         const gate = String(args.gate) as 'GR' | 'G0' | 'G1' | 'G2' | 'G3' | 'G5' | 'G6'
+        // G5/G6 要求终审（高风险还要安全审查）记录；此前没有生产者，
+        // 开着 review.enabled 时提交 G5 必然"缺少 S5 终审记录"（P0-5）。
+        // 这里在提交 G5 前自动跑一次只读终审子 agent 并登记记录。
+        let finalReviewMessage = ''
+        if (gate === 'G5') {
+          const change = engine.currentChange()
+          if (change && change.stage === 'S5' && engine.getConfig().review.enabled) {
+            const finalReview = await runFinalReview(runtime)
+            finalReviewMessage = finalReview.message
+            if (!finalReview.ok) {
+              // 不可用 / 启动失败：直接返回可执行提示（否则 submitGate 会因缺终审记录失败且原因不直观）。
+              if (/不可用|启动失败|没有|主会话未绑定|服务消失|读取终审/.test(finalReview.message)) {
+                return fail(
+                  `S5 终审无法执行：${finalReview.message}`,
+                  '需要带子 agent 的宿主；或在 .flowgate/config.yaml 设 review.enabled=false（会关闭审查要求，不推荐）',
+                  { gate: 'G5' },
+                )
+              }
+              // 读取覆盖不足：不能带着"未覆盖"的终审记录通过 G5（finalReviewOutcome 只看 verdict）。
+              if (!finalReview.coverageOk) {
+                return fail(
+                  `S5 终审未覆盖全部改动：${finalReview.message}`,
+                  '重新提交 G5 重试终审；若持续失败，检查宿主 sessionQuery 能力与审查子 agent 的读取行为',
+                  { gate: 'G5' },
+                )
+              }
+            }
+          }
+        }
         const result = await engine.submitGate(gate)
         runtime.emit()
-        const lines = [result.message]
+        const lines = finalReviewMessage !== '' ? [`终审：${finalReviewMessage}`, result.message] : [result.message]
         for (const failure of result.failures) {
           lines.push(`✗ ${failure.label}：${failure.hint ?? ''}${failure.example ? `（例：${failure.example}）` : ''}`)
         }
@@ -157,6 +186,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           passed: result.passed,
           awaiting: result.awaiting,
           stage: result.stage,
+          finalReview: finalReviewMessage === '' ? undefined : finalReviewMessage,
           failures: result.failures.map((failure) => ({ item: failure.item, label: failure.label, hint: failure.hint, example: failure.example })),
           items: result.items.map((item) => ({ item: item.item, label: item.label, passed: item.passed, hint: item.hint })),
         })
@@ -169,7 +199,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     defineHostTool({
       name: 'flow_task_start',
       description:
-        'S4 inline 模式领取任务（按执行图顺序，不能跳批）。返回任务卡、覆盖场景、上下文片段、TDD 要求与验证组。派发模式（dispatch=subagent/auto）请改用 flow_dispatch_next。',
+        'S4 领取任务（按执行图顺序，不能跳批）。返回任务卡、覆盖场景、上下文片段、TDD 要求与验证组。派发模式（dispatch=subagent/auto）下仅 `run: main` 的任务用本工具领取（子 agent 任务用 flow_dispatch_next）；inline 模式全部用本工具。',
       parameters: {
         taskId: { type: 'string', required: true, description: '任务 id，如 "T2"' },
       },
@@ -214,20 +244,29 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         let reviewNote: string | null = null
         try {
           const config = engine.getConfig()
-          const change = engine.currentChange()
-          const existingPass = change?.reviews.some((review) => review.taskId === taskId && review.verdict === 'pass' && review.coverageOk)
-          if (config.review.enabled && !existingPass) {
+          // 高风险任务门要求 2 轮审查（levels.reviewRoundsPerTask）；host 必须按
+          // 已有 pass 数补足轮次，不能"有一条 pass 就短路"（否则任务门永久缺一轮）。
+          const required = taskReviewRounds(engine)
+          const passCount = (): number =>
+            (engine.currentChange()?.reviews ?? []).filter(
+              (review) => review.taskId === taskId && review.verdict === 'pass' && review.coverageOk,
+            ).length
+          if (config.review.enabled && required > 0 && passCount() < required) {
             const capability = reviewCapability(runtime)
             if (capability.available) {
-              const review = await runTaskReview(runtime, taskId)
-              reviewNote = review.message
-              if (!review.ok && config.review.requireForTaskGate) {
-                return fail(`任务 ${taskId} 的审查未通过或缺失：${review.message}`, '修复审查发现后重试 flow_task_done；或由负责人豁免（低风险）', {
-                  taskId,
-                  findings: review.findings,
-                  coverageOk: review.coverageOk,
-                })
+              const messages: string[] = []
+              for (let round = passCount(); round < required; round += 1) {
+                const review = await runTaskReview(runtime, taskId)
+                messages.push(review.message)
+                if (!review.ok && config.review.requireForTaskGate) {
+                  return fail(`任务 ${taskId} 的审查未通过或缺失：${review.message}`, '修复审查发现后重试 flow_task_done；或由负责人豁免（低风险）', {
+                    taskId,
+                    findings: review.findings,
+                    coverageOk: review.coverageOk,
+                  })
+                }
               }
+              reviewNote = messages.join('；')
             } else {
               reviewNote = `审查不可用（${capability.reason ?? '宿主缺少子 agent'}），任务门可能标记审查缺失`
             }
@@ -391,7 +430,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
       description: 'S4 申请修订执行计划（新增任务/调整顺序），生成计划修订申请 PC-n。已开始/已完成的任务不能改。',
       parameters: {
         add: { type: 'array', description: '要新增的任务（每个元素是任务卡 markdown 片段）', items: { type: 'string' } },
-        reorder: { type: 'array', description: '新的任务顺序（任务 id 列表）', items: { type: 'string' } },
+        reorder: { type: 'array', description: '新的任务顺序（任务 id 列表；只调整同一批次内未开始任务的先后）', items: { type: 'string' } },
         reason: { type: 'string', required: true, description: '为什么必须修订计划' },
       },
       execute: async (args) => {

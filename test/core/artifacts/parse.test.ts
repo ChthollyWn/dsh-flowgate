@@ -13,6 +13,7 @@ import {
   parseRisk,
   parseRoadmap,
   parseTasks,
+  parseTaskCardFragment,
   traceabilityMatrix,
   VAGUE_TERMS,
 } from '../../../src/core/artifacts/parse'
@@ -402,5 +403,39 @@ describe('traceabilityMatrix', () => {
     const ids = knownScenarioIds(spec)
     expect(ids.has('R1.S1')).toBe(true)
     expect(ids.has('R9.S9')).toBe(false)
+  })
+})
+
+describe('parseTaskCardFragment', () => {
+  const fragment = [
+    '## T9 补充回归',
+    '',
+    '```yaml',
+    'covers: [R1.S1]',
+    'scope: [src/index.ts]',
+    'verify:',
+    '  - group: unit',
+    '    command: pnpm test',
+    '    inputs: [src/index.ts]',
+    'tdd: optional',
+    'size: S',
+    'run: main',
+    '```',
+    '',
+    '补充回归验证。',
+  ].join('\n')
+
+  it('解析单个任务卡片段（标题 + YAML）', () => {
+    const card = parseTaskCardFragment(fragment)
+    expect(card?.id).toBe('T9')
+    expect(card?.title).toBe('补充回归')
+    expect(card?.scope).toEqual(['src/index.ts'])
+    expect(card?.run).toBe('main')
+    expect(card?.verify[0]?.command).toBe('pnpm test')
+  })
+
+  it('没有任务标题或为空时返回 null', () => {
+    expect(parseTaskCardFragment('')).toBeNull()
+    expect(parseTaskCardFragment('not-a-task-card')).toBeNull()
   })
 })

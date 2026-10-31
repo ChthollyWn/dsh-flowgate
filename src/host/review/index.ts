@@ -48,6 +48,16 @@ export const REVIEW_OUTPUT_SCHEMA: Record<string, unknown> = {
   additionalProperties: true,
 }
 
+/** 当前变更的任务门审查轮次要求（0=不需要；fake/旧 engine 退化为 1）。 */
+export function taskReviewRounds(engine: EngineLike): number {
+  const fn = (engine as unknown as { requiredReviewRounds?: () => number }).requiredReviewRounds
+  try {
+    return typeof fn === 'function' ? Math.max(0, Number(fn.call(engine)) || 0) : 1
+  } catch {
+    return 1
+  }
+}
+
 /** 子 agent 可用性：subagents 服务 + agent 工厂 + 已知 provider。 */
 export function reviewCapability(runtime: HostRuntime): { available: boolean; provider?: string; reason?: string } {
   const subagents = runtime.getService<DshSubagentRuntime>('subagents')
@@ -240,6 +250,190 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
     findings: [],
     coverageOk: false,
     message: `审查子 agent 启动失败（重试 1 次后仍失败）：${toAgentError(lastError).error}。任务门将标记"审查缺失"。`,
+  }
+}
+
+/** 终审检查清单（S5；高风险额外要求安全/合规）。 */
+function finalReviewCriteria(riskHigh: boolean): string[] {
+  const criteria = [
+    '全部改动是否满足变更目标与全部验收场景（对照 specs/ 与追溯矩阵）',
+    '是否引入回归风险：既有行为、接口兼容、迁移与配置是否被无证据地改变',
+    '证据是否真实：测试是否覆盖新逻辑，是否存在跳过用例、改断言或"无证据自称完成"',
+    '错误处理与边界条件（失败路径、幂等、并发）是否完整',
+  ]
+  if (riskHigh) {
+    criteria.push(
+      '安全：鉴权/越权、注入、密钥与敏感数据、依赖与供应链风险',
+      '合规：日志/导出/存储是否泄漏敏感字段，是否满足登记的合规要求',
+    )
+  }
+  return criteria
+}
+
+function buildFinalReviewPrompt(input: {
+  changeTitle: string
+  riskHigh: boolean
+  criteria: string[]
+  diff: string
+  files: string[]
+}): DshContentBlock[] {
+  const lines: string[] = [
+    '你是 FlowGate 的独立终审者（只读取证模式）。这是 S5 交付前的整体终审，只输出结构化结论。',
+    '',
+    `变更：${input.changeTitle}`,
+    `风险等级：${input.riskHigh ? '高（必须同时给出安全/合规结论）' : '普通'}`,
+    '',
+    '终审清单（逐条给出结论，发现必须带文件与行号）：',
+    ...input.criteria.map((item, index) => `${index + 1}. ${item}`),
+    '',
+    '规则：',
+    '- 只能用只读工具（read/glob/grep/flow_diff）；不能改文件、不能跑 shell。',
+    '- 至少读完改动文件与原文件的相关行；漏读或截断视为未覆盖，结论会被拒绝。',
+    '- verdict 只能是 pass 或 changes-required；findings 的 severity 只能是 critical/major/minor。',
+    '- 没有发现问题时 findings 为空数组，verdict 仍可为 pass。',
+    '',
+    input.files.length > 0 ? `涉及文件：${input.files.join('、')}` : '涉及文件：见 diff',
+    '',
+    '改动 diff（相对 S2 基线）：',
+    '```diff',
+    input.diff.length > 80_000 ? `${input.diff.slice(0, 80_000)}\n…（diff 过长已截断，可用 flow_diff 或 read 查看完整内容）` : input.diff,
+    '```',
+  ].filter((line) => line !== '')
+  return [{ type: 'text', text: lines.join('\n') }]
+}
+
+/**
+ * S5 终审 / 高风险安全审查的生产者（P0-5）。
+ *
+ * 现有 `runTaskReview` 只产 `kind:'task'` 的审查记录，而 G5/G6 要求
+ * `kind:'final'`（高风险还需 `kind:'security'`）记录——此前没有生产者，
+ * 开着 `review.enabled` 提交 G5 必然失败。终审对"相对 S2 基线的整体 diff"
+ * 跑一次只读审查子 agent，并把同一结论登记为 final（高风险时再登记 security）。
+ */
+export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOutcome> {
+  const capability = reviewCapability(runtime)
+  if (!capability.available || !capability.provider) {
+    return {
+      ok: false,
+      verdict: 'changes-required',
+      findings: [],
+      coverageOk: false,
+      message: `终审子 agent 不可用：${capability.reason ?? '未知原因'}`,
+    }
+  }
+  const parent = runtime.mainAgent()
+  if (!parent) return { ok: false, verdict: 'changes-required', findings: [], coverageOk: false, message: '主会话未绑定' }
+  const engine = runtime.requireEngine()
+  const change = engine.currentChange()
+  if (!change) throw new HostError('没有进行中的变更', '运行 /flow 查看')
+  const subagents = runtime.getService<DshSubagentRuntime>('subagents')
+  if (!subagents) return { ok: false, verdict: 'changes-required', findings: [], coverageOk: false, message: '子 agent 服务消失' }
+  const ports = runtime.ports()
+  const root = runtime.root()
+  let diff = ''
+  let files: string[] = []
+  if (ports?.git && root) {
+    const base = change.baseline?.commit ?? undefined
+    try {
+      diff = await ports.git.diffText(root, base)
+      files = await ports.git.diffNames(root, base).catch(() => [])
+    } catch (error) {
+      return {
+        ok: false,
+        verdict: 'changes-required',
+        findings: [],
+        coverageOk: false,
+        message: `读取终审 diff 失败：${toAgentError(error).error}`,
+      }
+    }
+  }
+  if (files.length === 0) {
+    files = [...new Set(engine.getTasks().flatMap((task) => [...task.scope, ...task.newFiles, ...task.tests]))]
+  }
+  const diffFingerprint = sha256Hex(diff)
+  const riskHigh = change.risk === 'high'
+  const prompt = buildFinalReviewPrompt({
+    changeTitle: `${change.id} ${change.title}`,
+    riskHigh,
+    criteria: finalReviewCriteria(riskHigh),
+    diff,
+    files,
+  })
+
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8 * 60_000)
+    timer.unref?.()
+    let activation: { childId: unknown; result: Promise<DshSubagentResult>; dispose(): Promise<void> } | null = null
+    try {
+      activation = await subagents.startActivation({
+        provider: capability.provider,
+        label: `flowgate-final-review-${attempt}`,
+        request: {
+          parent,
+          agentPreset: FLOWGATE_PRESETS.reviewer,
+          prompt,
+          outputSchema: REVIEW_OUTPUT_SCHEMA,
+          signal: controller.signal,
+          ...(root ? { cwd: root } : {}),
+        },
+        signal: controller.signal,
+        delivery: 'caller',
+      })
+      runtime.registerAgentRole(String(activation.childId), 'reviewer')
+      await enforceChildReadOnly(runtime, String(activation.childId))
+      const result = await activation.result
+      const structured = parseReviewResult(result)
+      const coverage = await checkReadCoverage(runtime, String(activation.childId), files)
+      const coverageOk = structured.readFilesSatisfied && coverage.ok
+      try {
+        await engine.recordReview({
+          kind: 'final',
+          verdict: structured.verdict,
+          findings: structured.findings,
+          coverageOk,
+          diffFingerprint,
+          attempts: attempt,
+        })
+        if (riskHigh) {
+          await engine.recordReview({
+            kind: 'security',
+            verdict: structured.verdict,
+            findings: structured.findings,
+            coverageOk,
+            diffFingerprint,
+            attempts: attempt,
+          })
+        }
+      } catch (error) {
+        runtime.noteFeature('review', `终审记录失败：${toAgentError(error).error}`)
+      }
+      runtime.emit()
+      const message = coverageOk
+        ? `终审完成：${structured.verdict === 'pass' ? '通过' : '需要修改'}（${structured.findings.length} 条发现${riskHigh ? '，已登记安全审查' : ''}，第 ${attempt} 次尝试）`
+        : `终审未覆盖全部改动文件（读取覆盖不足）：${coverage.detail ?? '读取覆盖不足'}。本次不消耗轮次。`
+      return { ok: coverageOk, verdict: structured.verdict, findings: structured.findings, coverageOk, message }
+    } catch (error) {
+      lastError = error
+      runtime.noteFeature('review', `终审子 agent 第 ${attempt} 次启动/执行失败（不消耗轮次）：${toAgentError(error).error}`)
+    } finally {
+      clearTimeout(timer)
+      if (activation) {
+        try {
+          await activation.dispose()
+        } catch {
+          // 清理失败不影响结论。
+        }
+      }
+    }
+  }
+  return {
+    ok: false,
+    verdict: 'changes-required',
+    findings: [],
+    coverageOk: false,
+    message: `终审子 agent 启动失败（重试 1 次后仍失败）：${toAgentError(lastError).error}`,
   }
 }
 

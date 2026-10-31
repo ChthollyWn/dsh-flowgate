@@ -139,7 +139,14 @@ describe('runIntegrationCheckpoint 分支', () => {
 
   it('集成命令失败时记录 checkpoint 失败、保留 worktree 便于排查', async () => {
     const runner = vi.fn(async () => ({ exitCode: 2, stdout: 'partial', stderr: '2 tests failed', timedOut: false }))
-    const completed: { id: string; result: { ok: boolean; detail?: string } }[] = []
+    type CheckpointResult = {
+      ok: boolean
+      detail?: string
+      kind?: 'merge' | 'integration' | 'unknown'
+      output?: string
+      command?: string
+    }
+    const completed: { id: string; result: CheckpointResult }[] = []
     const noteFeature = vi.fn()
     const runtime = {
       root: () => '/fake/project',
@@ -153,7 +160,7 @@ describe('runIntegrationCheckpoint 分支', () => {
       snapshot: () => ({ batches: [{ id: 'B1', tasks: ['T1', 'T2'] }] }),
       currentChange: () => ({ id: 'C-001', tasks: doneTasks, batches: [] }),
       getConfig: () => ({ commands: { integration: 'pnpm test' }, parallel: { setup: null, max_agents: 3 } }),
-      completeCheckpoint: async (id: string, result: { ok: boolean; detail?: string }) => {
+      completeCheckpoint: async (id: string, result: CheckpointResult) => {
         completed.push({ id, result })
       },
     }
@@ -163,6 +170,10 @@ describe('runIntegrationCheckpoint 分支', () => {
     expect(result?.detail).toContain('exit=2')
     expect(result?.detail).toContain('2 tests failed')
     expect(completed[0]?.result.ok).toBe(false)
+    // 结构化失败信息交给 core 解析修复范围（P0-2）。
+    expect(completed[0]?.result.kind).toBe('integration')
+    expect(completed[0]?.result.command).toBe('pnpm test')
+    expect(completed[0]?.result.output).toContain('2 tests failed')
     // 失败时不清理 worktree/branch（保留给负责人排查）。
     const calls = gitLines()
     expect(calls.some((line) => line.startsWith('worktree remove --force'))).toBe(false)
@@ -208,6 +219,24 @@ describe('runIntegrationCheckpoint 分支', () => {
     const result = await runIntegrationCheckpoint(stub.runtime as never, stub.engine as never, 'B1')
     expect(result).toEqual({ batchId: 'B1', ok: false, detail: 'ledger broken' })
     expect(stub.noteFeature).toHaveBeenCalledWith('dispatch', expect.stringContaining('集成检查点异常'))
+  })
+
+  it('同一批次并发调用只执行一次（子 agent 结算回调去重）', async () => {
+    const calls: string[] = []
+    const stub = checkpointStub({
+      tasks: doneTasks,
+      completeCheckpoint: async (id: string) => {
+        calls.push(id)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      },
+    })
+    const [first, second] = await Promise.all([
+      runIntegrationCheckpoint(stub.runtime as never, stub.engine as never, 'B1'),
+      runIntegrationCheckpoint(stub.runtime as never, stub.engine as never, 'B1'),
+    ])
+    expect(first).toEqual(second)
+    expect(first?.ok).toBe(true)
+    expect(calls).toEqual(['B1'])
   })
 
   it('批次/根目录/端口缺失时直接跳过（返回 null）', async () => {
@@ -342,6 +371,142 @@ describe('并行批次并发上限排队（max_agents=2）', () => {
       expect((subagents.state.started[2] as DshSubagentActivationSpec).label).toBe('flowgate-exec-T3')
       resolvers.get('flowgate-exec-T3')?.({ output: [], structured: { summary: 'T3 完成' }, stopReason: 'completed' })
       await flush(20)
+    } finally {
+      await fsp.rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 检查点失败后的重试路径（P0-3）：宿主在 retryCheckpoint 时重跑检查点
+// ---------------------------------------------------------------------------
+
+describe('flow_dispatch_next 重试集成检查点', () => {
+  it('dispatchNext 返回 retryCheckpoint 时宿主重跑检查点并返回通过', async () => {
+    const projectRoot = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'flowgate-retry-'))
+    try {
+      const config = defaultFakeConfig() as unknown as FlowgateConfig
+      config.review = { enabled: false, requireForTaskGate: false }
+      config.commands = {}
+      const engine = createFakeEngine({ config }) as unknown as PluginHarness['engine']
+      const state = engineState(engine)
+      const task = (id: string): TaskState => ({
+        id,
+        batch: 'B1',
+        status: 'done',
+        tdd: 'none',
+        evidenceIds: [],
+        reviewIds: [],
+        worktree: `.flowgate/worktrees/C-001/${id}`,
+      })
+      state.current = {
+        id: 'C-001',
+        kind: 'change',
+        title: '重试检查点',
+        complexity: 'low',
+        risk: 'normal',
+        stage: 'S4',
+        lifecycle: 'active',
+        gates: {},
+        branch: 'main',
+        batches: [{ id: 'B1', mode: 'parallel', status: 'checkpoint', tasks: ['T1', 'T2'] }],
+        tasks: { T1: task('T1'), T2: task('T2') },
+        evidenceIds: [],
+        pending: [],
+        overrides: [],
+        exceptions: [],
+        violations: [],
+        reviews: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      } as ChangeStatus
+      state.snapshotOverrides = { batches: [{ id: 'B1', mode: 'parallel', status: 'checkpoint', tasks: ['T1', 'T2'] }] }
+      const checkpointCalls: { id: string; result: { ok: boolean } }[] = []
+      type CheckpointResult = {
+        ok: boolean
+        detail?: string
+        kind?: 'merge' | 'integration' | 'unknown'
+        output?: string
+        command?: string
+      }
+      engine.completeCheckpoint = async (id: string, result: CheckpointResult) => {
+        checkpointCalls.push({ id, result })
+      }
+      engine.dispatchNext = async () => ({
+        dispatched: [],
+        batchId: 'B1',
+        mode: 'parallel' as const,
+        message: '批次 B1 的集成检查点待重试。',
+        retryCheckpoint: { batchId: 'B1', attempts: 1 },
+      })
+      const subagents = createFakeSubagents({ start: vi.fn() })
+      const h = await setupPlugin({ engine, services: { subagents }, config: { projectRoot } })
+      harness = h
+      await h.runtime.waitForEngine()
+
+      const result = await runTool(h, 'flow_dispatch_next', {})
+      expect(result.value.ok).toBe(true)
+      expect(result.value.summary).toContain('集成检查点：批次 B1 通过')
+      expect(result.value.data?.checkpoint).toBe('passed')
+      expect(checkpointCalls).toEqual([{ id: 'B1', result: { ok: true } }])
+    } finally {
+      await fsp.rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// run: main 任务（P0-1）：交给主会话领取，不启动子 agent
+// ---------------------------------------------------------------------------
+
+describe('flow_dispatch_next 的 run: main 任务', () => {
+  it('mainTasks 交给主会话 flow_task_start，不启动执行者子 agent', async () => {
+    const projectRoot = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'flowgate-run-main-'))
+    try {
+      const config = defaultFakeConfig() as unknown as FlowgateConfig
+      config.review = { enabled: false, requireForTaskGate: false }
+      const engine = createFakeEngine({ config }) as unknown as PluginHarness['engine']
+      engine.dispatchNext = async () => ({
+        dispatched: [],
+        batchId: 'B1',
+        mode: 'sequential' as const,
+        mainTasks: [{ taskId: 'T1', batch: 'B1', mode: 'sequential' as const }],
+        message: '批次 B1 的下一个任务 T1 标记 run: main，请主会话用 flow_task_start("T1") 执行。',
+      })
+      const subagents = createFakeSubagents({ start: vi.fn() })
+      const h = await setupPlugin({ engine, services: { subagents }, config: { projectRoot } })
+      harness = h
+      await h.runtime.waitForEngine()
+
+      const result = await runTool(h, 'flow_dispatch_next', {})
+      expect(result.value.ok).toBe(true)
+      expect(result.value.summary).toContain('flow_task_start("T1")')
+      expect((result.value.data?.mainTasks as unknown[]).length).toBe(1)
+      expect(subagents.state.started).toHaveLength(0)
+    } finally {
+      await fsp.rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('宿主没有子 agent 能力时，纯 run:main 任务仍可派发（不提前失败）', async () => {
+    const projectRoot = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'flowgate-run-main-nocap-'))
+    try {
+      const config = defaultFakeConfig() as unknown as FlowgateConfig
+      config.review = { enabled: false, requireForTaskGate: false }
+      const engine = createFakeEngine({ config }) as unknown as PluginHarness['engine']
+      engine.dispatchNext = async () => ({
+        dispatched: [],
+        batchId: 'B1',
+        mode: 'sequential' as const,
+        mainTasks: [{ taskId: 'T1', batch: 'B1', mode: 'sequential' as const }],
+        message: '批次 B1 的下一个任务 T1 标记 run: main。',
+      })
+      const h = await setupPlugin({ engine, services: { subagents: undefined }, config: { projectRoot } })
+      harness = h
+      await h.runtime.waitForEngine()
+      const result = await runTool(h, 'flow_dispatch_next', {})
+      expect(result.value.ok).toBe(true)
+      expect(result.value.summary).toContain('flow_task_start("T1")')
     } finally {
       await fsp.rm(projectRoot, { recursive: true, force: true })
     }

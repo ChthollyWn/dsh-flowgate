@@ -1443,6 +1443,22 @@ export function parseTasks(raw: string): TasksDoc {
 // Project doc
 // ---------------------------------------------------------------------------
 
+/**
+ * Parse a single task-card markdown fragment.
+ *
+ * Used by approved plan amendments (`plan.amend_requested` → `add: string[]`):
+ * each element is one task-card fragment that must start with a task heading
+ * such as `## T9 标题` and carry the usual YAML block. Returns `null` when no
+ * task heading can be recognized so callers can raise an actionable error
+ * instead of silently dropping a task.
+ */
+export function parseTaskCardFragment(markdown: string): TaskCard | null {
+  const safe = typeof markdown === 'string' ? markdown : String(markdown ?? '')
+  if (safe.trim() === '') return null
+  const parsed = parseTasks(safe)
+  return parsed.tasks[0] ?? null
+}
+
 const COMMAND_KEY_MATCHERS: ReadonlyArray<{ key: keyof ProjectDoc['commands']; re: RegExp }> = [
   { key: 'integration', re: /集成|integration|verify/i },
   { key: 'typecheck', re: /类型|typecheck|tsc/i },

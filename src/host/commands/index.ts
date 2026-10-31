@@ -48,6 +48,7 @@ export const FLOW_COMMAND_HELP = [
   '/flow unblock [BL-n|任务id] [理由] — 解除连续失败熔断：清零失败计数、任务恢复执行（无参时处理唯一 open blocker）',
   '/flow plan approve|reject <PC-n> [理由] — 计划修订申请',
   '/flow rule approve|reject <RL-n> [理由] — 规则沉淀提议',
+  '/flow conflict approve|reject <CF-n> [理由] — 集成检查点冲突/失败：approve=确认已修好并重试检查点，reject=放弃自动重试',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
   '/flow risk-level <普通|高> [理由] — 改风险等级',
   '/flow learn <detail|brief|off> — 学习模式',
@@ -121,6 +122,7 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
     case 'risk':
     case 'plan':
     case 'rule':
+    case 'conflict':
       return pendingCommand(runtime, verb, args)
     case 'unblock':
       return unblockCommand(runtime, args)
@@ -315,7 +317,11 @@ async function approveCommand(runtime: HostRuntime, agent: DshAgent | null, args
   return lines.join('\n')
 }
 
-async function pendingCommand(runtime: HostRuntime, kind: 'scope' | 'risk' | 'plan' | 'rule', args: string[]): Promise<string> {
+async function pendingCommand(
+  runtime: HostRuntime,
+  kind: 'scope' | 'risk' | 'plan' | 'rule' | 'conflict',
+  args: string[],
+): Promise<string> {
   const action = (args[0] ?? '').toLowerCase()
   const id = args[1]
   const reason = args.slice(2).join(' ')
@@ -327,7 +333,16 @@ async function pendingCommand(runtime: HostRuntime, kind: 'scope' | 'risk' | 'pl
   const engine = await engineFor(runtime)
   const item = await engine.decidePending(id, action === 'approve' ? 'approved' : 'rejected', reason === '' ? undefined : reason)
   runtime.emit()
-  const label = kind === 'scope' ? '范围变更' : kind === 'risk' ? '风险接管' : kind === 'plan' ? '计划修订' : '规则提议'
+  const label =
+    kind === 'scope'
+      ? '范围变更'
+      : kind === 'risk'
+        ? '风险接管'
+        : kind === 'plan'
+          ? '计划修订'
+          : kind === 'conflict'
+            ? '集成检查点冲突'
+            : '规则提议'
   return `${label} ${item.id} 已${action === 'approve' ? '批准' : '退回'}。${item.title}`
 }
 
@@ -342,6 +357,8 @@ function pendingKindHint(kind: string): string {
       return '/flow plan approve <PC-n>'
     case 'rule':
       return '/flow rule approve <RL-n>'
+    case 'conflict':
+      return '/flow conflict approve <CF-n>（确认已修好并重试检查点）或 /flow conflict reject <CF-n> <理由>（放弃自动重试）'
     default:
       return '运行 /flow 查看待处理项列表'
   }

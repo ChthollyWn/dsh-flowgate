@@ -77,11 +77,17 @@ describe('loadProjectState', () => {
     expect(state.locked).toBeUndefined()
   })
 
-  it('会话租约损坏时抛错（宿主据此锁定并提示 repair）', async () => {
+  it('会话租约损坏时汇总为 corruptStateFiles（由 engine 锁定，不再让 load 抛错）', async () => {
     const fs = new MemoryFileSystem()
     await scaffold(fs, '')
     await fs.writeFile(layout('').sessions, '{broken')
-    await expect(loadProjectState({ fs, root: '', config: DEFAULT_CONFIG, clock })).rejects.toThrowError(/租约/)
+    // P0-6：租约损坏曾让 loadProjectState 抛错 → engine.load 失败 → 宿主 markInert →
+    // 守卫 fail-open。现在按状态文件损坏处理：返回损坏清单，engine 进入锁定模式。
+    const state = await loadProjectState({ fs, root: '', config: DEFAULT_CONFIG, clock })
+    expect(state.leases).toEqual([])
+    expect(state.corruptStateFiles).toHaveLength(1)
+    expect(state.corruptStateFiles?.[0]?.path).toBe(layout('').sessions)
+    expect(state.corruptStateFiles?.[0]?.reason).toContain('非法 JSON')
   })
 
   it('支持 root 前缀', async () => {

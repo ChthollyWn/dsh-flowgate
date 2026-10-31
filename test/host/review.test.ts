@@ -16,6 +16,7 @@ import {
   checkReadCoverage,
   REVIEW_OUTPUT_SCHEMA,
   reviewCapability,
+  runFinalReview,
   runInvestigation,
   runTaskReview,
 } from '../../src/host/review/index.js'
@@ -466,5 +467,137 @@ describe('只读调查子 agent', () => {
     expect(outcome.ok).toBe(false)
     expect(outcome.message).toContain('调查子 agent 不可用')
     expect(outcome.message).toContain('ctx.subagents.startActivation')
+  })
+})
+
+describe('任务门审查轮次（高风险 2 轮）', () => {
+  it('flow_task_done 按 requiredReviewRounds 补满 2 轮，不再 any-pass 短路', async () => {
+    const engine = makeEngine()
+    // 模拟高风险变更：任务门要求 2 轮审查。
+    ;(engine as unknown as { requiredReviewRounds: () => number }).requiredReviewRounds = () => 2
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-rounds')
+    const h = await start({ engine, services: { subagents, sessionQuery: sessionQueryWith({ 'child-rounds': ['src/a.ts'] }) } })
+    withDiff(h)
+    const { value } = await runTool(h, 'flow_task_done', { taskId: 'T1' })
+    expect(value.ok).toBe(true)
+    const records = engineState(engine).calls.recordReview as { kind?: string; taskId?: string }[]
+    expect(records.filter((record) => record.kind === 'task' && record.taskId === 'T1')).toHaveLength(2)
+  })
+
+  it('已有 1 条 pass 时只补 1 轮（不重复满足 2 轮的审查）', async () => {
+    const engine = makeEngine()
+    ;(engine as unknown as { requiredReviewRounds: () => number }).requiredReviewRounds = () => 2
+    const state = engineState(engine)
+    state.current = {
+      ...(state.current as Record<string, unknown>),
+      reviews: [{ id: 'RV-1', changeId: 'C-001', taskId: 'T1', kind: 'task', verdict: 'pass', findings: [], coverageOk: true, diffFingerprint: '', createdAt: '1', attempts: 1 }],
+    }
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-one-more')
+    const h = await start({ engine, services: { subagents, sessionQuery: sessionQueryWith({ 'child-one-more': ['src/a.ts'] }) } })
+    withDiff(h)
+    const { value } = await runTool(h, 'flow_task_done', { taskId: 'T1' })
+    expect(value.ok).toBe(true)
+    const records = engineState(engine).calls.recordReview as { kind?: string }[]
+    expect(records.filter((record) => record.kind === 'task')).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// S5 终审 / 安全审查生产者（P0-5）
+// ---------------------------------------------------------------------------
+
+describe('S5 终审生产者', () => {
+  function s5Engine(risk: 'normal' | 'high' = 'normal'): PluginHarness['engine'] {
+    const engine = makeEngine()
+    const state = engineState(engine)
+    state.current = makeChange({
+      stage: 'S5',
+      risk,
+      baseline: {
+        commit: 'base-sha',
+        summary: { parser: 'vitest', parsed: true, run: 1, passed: 1, failed: 0, skipped: 0 },
+        recordedAt: '2026-01-01T00:00:00.000Z',
+      },
+    })
+    return engine
+  }
+
+  function recordedKinds(engine: PluginHarness['engine']): (string | undefined)[] {
+    return (engineState(engine).calls.recordReview as { kind?: string }[]).map((record) => record.kind)
+  }
+
+  it('普通风险：登记 kind=final，提示词是整体终审', async () => {
+    const engine = s5Engine('normal')
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-final')
+    const h = await start({ engine, services: { subagents, sessionQuery: sessionQueryWith({ 'child-final': ['src/a.ts'] }) } })
+    withDiff(h)
+
+    const outcome = await runFinalReview(h.runtime)
+    expect(outcome.ok).toBe(true)
+    expect(outcome.verdict).toBe('pass')
+    expect(recordedKinds(engine)).toEqual(['final'])
+    const spec = specAt(subagents, 0)
+    expect(spec.request.agentPreset).toBe(FLOWGATE_PRESETS.reviewer)
+    expect(promptText(spec)).toContain('终审')
+    expect(promptText(spec)).toContain('相对 S2 基线')
+  })
+
+  it('高风险：同一结论同时登记 final 与 security', async () => {
+    const engine = s5Engine('high')
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-final-high')
+    const h = await start({
+      engine,
+      services: { subagents, sessionQuery: sessionQueryWith({ 'child-final-high': ['src/a.ts'] }) },
+    })
+    withDiff(h)
+
+    const outcome = await runFinalReview(h.runtime)
+    expect(outcome.ok).toBe(true)
+    expect(recordedKinds(engine)).toEqual(['final', 'security'])
+    expect(outcome.message).toContain('安全审查')
+    expect(promptText(specAt(subagents, 0))).toContain('安全')
+  })
+
+  it('flow_submit G5 在 S5 自动先跑终审，再提交门禁', async () => {
+    const engine = s5Engine('normal')
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-final-submit')
+    const h = await start({
+      engine,
+      services: { subagents, sessionQuery: sessionQueryWith({ 'child-final-submit': ['src/a.ts'] }) },
+    })
+    withDiff(h)
+
+    const { value } = await runTool(h, 'flow_submit', { gate: 'G5' })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('终审：')
+    expect(value.summary).toContain('已提交 G5（fake）')
+    expect(value.data?.finalReview).toContain('终审完成')
+    expect(recordedKinds(engine)).toEqual(['final'])
+  })
+
+  it('终审子 agent 不可用时 flow_submit G5 返回可执行提示（不写空记录）', async () => {
+    const engine = s5Engine('normal')
+    const h = await start({ engine, services: { subagents: undefined } })
+    const { value } = await runTool(h, 'flow_submit', { gate: 'G5' })
+    expect(value.ok).toBe(false)
+    expect(value.summary).toContain('S5 终审无法执行')
+    expect(recordedKinds(engine)).toEqual([])
+  })
+
+  it('终审读取覆盖不足时 flow_submit G5 拒绝通过（不能带未覆盖终审走 G5）', async () => {
+    const engine = s5Engine('normal')
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-final-nocov')
+    const h = await start({
+      engine,
+      // 子会话里没有任何读取记录 → 覆盖核对失败。
+      services: { subagents, sessionQuery: sessionQueryWith({ 'child-final-nocov': [] }) },
+    })
+    withDiff(h)
+
+    const { value } = await runTool(h, 'flow_submit', { gate: 'G5' })
+    expect(value.ok).toBe(false)
+    expect(value.summary).toContain('S5 终审未覆盖全部改动')
+    // 终审记录仍会落账（coverageOk=false），供 /flow status/报告查看。
+    expect(recordedKinds(engine)).toEqual(['final'])
   })
 })

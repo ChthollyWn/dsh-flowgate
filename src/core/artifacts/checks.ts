@@ -1471,6 +1471,7 @@ function finalReviewOutcome(ctx: GateCheckContext, item: string, label: string):
     problems.push('缺少 S5 终审记录')
   } else {
     if (finalReview.verdict !== 'pass') problems.push('终审结论为 changes-required')
+    if (finalReview.coverageOk === false) problems.push('终审读取覆盖不足（coverageOk=false），不能作为交付证据')
     const critical = finalReview.findings.filter((finding) => finding.severity === 'critical' || finding.severity === 'major')
     if (critical.length > 0) {
       problems.push(`终审还有 ${critical.length} 条未处理的 critical / major：${critical.slice(0, 5).map((finding) => `${finding.file}${finding.line ? `:${finding.line}` : ''} ${finding.message}`).join('；')}`)
@@ -1479,7 +1480,10 @@ function finalReviewOutcome(ctx: GateCheckContext, item: string, label: string):
   if (ctx.change.risk === 'high') {
     const security = sorted.find((review) => review.kind === 'security')
     if (!security) problems.push('高风险变更缺少安全审查记录')
-    else if (security.verdict !== 'pass') problems.push('安全审查未通过')
+    else {
+      if (security.verdict !== 'pass') problems.push('安全审查未通过')
+      if (security.coverageOk === false) problems.push('安全审查读取覆盖不足（coverageOk=false）')
+    }
   }
   if (problems.length > 0) {
     return fail(item, label, '终审必须通过且没有未处理的 critical / major；高风险还要安全审查通过。', 'P0', {

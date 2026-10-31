@@ -23,7 +23,7 @@ import type { DispatchTaskEnvelope } from '../../core/types.js'
 import { defineHostTool, fail, ok } from '../tools/schema.js'
 import { HostError, toAgentError } from '../errors.js'
 import { FLOWGATE_PRESETS } from '../guard/delegation.js'
-import { reviewCapability, runTaskReview } from '../review/index.js'
+import { reviewCapability, runTaskReview, taskReviewRounds } from '../review/index.js'
 import { runGit } from '../adapters/node-git.js'
 import { normalizeSlashes } from '../adapters/windows-path.js'
 import {
@@ -92,6 +92,7 @@ export function dispatchBusy(): boolean {
  */
 export function resetDispatchStateForTest(): void {
   running.clear()
+  checkpointInFlight.clear()
   resetPendingNotificationForTest()
   resetRedispatchStateForTest()
 }
@@ -123,11 +124,8 @@ export function installDispatch(runtime: HostRuntime): void {
         if (!engine) return fail('FlowGate 引擎未就绪', '确认项目已 /flow init；运行 /flow doctor 诊断')
         if (dispatchBusy()) return fail('上一批任务还在运行', '等当前批次结束（会收到完成通知）后再调用 flow_dispatch_next')
         const capability = reviewCapability(runtime)
-        if (!capability.available || !capability.provider) {
-          return fail('宿主不支持派发子 agent', `原因：${capability.reason ?? '未知'}。可把 config.dispatch 改为 inline，用 flow_task_start 逐个执行。`, {
-            validValues: { dispatch: ['inline', 'auto', 'subagent'] },
-          })
-        }
+        // 子 agent 能力不在这里提前失败：队列里可能只有 run:main 任务（不需要子 agent），
+        // 等 dispatchNext 返回后再按"是否真的有 dispatched 任务"决定。
         // 派发前复核（T4.6）：中断任务必须确认旧子 agent 已停止/资源已释放；
         // scope/plan/risk 待处理项未审批时不能静默开始新任务。
         const redispatch = await checkInterruptedRedispatch(runtime, engine)
@@ -147,20 +145,72 @@ export function installDispatch(runtime: HostRuntime): void {
         }
         const outcome = await engine.dispatchNext()
         runtime.emit()
+        if (outcome.blocked) {
+          return fail(outcome.message, pendingHint(outcome.blocked), {
+            pending: pendingView([outcome.blocked]),
+            batchId: outcome.batchId,
+          })
+        }
+        const provider = capability.available ? capability.provider : undefined
+        if (outcome.dispatched.length > 0 && !provider) {
+          // 已经 core 侧标记 running 的任务要回滚为失败，避免挂起。
+          for (const envelope of outcome.dispatched) {
+            try {
+              await engine.taskFailed(envelope.taskId, `宿主不支持派发子 agent：${capability.reason ?? '未知'}`)
+            } catch {
+              // 忽略记账失败。
+            }
+          }
+          return fail('宿主不支持派发子 agent', `原因：${capability.reason ?? '未知'}。可把 config.dispatch 改为 inline，用 flow_task_start 逐个执行。`, {
+            validValues: { dispatch: ['inline', 'auto', 'subagent'] },
+          })
+        }
+        // A batch whose integration checkpoint failed (or whose repair batch just
+        // finished) is retried here; this is the model-reachable recovery path
+        // (P0-3). The engine never asks the model to call host-internal APIs.
+        if (outcome.retryCheckpoint) {
+          const retried = await runIntegrationCheckpoint(runtime, engine, outcome.retryCheckpoint.batchId)
+          runtime.emit()
+          const lines = [outcome.message]
+          if (retried) {
+            lines.push(
+              retried.ok
+                ? `集成检查点：批次 ${retried.batchId} 通过（worktree 已合并并清理）。`
+                : `集成检查点：批次 ${retried.batchId} 失败 —— ${retried.detail ?? '原因未知'}。worktree 已保留便于排查；修复后再次调用 flow_dispatch_next 重试。`,
+            )
+          } else {
+            lines.push('集成检查点暂时无法执行（批次任务未全部完成或环境缺失）；处理后再调用 flow_dispatch_next。')
+          }
+          return retried?.ok
+            ? ok(lines.join('\n'), { batchId: retried.batchId, checkpoint: 'passed', retried: outcome.retryCheckpoint })
+            : fail(
+                lines.join('\n'),
+                '检查点未通过：修复失败/冲突后再次调用 flow_dispatch_next 重试检查点',
+                { batchId: outcome.retryCheckpoint.batchId, retryCheckpoint: outcome.retryCheckpoint },
+              )
+        }
         const pendingNow = pendingView(openOwnerPending(engine))
         const pendingData = pendingNow.length > 0 ? { pending: pendingNow } : {}
+        // `run: main` tasks: the main session claims them via flow_task_start;
+        // the host must not start an executor subagent for them.
+        const mainTasks = outcome.mainTasks ?? []
+        const mainTaskData = mainTasks.length > 0 ? { mainTasks } : {}
+        const mainTaskLines =
+          mainTasks.length > 0
+            ? [`主会话任务（run: main）：${mainTasks.map((item) => `${item.taskId} → flow_task_start("${item.taskId}")`).join('、')}；完成后调用 flow_dispatch_next。`]
+            : []
         if (outcome.dispatched.length === 0) {
-          const emptyLines = [outcome.message]
+          const emptyLines = [outcome.message, ...mainTaskLines]
           const knownPending = pendingLines(openOwnerPending(engine))
           if (knownPending.length > 0) emptyLines.push('', ...knownPending)
-          return ok(emptyLines.join('\n'), { dispatched: [], batchId: outcome.batchId, mode: outcome.mode, ...pendingData })
+          return ok(emptyLines.join('\n'), { dispatched: [], batchId: outcome.batchId, mode: outcome.mode, ...mainTaskData, ...pendingData })
         }
         const lines = [outcome.message]
         // 结构化 data 必须回填 startExecutor 实际创建的 worktree：envelope 是派发前的
         // 快照，并行批次在 startExecutor 里才建 worktree，此时 envelope.worktree 为空。
         const dispatchedData: Record<string, unknown>[] = []
         for (const envelope of outcome.dispatched) {
-          const started = await startExecutor(runtime, engine, envelope, capability.provider)
+          const started = await startExecutor(runtime, engine, envelope, provider as string)
           if (!started.ok) {
             lines.push(`✗ ${envelope.taskId} 启动失败：${started.message}`)
             try {
@@ -180,6 +230,7 @@ export function installDispatch(runtime: HostRuntime): void {
           })
         }
         lines.push('任务结束后会收到完成通知（摘要、任务门、集成检查点结果）；收到后再调用 flow_dispatch_next。')
+        if (mainTaskLines.length > 0) lines.push(...mainTaskLines)
         if (pendingNow.length > 0) {
           lines.push(`⚠ 仍有 ${pendingNow.length} 个待处理项需要负责人处理：${pendingNow.map((item) => item.id).join('、')}（/flow status 查看）。`)
         }
@@ -188,6 +239,7 @@ export function installDispatch(runtime: HostRuntime): void {
           dispatched: dispatchedData,
           batchId: outcome.batchId,
           mode: outcome.mode,
+          ...mainTaskData,
           ...pendingData,
         })
       },
@@ -368,12 +420,22 @@ async function finalizeTask(
       await engine.taskFailed(envelope.taskId, typeof summary === 'string' ? summary : `子 agent 停止原因：${result?.stopReason ?? '未知'}`)
       lines.push('任务已标记失败，等待负责人处理（/flow 查看待处理项）。')
     } else {
-      // 审查（普通任务 1 轮；审查失败不消耗轮次）。
+      // 审查（按等级轮次要求补齐；高风险 2 轮。审查失败不消耗轮次）。
       try {
         const capability = reviewCapability(runtime)
         if (capability.available && engine.getConfig().review.enabled) {
-          const review = await runTaskReview(runtime, envelope.taskId)
-          lines.push(`审查：${review.message}`)
+          const required = taskReviewRounds(engine)
+          const passCount = (): number =>
+            (engine.currentChange()?.reviews ?? []).filter(
+              (review) => review.taskId === envelope.taskId && review.verdict === 'pass' && review.coverageOk,
+            ).length
+          const messages: string[] = []
+          for (let round = passCount(); round < required; round += 1) {
+            const review = await runTaskReview(runtime, envelope.taskId)
+            messages.push(review.message)
+            if (!review.ok) break
+          }
+          if (messages.length > 0) lines.push(`审查：${messages.join('；')}`)
         }
       } catch (error) {
         lines.push(`审查执行异常：${toAgentError(error).error}`)
@@ -425,8 +487,31 @@ export interface CheckpointOutcome {
   detail?: string
 }
 
+/**
+ * 同一批次的检查点并发去重。
+ *
+ * 并行批次各子 agent 的结算回调是独立的：两个子 agent 几乎同时结束时会都看到
+ * "全部任务已完成"并发跑合并/集成命令/completeCheckpoint（会双 merge、双扣费、
+ * failure/success 交错导致状态机错乱）。这里用 in-flight promise 串行化同批次。
+ */
+const checkpointInFlight = new Map<string, Promise<CheckpointOutcome | null>>()
+
 /** 并行批次全部任务结束后做集成检查点（合并 worktree 分支 + integration 命令）。导出供单测。 */
-export async function runIntegrationCheckpoint(
+export function runIntegrationCheckpoint(
+  runtime: HostRuntime,
+  engine: EngineLike,
+  batchId: string,
+): Promise<CheckpointOutcome | null> {
+  const existing = checkpointInFlight.get(batchId)
+  if (existing) return existing
+  const task = runIntegrationCheckpointInner(runtime, engine, batchId).finally(() => {
+    checkpointInFlight.delete(batchId)
+  })
+  checkpointInFlight.set(batchId, task)
+  return task
+}
+
+async function runIntegrationCheckpointInner(
   runtime: HostRuntime,
   engine: EngineLike,
   batchId: string,
@@ -444,6 +529,9 @@ export async function runIntegrationCheckpoint(
     if (!root || !ports) return null
     // 1) 合并各任务分支回变更分支（当前 root 所在分支）。
     const failures: string[] = []
+    let failureKind: 'merge' | 'integration' | 'unknown' = 'unknown'
+    let failureOutput = ''
+    let failureCommand = ''
     for (const taskId of batch.tasks) {
       const task = change.tasks[taskId]
       const branch = taskWorktreeBranch(change.id, taskId)
@@ -453,6 +541,7 @@ export async function runIntegrationCheckpoint(
       const merge = await runGit(['merge', '--no-ff', '--no-edit', branch], root, 120_000)
       if (merge.exitCode !== 0) {
         failures.push(`合并 ${taskId} 冲突：${merge.stderr.trim().slice(0, 300)}`)
+        failureKind = 'merge'
         await runGit(['merge', '--abort'], root)
         break
       }
@@ -462,12 +551,21 @@ export async function runIntegrationCheckpoint(
     if (failures.length === 0 && integration && integration !== 'none' && ports.commandRunner) {
       const result = await ports.commandRunner.run(integration, { cwd: root, timeoutMs: 20 * 60_000 })
       if (result.exitCode !== 0 || result.timedOut) {
+        failureKind = 'integration'
+        failureCommand = integration
+        failureOutput = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim()
         failures.push(`集成命令失败（${integration}，exit=${result.exitCode}）：${(result.stderr || result.stdout).trim().slice(0, 500)}`)
       }
     }
     if (failures.length > 0) {
       const detail = failures.join('；')
-      await engine.completeCheckpoint(batchId, { ok: false, detail })
+      await engine.completeCheckpoint(batchId, {
+        ok: false,
+        detail,
+        kind: failureKind,
+        command: failureCommand,
+        output: failureOutput.slice(0, 20_000),
+      })
       runtime.noteFeature('dispatch', `批次 ${batchId} 集成检查点失败：${detail}`)
       return { batchId, ok: false, detail }
     }

@@ -88,6 +88,8 @@ describe('会话绑定与引擎初始化', () => {
   it('agent/created 后绑定主会话并启动租约心跳', async () => {
     harness = await setupPlugin({ bindAgent: false })
     harness.ctx.emitEvent('agent/created', { agent: harness.agent, source: 'startup' })
+    // 引擎初始化是异步的：用 waitForEngine 代替固定 flush 次数，避免覆盖率插桩下计时抖动。
+    await harness.runtime.waitForEngine()
     await flush()
     expect(harness.runtime.mainAgent()).toBe(harness.agent)
     expect(harness.runtime.engine()).not.toBeNull()
@@ -137,6 +139,7 @@ describe('卸载清理', () => {
     expect(runtime).not.toBeNull()
     const agent = createFakeAgent({ id: 'session-main', cwd: '/fake/project', ctx })
     ctx.emitEvent('agent/created', { agent, source: 'startup' })
+    await runtime?.waitForEngine()
     await flush()
     await runtime?.dispose()
     const engineState = (engine as unknown as { state: { calls: { releaseSession: number } } }).state

@@ -117,7 +117,14 @@ export async function loadProjectState(ports: LoadProjectStatePorts): Promise<Lo
   const scan = await listChangesDetailed(ports.fs, ports.root)
   state.changes = scan.changes
   if (scan.corrupt.length > 0) state.corruptStateFiles = scan.corrupt
-  state.leases = await readLeases(ports.fs, ports.root)
+  // 会话租约损坏不再把 engine.load 打崩（否则宿主 markInert、守卫 fail-open）：
+  // 汇总为损坏状态文件，走与 status.json 相同的"锁定 + doctor + repair"路径。
+  try {
+    state.leases = await readLeases(ports.fs, ports.root)
+  } catch (error) {
+    if (!(error instanceof SessionLeaseCorruptionError)) throw error
+    state.corruptStateFiles = [...(state.corruptStateFiles ?? []), { path: error.path, reason: error.reason }]
+  }
   const events = await readLedgerEvents(ports.fs, l.ledger)
   state.ledgerSeq = events.length > 0 ? events[events.length - 1]!.seq : 0
   const locked = foldProjectLock(events)
@@ -324,7 +331,20 @@ export async function writeChangesIndex(
 // 会话租约
 // ---------------------------------------------------------------------------
 
-/** 读取会话租约（文件缺失返回空数组；损坏时抛错进入锁定模式）。 */
+/** 会话租约文件损坏（非法 JSON / 结构非法）：engine 汇总为损坏状态文件并进入锁定模式。 */
+export class SessionLeaseCorruptionError extends Error {
+  readonly path: string
+  readonly reason: string
+
+  constructor(path: string, reason: string) {
+    super(`会话租约文件损坏：${path}（${reason}）。运行 /flow repair 重建。`)
+    this.name = 'SessionLeaseCorruptionError'
+    this.path = path
+    this.reason = reason
+  }
+}
+
+/** 读取会话租约（文件缺失返回空数组；损坏时抛 SessionLeaseCorruptionError）。 */
 export async function readLeases(fs: FileSystem, root: string): Promise<SessionLease[]> {
   const path = layout(root).sessions
   if (!(await fs.exists(path))) return []
@@ -334,11 +354,11 @@ export async function readLeases(fs: FileSystem, root: string): Promise<SessionL
     parsed = JSON.parse(raw)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`会话租约文件损坏：${path}（${reason}）。运行 /flow repair 重建。`)
+    throw new SessionLeaseCorruptionError(path, `非法 JSON（${reason}）`)
   }
   const list = Array.isArray(parsed) ? parsed : isRecord(parsed) ? parsed.leases : null
   if (!Array.isArray(list)) {
-    throw new Error(`会话租约文件损坏：${path}（缺少 leases 数组）。运行 /flow repair 重建。`)
+    throw new SessionLeaseCorruptionError(path, '缺少 leases 数组')
   }
   return list.filter(
     (item): item is SessionLease =>

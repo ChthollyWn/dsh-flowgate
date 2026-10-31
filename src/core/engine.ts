@@ -105,6 +105,8 @@ import {
   humanGate,
   stageAfterGate,
   applyVerificationFailure,
+  draftRepairTasks,
+  type VerificationFailureInput,
 } from './state'
 import {
   evaluateRules,
@@ -115,7 +117,7 @@ import {
   explainDecision,
 } from './rules'
 import { validateVerifyCommand } from './shell'
-import { loadArtifacts, loadProjectDoc, runGateChecks, artifactHashes, parseIncrementalSpec, parseRoadmap } from './artifacts'
+import { loadArtifacts, loadProjectDoc, runGateChecks, artifactHashes, parseIncrementalSpec, parseRoadmap, parseTaskCardFragment } from './artifacts'
 import { renderExecutionPlanMarkdown, renderExecutionDiagram } from './plan'
 import { verifyCitations } from './citations'
 import { detectTechStack, renderProjectDocDraft } from './detect'
@@ -128,6 +130,8 @@ import {
   runVerifyGroup,
   compareWithBaseline,
   summarizeEvidenceForContext,
+  parseTestOutput,
+  detectEvidenceKind,
 } from './evidence'
 import { invalidateOnRework } from './revision'
 import { computeMetrics } from './metrics'
@@ -312,12 +316,18 @@ export class FlowEngine {
       await this.rebuildCounters()
 
       // Attach session / current change.
-      const leases = this.state.leases
-      const mine = this.sessionId ? leases.find((lease) => lease.sessionId === this.sessionId) : undefined
-      if (mine) {
-        this.current = this.state.changes.find((change) => change.id === mine.changeId) ?? null
+      if (this.stateCorruption.length > 0) {
+        // 损坏状态下不自动附着/改写租约：修复路径统一走 /flow repair，
+        // 避免 load 顺手覆盖仍在报告里的损坏文件。
+        this.current = null
       } else {
-        await this.autoAttach()
+        const leases = this.state.leases
+        const mine = this.sessionId ? leases.find((lease) => lease.sessionId === this.sessionId) : undefined
+        if (mine) {
+          this.current = this.state.changes.find((change) => change.id === mine.changeId) ?? null
+        } else {
+          await this.autoAttach()
+        }
       }
       await this.reloadArtifacts()
       this.loaded = true
@@ -402,6 +412,16 @@ export class FlowEngine {
 
   getConfig(): FlowgateConfig {
     return this.config
+  }
+
+  /**
+   * Review rounds required for each task gate at the current change's level
+   * (0 = review not required). Host uses it to run the full number of rounds
+   * instead of short-circuiting after the first pass (high risk requires 2).
+   */
+  requiredReviewRounds(): number {
+    if (!this.current) return 0
+    return levelProfile(this.current.complexity, this.current.risk, this.config.limits).reviewRoundsPerTask
   }
 
   getState(): store.ProjectState | null {
@@ -985,6 +1005,33 @@ export class FlowEngine {
         gate,
         failures: result.failures.map((failure) => ({ item: failure.item, hint: failure.hint })),
       })
+      // P0-7: S5 验证失败（全量测试 / lint-build / 终审 critical-major findings）
+      // 回退 S4 并生成 FIX-n 修复任务，而不是停在 S5 让 agent 反复重交。
+      let repairNote = ''
+      if (gate === 'G5') {
+        const inputs = this.gateVerificationInputs(change, result.failures)
+        if (inputs !== null) {
+          const reverted = applyVerificationFailure(change, inputs, now, this.nextRepairIndex(change))
+          Object.assign(change, reverted.change)
+          this.hydrateRepairTasks(reverted.tasks)
+          const lastBatchId = change.batches[change.batches.length - 1]?.id ?? ''
+          const repairBatchId = this.insertRepairBatch(
+            change,
+            reverted.tasks,
+            lastBatchId,
+            'S5 验证失败自动修复（回退 S4）',
+            { retryOf: false },
+          )
+          await this.appendLedger('plan.repair_added', {
+            changeId: change.id,
+            batchId: 'G5',
+            repairBatchId,
+            tasks: reverted.tasks.map((card) => card.id),
+            source: 's5-verification',
+          })
+          repairNote = `已回退 S4 并生成修复任务 ${reverted.tasks.map((card) => card.id).join('、')}（批次 ${repairBatchId}）`
+        }
+      }
       await this.saveChange(change)
       return {
         gate,
@@ -992,7 +1039,7 @@ export class FlowEngine {
         items: result.items,
         failures: result.failures,
         stage: change.stage,
-        message: `G${gate.slice(1)} 未通过：${result.failures.map((failure) => failure.label).join('；')}`,
+        message: `G${gate.slice(1)} 未通过：${result.failures.map((failure) => failure.label).join('；')}${repairNote !== '' ? `；${repairNote}。` : ''}`,
       }
     }
 
@@ -1612,17 +1659,38 @@ export class FlowEngine {
     const task = tasks.find((item) => item.id === taskId)
     if (!task) throw new FlowGateError(`没有任务 ${taskId}`, `可用任务：${tasks.map((item) => item.id).join('、')}`)
     const active = this.activeTask()
-    if (active) throw new FlowGateError(`任务 ${active.id} 正在进行中`, '先完成或暂停当前任务')
+    if (active) {
+      // `run: main` tasks may execute in the main session while subagent tasks
+      // of the same parallel batch keep running; two main-session tasks (or an
+      // inline claim in the middle of another task) are still rejected.
+      const activeCard = this.getTask(active.id)
+      const activeIsMain = activeCard?.run === 'main'
+      const currentIsMain = task.run === 'main'
+      if (!(currentIsMain && !activeIsMain && this.config.dispatch !== 'inline')) {
+        throw new FlowGateError(`任务 ${active.id} 正在进行中`, '先完成或暂停当前任务')
+      }
+    }
     if (this.config.dispatch === 'subagent' && task.run !== 'main') {
       throw new FlowGateError('当前是派发模式', '用 flow_dispatch_next 按执行图派发，不要自己领取任务')
     }
     const expected = this.nextTaskToStart(tasks)
     if (!expected) throw new FlowGateError('当前没有可领取的任务', '检查执行图与批次状态')
     if (expected.taskId !== taskId) {
-      throw new FlowGateError(
-        `执行图要求先做 ${expected.taskId}`,
-        `当前批次 ${expected.batchId}（${expected.mode}），下一个可领取的是 ${expected.taskId}`,
-      )
+      // A `run: main` task inside a parallel batch does not have to be first in
+      // the batch order — it runs concurrently in the main session.
+      const taskBatch = this.getPlan().batches.find((batch) => batch.batch === change.tasks[taskId]?.batch)
+      const concurrentMain =
+        task.run === 'main' &&
+        taskBatch?.mode === 'parallel' &&
+        // 只允许当前执行图正在推进的批次里的 run:main 任务并行领取；
+        // 跨越未完成批次会破坏 depends_on / 批次顺序（reviewer Major）。
+        expected.batchId === taskBatch.batch
+      if (!concurrentMain) {
+        throw new FlowGateError(
+          `执行图要求先做 ${expected.taskId}`,
+          `当前批次 ${expected.batchId}（${expected.mode}），下一个可领取的是 ${expected.taskId}`,
+        )
+      }
     }
     const now = isoNow(this.clock)
     const state = change.tasks[taskId]
@@ -1690,7 +1758,7 @@ export class FlowEngine {
       contextExcerpt,
       handoff: change.handoff?.text,
       verifyGroups: task.verify,
-      tdd: task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll,
+      tdd: !task.autoRepair && (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll),
     }
   }
 
@@ -1750,7 +1818,8 @@ export class FlowEngine {
     }
 
     // 2. TDD ordering.
-    const tddRequired = task.tdd === 'required' || level.tddRequiredAll
+    // 自动修复任务用 fix 验证组收口，不强制 RED→GREEN（高风险的 tddRequiredAll 也豁免）。
+    const tddRequired = !task.autoRepair && (task.tdd === 'required' || level.tddRequiredAll)
     if (tddRequired && taskState.tdd !== 'green') {
       failures.push({
         item: 'tdd',
@@ -1848,12 +1917,58 @@ export class FlowEngine {
       let state = batchStates().find((item) => item.id === batch.batch)
       if (!state) continue
       if (state.status === 'done') continue
-      if (state.status === 'checkpoint') {
+      if (state.status === 'checkpoint' || state.status === 'failed') {
+        // A failed checkpoint is retried by the host on the next
+        // flow_dispatch_next call. When an auto-generated repair batch (retryOf)
+        // is still pending, let the loop fall through to dispatch that batch
+        // first; only ask for a retry once the repairs are done.
+        const pendingRepairBatches = change.batches.filter(
+          (item) => item.retryOf === batch.batch && item.status !== 'done',
+        )
+        if (pendingRepairBatches.length > 0) continue
+        const attempts = state.checkpoint?.attempts ?? 0
+        // 达到连续失败上限后不再自动重试集成命令，转为负责人闸门：等负责人
+        // 处理好冲突/失败并批准 conflict 项（会重置 attempts）后再重试。
+        const limit = this.config.triggers.consecutive_failure_limit
+        const ownerConflict = change.pending.find(
+          (entry) =>
+            entry.status === 'open' &&
+            entry.kind === 'conflict' &&
+            String(entry.data?.batchId ?? '') === batch.batch,
+        )
+        if (state.status === 'failed' && !ownerConflict) {
+          await this.saveChange(change)
+          throw new FlowGateError(
+            `批次 ${batch.batch} 的集成检查点已被负责人放弃自动重试`,
+            '如仍需交付：新建变更重跑；或 /flow doctor 查看状态。不再自动重试该批次',
+          )
+        }
+        if (limit > 0 && attempts >= limit && ownerConflict) {
+          await this.saveChange(change)
+          return {
+            dispatched: [],
+            batchId: batch.batch,
+            mode: batch.mode,
+            blocked: ownerConflict,
+            message: `批次 ${batch.batch} 的集成检查点连续失败 ${attempts} 次（上限 ${limit}），已转为负责人处理（${ownerConflict.id}）。修好后由负责人执行 /flow conflict approve ${ownerConflict.id}（或面板确认），再调用 flow_dispatch_next 重试。`,
+          }
+        }
+        await this.appendLedger('checkpoint.retry_requested', {
+          changeId: change.id,
+          batchId: batch.batch,
+          attempts,
+          status: state.checkpoint?.status,
+        })
+        await this.saveChange(change)
         return {
           dispatched: [],
           batchId: batch.batch,
           mode: batch.mode,
-          message: `批次 ${batch.batch} 的任务全部完成，先完成集成检查点（合并 worktree + 全量测试），调用 completeCheckpoint 后再继续派发。`,
+          retryCheckpoint: { batchId: batch.batch, attempts },
+          message:
+            state.checkpoint?.status === 'conflict'
+              ? `批次 ${batch.batch} 的集成检查点待重试（上次为合并冲突或未解决失败）。负责人解决冲突后再次调用 flow_dispatch_next 重试检查点。`
+              : `批次 ${batch.batch} 的集成检查点待重试（已尝试 ${attempts} 次）。修复后再次调用 flow_dispatch_next 重试检查点。`,
         }
       }
       if (batch.mode === 'parallel') {
@@ -1862,10 +1977,37 @@ export class FlowEngine {
           const taskState = change.tasks[id]
           return taskState && (taskState.status === 'pending' || taskState.status === 'queued' || taskState.status === 'interrupted')
         })
+        const mainQueued = queued
+          .map((id) => ({ taskId: id, card: tasks.find((item) => item.id === id) }))
+          .filter((entry) => entry.card?.run === 'main')
+          .map((entry) => ({ taskId: entry.taskId, batch: batch.batch, mode: batch.mode }))
+        const subagentQueued = queued.filter((id) => tasks.find((item) => item.id === id)?.run !== 'main')
         const capacity = Math.max(0, this.config.parallel.max_agents - running.length)
-        const toStart = queued.slice(0, capacity)
+        const toStart = subagentQueued.slice(0, capacity)
         if (toStart.length === 0) {
-          if (running.length > 0) return { dispatched: [], batchId: batch.batch, mode: batch.mode, message: `批次 ${batch.batch} 已有 ${running.length} 个子 agent 在运行，达到并发上限 ${this.config.parallel.max_agents}。` }
+          if (running.length > 0) {
+            return {
+              dispatched: [],
+              batchId: batch.batch,
+              mode: batch.mode,
+              ...(mainQueued.length > 0 ? { mainTasks: mainQueued } : {}),
+              message:
+                mainQueued.length > 0
+                  ? `批次 ${batch.batch} 已有 ${running.length} 个子 agent 在运行；主会话任务待执行：${mainQueued.map((item) => item.taskId).join('、')}（用 flow_task_start 领取）。`
+                  : `批次 ${batch.batch} 已有 ${running.length} 个子 agent 在运行，达到并发上限 ${this.config.parallel.max_agents}。`,
+            }
+          }
+          if (mainQueued.length > 0) {
+            this.ensureBatchRunning(change, batch.batch)
+            await this.saveChange(change)
+            return {
+              dispatched: [],
+              batchId: batch.batch,
+              mode: batch.mode,
+              mainTasks: mainQueued,
+              message: `批次 ${batch.batch} 有 ${mainQueued.length} 个 run: main 任务待主会话执行：${mainQueued.map((item) => item.taskId).join('、')}。用 flow_task_start 领取；完成后调用 flow_dispatch_next。`,
+            }
+          }
           throw new FlowGateError(`批次 ${batch.batch} 没有可派发的任务`, '检查是否有任务被阻塞；被阻塞的任务需要先处理待处理项')
         }
         this.ensureBatchRunning(change, batch.batch)
@@ -1881,7 +2023,16 @@ export class FlowEngine {
         }
         await this.saveChange(change)
         this.pushNotice(`已派发批次 ${batch.batch}（并行）的 ${dispatched.map((item) => item.taskId).join('、')}；每个任务在自己的 worktree 里执行。`)
-        return { dispatched, batchId: batch.batch, mode: batch.mode, message: `已派发 ${dispatched.map((item) => item.taskId).join('、')}（并行批次 ${batch.batch}）。` }
+        return {
+          dispatched,
+          batchId: batch.batch,
+          mode: batch.mode,
+          ...(mainQueued.length > 0 ? { mainTasks: mainQueued } : {}),
+          message:
+            mainQueued.length > 0
+              ? `已派发 ${dispatched.map((item) => item.taskId).join('、')}（并行批次 ${batch.batch}）；主会话任务：${mainQueued.map((item) => item.taskId).join('、')}（用 flow_task_start 领取）。`
+              : `已派发 ${dispatched.map((item) => item.taskId).join('、')}（并行批次 ${batch.batch}）。`,
+        }
       }
       // sequential batch: one task at a time, in order.
       const nextId = batch.tasks.find((id) => {
@@ -1892,6 +2043,26 @@ export class FlowEngine {
         state.status = 'done'
         state.completedAt = now
         await this.appendLedger('batch.completed', { changeId: change.id, batch: batch.batch })
+        // Repair batch finished: ask the host to retry the checkpoint of the
+        // batch it repairs instead of moving on to later batches.
+        if (batch.retryOf) {
+          const retryState = change.batches.find((item) => item.id === batch.retryOf)
+          const attempts = retryState?.checkpoint?.attempts ?? 0
+          await this.appendLedger('checkpoint.retry_requested', {
+            changeId: change.id,
+            batchId: batch.retryOf,
+            attempts,
+            viaRepairBatch: batch.batch,
+          })
+          await this.saveChange(change)
+          return {
+            dispatched: [],
+            batchId: batch.retryOf,
+            mode: retryState?.mode,
+            retryCheckpoint: { batchId: batch.retryOf, attempts },
+            message: `修复批次 ${batch.batch} 已完成，重试原批次 ${batch.retryOf} 的集成检查点。`,
+          }
+        }
         continue
       }
       const nextTask = tasks.find((item) => item.id === nextId)
@@ -1902,6 +2073,17 @@ export class FlowEngine {
       }
       const runningTask = Object.values(change.tasks).find((item) => item.status === 'running')
       if (runningTask) throw new FlowGateError(`任务 ${runningTask.id} 仍在运行`, '顺序批次一次只能运行一个任务；等它结束后再调用 flow_dispatch_next')
+      if (nextTask.run === 'main') {
+        this.ensureBatchRunning(change, batch.batch)
+        await this.saveChange(change)
+        return {
+          dispatched: [],
+          batchId: batch.batch,
+          mode: batch.mode,
+          mainTasks: [{ taskId: nextId, batch: batch.batch, mode: batch.mode }],
+          message: `批次 ${batch.batch} 的下一个任务 ${nextId} 标记 run: main，请主会话用 flow_task_start("${nextId}") 执行；完成后调用 flow_dispatch_next。`,
+        }
+      }
       this.ensureBatchRunning(change, batch.batch)
       taskState.status = 'running'
       taskState.startedAt = now
@@ -2010,7 +2192,10 @@ export class FlowEngine {
       if (!state || state.status === 'done') continue
       const allDone = batch.tasks.every((id) => change.tasks[id]?.status === 'done' || change.tasks[id]?.status === 'skipped')
       if (!allDone) continue
-      if (batch.mode === 'parallel' && state.status !== 'checkpoint') {
+      if (batch.mode === 'parallel') {
+        // checkpoint（含失败后待重试/冲突待处理）只能由 completeCheckpoint 结算；
+        // 这里若把它当 done 会在修复任务完成时"跳过集成检查点"，把失败批次静默放行。
+        if (state.status === 'checkpoint' || state.status === 'failed') continue
         state.status = 'checkpoint'
         await this.appendLedger('checkpoint.failed', { changeId: change.id, batch: batch.batch, note: 'awaiting-integration-checkpoint' })
         this.pushNotice(`并行批次 ${batch.batch} 的任务全部完成，需要集成检查点：合并 worktree 分支并跑全量测试。`)
@@ -2027,29 +2212,306 @@ export class FlowEngine {
     }
   }
 
-  async completeCheckpoint(batchId: string, result: { ok: boolean; detail?: string }): Promise<void> {
+  /**
+   * Finish the integration checkpoint of a parallel batch.
+   *
+   * - pass: mark the batch done and auto-close its open conflict pendings.
+   * - `integration` failure: generate `FIX-n` repair tasks (scope = files parsed
+   *   from the failure output, falling back to the batch task scopes) in a new
+   *   sequential batch (`retryOf` = failed batch). After those tasks finish,
+   *   `dispatchNext` returns `retryCheckpoint` so the host retries the merge +
+   *   integration command on the same batch. Repeated failures above
+   *   `triggers.consecutive_failure_limit` fall back to an owner conflict item.
+   * - `merge`/unknown failure: owner conflict pending; the host retries the
+   *   checkpoint on the next `flow_dispatch_next` call (`retryCheckpoint`).
+   */
+  async completeCheckpoint(
+    batchId: string,
+    result: {
+      ok: boolean
+      detail?: string
+      /** Failure class reported by the host. */
+      kind?: 'merge' | 'integration' | 'unknown'
+      /** Raw integration-command output (used to derive repair-task scope). */
+      output?: string
+      /** Integration command itself (parser hint). */
+      command?: string
+    },
+  ): Promise<void> {
     const change = this.requireChange()
     const now = isoNow(this.clock)
     const batch = change.batches.find((item) => item.id === batchId)
     if (!batch) throw new FlowGateError(`没有批次 ${batchId}`, '运行 /flow 查看执行图')
+    if (batch.status === 'done') {
+      // 幂等：并发/迟到的检查点回调不重复改状态（成功重放直接返回，失败回调忽略）。
+      return
+    }
     if (result.ok) {
       batch.status = 'done'
       batch.completedAt = now
-      batch.checkpoint = { status: 'passed', at: now, detail: result.detail }
+      batch.checkpoint = { status: 'passed', at: now, detail: result.detail, attempts: batch.checkpoint?.attempts }
       await this.appendLedger('checkpoint.passed', { changeId: change.id, batch: batchId })
-    } else {
-      batch.status = 'failed'
-      batch.checkpoint = { status: 'failed', at: now, detail: result.detail }
-      await this.appendLedger('checkpoint.failed', { changeId: change.id, batch: batchId, detail: result.detail })
-      this.createPending(change, {
-        kind: 'conflict',
-        title: `批次 ${batchId} 集成检查点失败`,
-        detail: result.detail ?? '合并或全量测试失败，需要负责人决定如何处理。',
-        data: { batchId },
-      })
+      // A successful retry closes the conflict items it was waiting on.
+      for (const item of change.pending) {
+        if (item.status !== 'open' || item.kind !== 'conflict') continue
+        if (String(item.data?.batchId ?? '') !== batchId) continue
+        item.status = 'approved'
+        item.decidedAt = now
+        item.decisionReason = '集成检查点重试通过，自动关闭'
+      }
+      await this.checkBatchProgress(change, now)
+      await this.saveChange(change)
+      return
     }
-    await this.checkBatchProgress(change, now)
+
+    const attempts = (batch.checkpoint?.attempts ?? 0) + 1
+    const kind = result.kind ?? 'unknown'
+    batch.status = 'checkpoint'
+    batch.checkpoint = {
+      status: kind === 'integration' ? 'failed' : 'conflict',
+      at: now,
+      detail: result.detail,
+      attempts,
+    }
+    await this.appendLedger('checkpoint.failed', {
+      changeId: change.id,
+      batchId,
+      detail: result.detail,
+      kind,
+      attempts,
+    })
+    if (kind === 'merge') await this.appendLedger('merge.conflict', { changeId: change.id, batchId })
+
+    const limit = this.config.triggers.consecutive_failure_limit
+    const canAutoRepair = kind === 'integration' && (limit <= 0 || attempts < limit)
+    if (canAutoRepair) {
+      const inputs = this.checkpointRepairInputs(batchId, result)
+      const cards = draftRepairTasks(change, inputs, this.nextRepairIndex(change))
+      this.hydrateRepairTasks(cards, result.command)
+      const repairBatchId = this.insertRepairBatch(
+        change,
+        cards,
+        batchId,
+        `集成检查点失败自动修复（原批次 ${batchId}）`,
+      )
+      await this.appendLedger('plan.repair_added', {
+        changeId: change.id,
+        batchId,
+        repairBatchId,
+        tasks: cards.map((card) => card.id),
+        attempts,
+      })
+      this.pushNotice(
+        `批次 ${batchId} 集成检查点失败：已生成修复任务 ${cards.map((card) => card.id).join('、')}（批次 ${repairBatchId}）；完成后会自动重试检查点。`,
+      )
+    } else {
+      // 重试仍失败时复用同批次已有的 open conflict 项，避免每次 retry 刷一条新待处理项。
+      const existing = change.pending.find(
+        (entry) =>
+          entry.status === 'open' &&
+          entry.kind === 'conflict' &&
+          String(entry.data?.batchId ?? '') === batchId,
+      )
+      if (existing) {
+        existing.detail = result.detail ?? existing.detail
+        existing.data = { ...(existing.data ?? {}), kind, attempts }
+      } else {
+        this.createPending(change, {
+          kind: 'conflict',
+          title: `批次 ${batchId} 集成检查点失败`,
+          detail: result.detail ?? '合并或全量测试失败，需要负责人决定如何处理。',
+          data: { batchId, kind, attempts },
+        })
+      }
+    }
     await this.saveChange(change)
+  }
+
+  /**
+   * Make auto-generated repair tasks actually completable.
+   *
+   * `draftRepairTasks` (state machine) only knows scopes and marks TDD required.
+   * For an auto repair task the failing state is usually not reproducible as a
+   * RED unit test (e.g. a lint/build failure or an already-green suite), so
+   * requiring RED→GREEN would permanently block `flow_task_done`. Repair tasks
+   * therefore use TDD `optional` and carry the project's failing command as a
+   * `fix` verify group, so completion still requires a fresh GREEN receipt.
+   * Commands that `validateVerifyCommand` rejects (`&&`, pipes, …) are skipped.
+   */
+  private hydrateRepairTasks(cards: TaskCard[], preferredCommand?: string): void {
+    const commands = this.config.commands
+    // 只用测试类命令：build/lint 等命令的证据 phase 恒为 none，无法满足
+    // taskDone 的"新鲜 GREEN"证据要求（会把修复任务再次卡死）。
+    const candidates = [preferredCommand, commands.integration, commands.test, commands.lint, commands.build, commands.typecheck]
+    const command =
+      candidates.find(
+        (item): item is string =>
+          typeof item === 'string' &&
+          item !== '' &&
+          item !== 'none' &&
+          validateVerifyCommand(item).ok &&
+          detectEvidenceKind(item) === 'test',
+      ) ?? ''
+    for (const card of cards) {
+      card.tdd = 'optional'
+      card.autoRepair = true
+      card.tddReason = '自动修复任务：以重新跑通失败命令为证据（不强制 RED→GREEN；仍需新鲜 GREEN 回执）'
+      if (command !== '') {
+        card.verify = [{ group: 'fix', command, inputs: [...card.scope] }]
+      }
+    }
+  }
+
+  /** Next `FIX-n` number for auto-generated repair tasks. */
+  private nextRepairIndex(change: ChangeStatus): number {
+    let max = 0
+    const scan = (id: string): void => {
+      const match = /^FIX-(\d+)$/.exec(id)
+      if (match) max = Math.max(max, Number(match[1]))
+    }
+    for (const task of this.getTasks()) scan(task.id)
+    for (const id of Object.keys(change.tasks)) scan(id)
+    return max
+  }
+
+  /**
+   * Repair-task inputs for S5 gate failures that need code changes.
+   *
+   * Only verification-class items are converted: full-suite regressions, lint/
+   * build/typecheck failures, and final-review critical/major findings (which
+   * point at concrete files). Evidence-only failures (`g5.runtime`,
+   * `g5.scenarios`) stay in S5 — a code repair task cannot fix them.
+   */
+  private gateVerificationInputs(change: ChangeStatus, failures: CheckOutcome[]): VerificationFailureInput[] | null {
+    const items = new Set(failures.map((failure) => failure.item))
+    const inputs: VerificationFailureInput[] = []
+    const allScopes = (): string[] => [
+      ...new Set(this.getTasks().flatMap((task) => [...task.scope, ...task.newFiles, ...task.tests])),
+    ]
+    if (items.has('g5.fullTests')) {
+      const receipt = [...this.receipts]
+        .filter((entry) => entry.changeId === change.id && entry.group === 'full-suite')
+        .sort(compareReceipts)
+        .pop()
+      const failed = receipt?.summary?.failures ?? []
+      const files = failed
+        .map((failure) => failure.file ?? this.fileFromFailureName(failure.name))
+        .filter((file): file is string => Boolean(file))
+      const tests = failed.map((failure) => failure.name).filter((name): name is string => Boolean(name))
+      inputs.push({ name: 'S5 全量测试回归', files: files.length > 0 ? files : allScopes(), tests })
+    }
+    if (items.has('g5.lintBuild')) {
+      inputs.push({ name: 'S5 lint/build/typecheck 失败', files: allScopes(), tests: [] })
+    }
+    if (items.has('g5.finalReview')) {
+      const finalReview = [...change.reviews]
+        .filter((review) => review.kind === 'final')
+        .sort((left, right) => (left.createdAt < right.createdAt ? 1 : -1))[0]
+      const findings = (finalReview?.findings ?? []).filter(
+        (finding) => finding.severity === 'critical' || finding.severity === 'major',
+      )
+      if (findings.length > 0) {
+        const files = [...new Set(findings.map((finding) => finding.file).filter((file) => file !== ''))]
+        inputs.push({ name: 'S5 终审 findings', files: files.length > 0 ? files : allScopes(), tests: [] })
+      }
+    }
+    return inputs.length > 0 ? inputs : null
+  }
+
+  /** Derive repair-task inputs from a failed integration command. */
+  private checkpointRepairInputs(
+    batchId: string,
+    result: { output?: string; command?: string; detail?: string },
+  ): VerificationFailureInput[] {
+    const batch = this.getPlan().batches.find((item) => item.batch === batchId)
+    const files = new Set<string>()
+    const tests = new Set<string>()
+    const output = result.output ?? ''
+    if (output.trim() !== '') {
+      try {
+        const summary = parseTestOutput({
+          command: result.command && result.command !== '' ? result.command : 'integration',
+          stdout: output,
+          stderr: '',
+          exitCode: 1,
+        })
+        for (const failure of summary.failures ?? []) {
+          const derived = failure.file ?? this.fileFromFailureName(failure.name)
+          if (derived) files.add(derived)
+          if (failure.name) tests.add(failure.name)
+        }
+      } catch {
+        // Parser is tolerant; this is only a fallback-scope optimization.
+      }
+    }
+    if (files.size === 0) {
+      // Fallback: the failed batch's task scopes, so the repair task can write
+      // at all (an empty scope would be rejected by the write guard).
+      for (const taskId of batch?.tasks ?? []) {
+        const task = this.getTask(taskId)
+        for (const path of task?.scope ?? []) files.add(path)
+      }
+    }
+    return [{ name: `集成检查点 ${batchId}`, files: [...files].sort(), tests: [...tests].sort() }]
+  }
+
+  /**
+   * Derive a file path from a test-failure name when the parser only returns
+   * display names (e.g. vitest `test/a.test.ts > suite > case`).
+   */
+  private fileFromFailureName(name: string | undefined): string {
+    const raw = (name ?? '').trim()
+    if (raw === '') return ''
+    const head = raw.split(' > ')[0]!.trim()
+    if (!head.includes('/') && !/\.[a-z0-9]+$/i.test(head)) return ''
+    return normalizeRelPath(head)
+  }
+
+  /** Insert a sequential repair batch right after `afterBatchId`. */
+  private insertRepairBatch(
+    change: ChangeStatus,
+    cards: TaskCard[],
+    afterBatchId: string,
+    why: string,
+    options: { retryOf?: boolean } = {},
+  ): string {
+    const plan = change.plan ?? this.getPlan()
+    const nextPlan: ExecutionPlan = { batches: plan.batches.map((batch) => ({ ...batch, tasks: [...batch.tasks] })) }
+    const repairBatchId = this.nextPlanBatchId(nextPlan)
+    const taskIds = cards.map((card) => card.id)
+    const planIndex = nextPlan.batches.findIndex((batch) => batch.batch === afterBatchId)
+    // S5→S4 修复批次不是"重试检查点"，不应带 retryOf（否则 dispatchNext 会对已通过
+    // 批次发 retryCheckpoint）；检查点失败生成的修复批次则必须带。
+    const retryOf = options.retryOf === false ? undefined : afterBatchId
+    nextPlan.batches.splice(planIndex >= 0 ? planIndex + 1 : nextPlan.batches.length, 0, {
+      batch: repairBatchId,
+      mode: 'sequential',
+      tasks: taskIds,
+      why,
+      ...(retryOf !== undefined ? { retryOf } : {}),
+    })
+    change.newTasks = [...(change.newTasks ?? []), ...cards]
+    const state: BatchState = {
+      id: repairBatchId,
+      mode: 'sequential',
+      status: 'pending',
+      tasks: [...taskIds],
+      ...(retryOf !== undefined ? { retryOf } : {}),
+    }
+    const stateIndex = change.batches.findIndex((batch) => batch.id === afterBatchId)
+    change.batches.splice(stateIndex >= 0 ? stateIndex + 1 : change.batches.length, 0, state)
+    for (const card of cards) {
+      change.tasks[card.id] = {
+        id: card.id,
+        batch: repairBatchId,
+        status: 'pending',
+        tdd: 'none',
+        evidenceIds: [],
+        reviewIds: [],
+      }
+    }
+    change.plan = nextPlan
+    return repairBatchId
   }
 
   // ------------------------------------------------------------------
@@ -2114,7 +2576,9 @@ export class FlowEngine {
         taskState.tdd = 'red'
         taskState.redObserved = true
       } else if (receipt.phase === 'green') {
-        const tddRequired = task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll
+        const tddRequired =
+          !task.autoRepair &&
+          (task.tdd === 'required' || levelProfile(change.complexity, change.risk, this.config.limits).tddRequiredAll)
         if (!tddRequired || taskState.redObserved) taskState.tdd = 'green'
       }
       if (receipt.exitCode !== 0) {
@@ -2291,8 +2755,31 @@ export class FlowEngine {
         await this.persistRule(item)
         await this.appendLedger('rule.adopted', { changeId: change.id, pendingId: id })
       } else if (item.kind === 'plan') {
-        await this.applyPlanAmendment(change, item)
-        await this.appendLedger('plan.amended', { changeId: change.id, pendingId: id })
+        try {
+          await this.applyPlanAmendment(change, item)
+        } catch (error) {
+          // 计划修订失败（片段不可解析/重排非法）时保持 open，避免"已批准但计划没变"
+          // 的假状态在后续 saveChange 里被持久化。
+          item.status = 'open'
+          item.decidedAt = undefined
+          item.decisionReason = undefined
+          throw error
+        }
+      } else if (item.kind === 'conflict') {
+        // 负责人确认"冲突/失败已修好"：重置该批次的检查点失败计数，下一次
+        // flow_dispatch_next 会重试集成检查点（达到上限后的 owner 闸门由此解锁）。
+        const batchId = String(item.data?.batchId ?? '')
+        const batch = change.batches.find((entry) => entry.id === batchId)
+        if (batch) {
+          batch.status = 'checkpoint'
+          if (batch.checkpoint) batch.checkpoint = { ...batch.checkpoint, attempts: 0 }
+        }
+        await this.appendLedger('checkpoint.retry_requested', {
+          changeId: change.id,
+          batchId,
+          attempts: 0,
+          ownerApproved: true,
+        })
       } else if (item.kind === 'blocker') {
         // 负责人解锁「连续失败熔断」：清失败计数、任务恢复 running，并把同任务的
         // 其它 open blocker（含历史版本每个动作一条的 T-FAILURE-LIMIT 残留项）一起关闭。
@@ -2302,7 +2789,14 @@ export class FlowEngine {
     } else {
       if (item.kind === 'scope') await this.appendLedger('scope.rejected', { changeId: change.id, pendingId: id, reason })
       else if (item.kind === 'risk') await this.appendLedger('risk.rejected', { changeId: change.id, pendingId: id, reason })
-      else await this.appendLedger('gate.rejected', { changeId: change.id, pendingId: id, kind: item.kind, reason })
+      else if (item.kind === 'conflict') {
+        // 拒绝 = 放弃自动重试该批次的集成检查点：批次标记 failed，dispatchNext
+        // 不再重试（避免 attempts 不归零导致无限重跑）。
+        const batchId = String(item.data?.batchId ?? '')
+        const batch = change.batches.find((entry) => entry.id === batchId)
+        if (batch) batch.status = 'failed'
+        await this.appendLedger('gate.rejected', { changeId: change.id, pendingId: id, kind: item.kind, reason })
+      } else await this.appendLedger('gate.rejected', { changeId: change.id, pendingId: id, kind: item.kind, reason })
     }
     this.pushNotice(`待处理项 ${id} 已${decision === 'approved' ? '批准' : '拒绝'}${reason ? `：${reason}` : ''}。`)
     await this.saveChange(change)
@@ -2379,13 +2873,118 @@ export class FlowEngine {
     await this.fs.writeFile(path, md)
   }
 
+  /**
+   * Apply an owner-approved plan amendment (PC-n) for real.
+   *
+   * - `add`: each element is one task-card markdown fragment; parsed cards are
+   *   registered as runtime tasks (`change.newTasks`) in one new sequential
+   *   batch appended after the current plan (they cannot be started before it).
+   * - `reorder`: a new order for not-yet-started tasks; tasks are reordered
+   *   within their existing batches (batch membership never changes silently).
+   *
+   * The frozen `tasks.md` is not touched: `change.plan` is the runtime execution
+   * plan and wins in `getPlan()`/`getTasks()`.
+   */
   private async applyPlanAmendment(change: ChangeStatus, item: PendingItem): Promise<void> {
-    const reorder = (item.data?.reorder as string[] | undefined) ?? []
-    if (reorder.length > 0 && change.plan) {
-      // Reordering within the same batch is expressed by the owner; keep a record for the panel.
-      change.plan = { ...change.plan, batches: change.plan.batches.map((batch) => ({ ...batch })) }
+    // 迟到批准（S5/S6 才批）会留下永远无法派发的 pending 批次 → G6 死锁，
+    // 因此只允许执行阶段应用；流程后期发现缺口应新建增量变更。
+    if (change.stage !== 'S4') {
+      throw new FlowGateError(
+        '只有 S4 执行阶段可以应用计划修订',
+        'S5/S6 才发现计划缺口时请新建增量变更；先把当前变更走完',
+      )
     }
-    void item
+    const addRaw = (item.data?.add as unknown[] | undefined) ?? []
+    const reorderRaw = (item.data?.reorder as unknown[] | undefined) ?? []
+    const addFragments = addRaw.map((value) => String(value ?? '')).filter((value) => value.trim() !== '')
+    const reorder = reorderRaw.map((value) => String(value ?? '').trim()).filter((value) => value !== '')
+    if (addFragments.length === 0 && reorder.length === 0) {
+      throw new FlowGateError('计划修订为空', 'PC 申请里 add 与 reorder 至少有一个；空的修订无法批准')
+    }
+    const plan = change.plan ?? this.getPlan()
+    const nextPlan: ExecutionPlan = { batches: plan.batches.map((batch) => ({ ...batch, tasks: [...batch.tasks] })) }
+    const existingIds = new Set(this.getTasks().map((task) => task.id))
+
+    // 1) Parse and validate new task cards.
+    const added: TaskCard[] = []
+    for (const fragment of addFragments) {
+      const card = parseTaskCardFragment(fragment)
+      if (!card || card.id.trim() === '') {
+        throw new FlowGateError(
+          '无法解析新增任务卡片段',
+          'add 的每个元素必须是一个任务卡 markdown 片段：标题含任务 id（如 `## T9 新增任务`）+ 常规 YAML 块',
+        )
+      }
+      if (existingIds.has(card.id) || added.some((entry) => entry.id === card.id)) {
+        throw new FlowGateError(`新增任务 ${card.id} 与既有任务 id 重复`, '新增任务需要使用未被占用的任务 id（如 FIX-2、T9）')
+      }
+      added.push(card)
+    }
+
+    // 2) Validate + apply reorder on not-yet-started tasks (within each batch).
+    for (const id of reorder) {
+      if (!existingIds.has(id) && !added.some((entry) => entry.id === id)) {
+        throw new FlowGateError(`重排列表包含未知任务 ${id}`, 'reorder 只能引用当前执行计划或本次新增的任务 id')
+      }
+      const state = change.tasks[id]
+      if (state && state.status !== 'pending' && state.status !== 'queued') {
+        throw new FlowGateError(`任务 ${id} 已开始或已完成，不能调整顺序`, '只能调整尚未开始的任务顺序；已开始的任务请按原计划完成')
+      }
+    }
+
+    // 3) Append added tasks as one new sequential batch at the end of the plan.
+    if (added.length > 0) {
+      const batchId = this.nextPlanBatchId(nextPlan)
+      const taskIds = added.map((card) => card.id)
+      nextPlan.batches.push({ batch: batchId, mode: 'sequential', tasks: taskIds, why: '负责人批准的计划修订新增任务' })
+      change.newTasks = [...(change.newTasks ?? []), ...added]
+      change.batches.push({ id: batchId, mode: 'sequential', status: 'pending', tasks: [...taskIds] })
+      for (const card of added) {
+        change.tasks[card.id] = {
+          id: card.id,
+          batch: batchId,
+          status: 'pending',
+          tdd: 'none',
+          evidenceIds: [],
+          reviewIds: [],
+        }
+      }
+    }
+
+    // 4) Reorder is applied after add so a PC can add and position new tasks in
+    //    the same amendment (positions refer to the post-add task set).
+    if (reorder.length > 0) {
+      const position = new Map(reorder.map((id, index) => [id, index] as const))
+      for (const batch of nextPlan.batches) {
+        batch.tasks = [...batch.tasks].sort((a, b) => {
+          const left = position.get(a) ?? Number.MAX_SAFE_INTEGER
+          const right = position.get(b) ?? Number.MAX_SAFE_INTEGER
+          return left - right
+        })
+        const state = change.batches.find((entry) => entry.id === batch.batch)
+        if (state) state.tasks = [...batch.tasks]
+      }
+    }
+
+    change.plan = nextPlan
+    await this.appendLedger('plan.amended', {
+      changeId: change.id,
+      pendingId: item.id,
+      added: added.map((card) => card.id),
+      reorder,
+    })
+  }
+
+  /** Next auto-generated batch id (`B<n>`), unique against plan + runtime state. */
+  private nextPlanBatchId(plan: ExecutionPlan): string {
+    let max = 0
+    const scan = (id: string): void => {
+      const match = /^B(\d+)$/i.exec(id)
+      if (match) max = Math.max(max, Number(match[1]))
+    }
+    for (const batch of plan.batches) scan(batch.batch)
+    for (const batch of this.current?.batches ?? []) scan(batch.id)
+    return `B${max + 1}`
   }
 
   async allowOnce(ruleIdOrLast: string, reason: string): Promise<OverrideRecord> {
@@ -2532,6 +3131,9 @@ export class FlowEngine {
 
   private async acquireLease(change: ChangeStatus): Promise<void> {
     if (!this.state || !this.sessionId) return
+    // 损坏状态下不改写租约/附着：避免把仍应出现在 doctor 与 repair 报告里的
+    // sessions.json 顺手覆盖掉（修复路径统一走 /flow repair）。
+    if (this.stateCorruption.length > 0) return
     const now = isoNow(this.clock)
     this.state.leases = this.state.leases.filter((lease) => lease.changeId !== change.id || lease.sessionId === this.sessionId)
     this.state.leases = this.state.leases.filter((lease) => lease.sessionId !== this.sessionId)
@@ -2550,6 +3152,12 @@ export class FlowEngine {
   }
 
   async attachSession(label?: string): Promise<RuntimeSnapshot> {
+    if (this.stateCorruption.length > 0) {
+      throw new FlowGateError(
+        '状态文件损坏，不能接续变更',
+        '运行 /flow doctor 诊断，/flow repair 从账本重建后再接续',
+      )
+    }
     // 与 autoAttach 一致：PROJECT（路线图阶段）也允许显式接续。
     const active = (this.state?.changes ?? []).filter((change) => change.lifecycle === 'active')
     if (active.length === 0) throw new FlowGateError('没有进行中的变更', '用 /flow new <描述> 立项')
@@ -2566,6 +3174,12 @@ export class FlowEngine {
   }
 
   async resumeChange(changeId: string, options: { takeover?: boolean } = {}): Promise<RuntimeSnapshot> {
+    if (this.stateCorruption.length > 0) {
+      throw new FlowGateError(
+        '状态文件损坏，不能恢复变更',
+        '运行 /flow doctor 诊断，/flow repair 从账本重建后再恢复',
+      )
+    }
     const change = this.state?.changes.find((item) => item.id === changeId)
     if (!change) throw new FlowGateError(`没有变更 ${changeId}`, '运行 /flow 查看台账')
     if (change.lifecycle === 'archived') throw new FlowGateError(`${changeId} 已归档`, '已交付的变更不能继续；要修改请新建关联变更')
@@ -2822,17 +3436,35 @@ export class FlowEngine {
           .join('；')}`,
       }
     }
+    // 会话租约是易失状态：损坏文件无法从账本"还原"哪条租约还有效，直接重建为空，
+    // 由下一个会话在 load 时自动附着/接管。它不能阻塞 repair（否则 sessions.json
+    // 一坏就永久锁定）。
+    let leaseNote = ''
+    let leaseBackup: string | null = null
+    try {
+      await store.readLeases(this.fs, this.root)
+    } catch {
+      // 保留损坏原文：只有 repair 整体成功才允许留下"空租约"重建结果。
+      leaseBackup = await this.fs.readFile(store.layout(this.root).sessions).catch(() => null)
+      await store.writeLeases(this.fs, this.root, [])
+      leaseNote = '（会话租约文件已重建为空）'
+    }
     // Rebuild status.json / changes index from the ledger snapshots + artifacts.
     const rebuilt = await store.rebuildState(this.fs, this.root)
     await this.load()
     // 03 §14 / 需求 v1.0：repair 必须能解锁，但不能把修不好的损坏静默吞掉——
     // 仍有 status.json 无法从账本/产物重建时保持锁定并明确报告，避免二次 fail-open。
     if (this.stateCorruption.length > 0) {
+      if (leaseBackup !== null) {
+        // 整体修复失败：恢复原损坏的租约文件，避免"repair 失败但现场已被改掉"。
+        await this.fs.writeFile(store.layout(this.root).sessions, leaseBackup)
+        leaseNote = '（会话租约已恢复原损坏文件，等待整体修复）'
+      }
       return {
         ok: false,
         message: `账本校验通过，但仍有 ${this.stateCorruption.length} 个状态文件无法从账本重建：${this.stateCorruption
           .map((file) => `${file.path}（${file.reason}）`)
-          .join('；')}。已保持锁定模式，请备份 .flowgate/ 后按 /flow doctor 提示处理。`,
+          .join('；')}。已保持锁定模式，请备份 .flowgate/ 后按 /flow doctor 提示处理。${leaseNote}`,
       }
     }
     if (this.state?.locked) {
@@ -2847,7 +3479,7 @@ export class FlowEngine {
     await this.reloadArtifacts()
     return {
       ok: true,
-      message: `已从账本与产物重建 ${rebuilt.rebuilt.length} 个变更（保留 ${rebuilt.kept.length} 个），锁定模式解除。`,
+      message: `已从账本与产物重建 ${rebuilt.rebuilt.length} 个变更（保留 ${rebuilt.kept.length} 个）${leaseNote}，锁定模式解除。`,
     }
   }
 

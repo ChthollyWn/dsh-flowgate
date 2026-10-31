@@ -574,8 +574,8 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
     async submitAnalysis() {
       return { ok: true, archived: true, citationChecks: [], message: '已归档（fake）' }
     },
-    async decidePending(id: string, decision: string) {
-      state.calls.decidePending.push({ id, decision })
+    async decidePending(id: string, decision: string, reason?: string) {
+      state.calls.decidePending.push(reason === undefined ? { id, decision } : { id, decision, reason })
       return { id, kind: 'scope', changeId: 'C-001', title: `待处理 ${id}`, detail: '', status: decision === 'approved' ? 'approved' : 'rejected', createdAt: '' }
     },
     async allowOnce(ruleId: string, reason: string) {
