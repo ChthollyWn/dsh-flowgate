@@ -20,6 +20,9 @@ pnpm exec vitest run test/host
 pnpm build
 tail -n 1 lib/host.js          # 期望含 export { apply, inject, name }
 head -c 200 lib/client.js      # 期望 window.__ModuleLoader__.load({ id: "dsh-flowgate", ...
+
+# 4) 故障注入冒烟（确定性、无网络；7 用例，覆盖状态/账本/配置/守卫/宿主服务缺失）
+pnpm exec vitest run test/fault-injection
 ```
 
 预期：`test/host` 全绿（110 用例，含 dispatch/review 专项测试）；`lib/host.js` 无 `@deepseek-ai/` 值导入（仅可能保留
@@ -34,22 +37,42 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 # 1) 从官方 web 模板建隔离 profile（只需第一次）
 "$DSH" --profile flowgate --from-default-profile web --help
 
-# 2) 以 link 方式装开发中的插件
-cd "$DSH_HOME/profiles/flowgate"
-pnpm add link:/path/to/dsh-flowgate
+# 2) 直接以 link 方式装开发中的插件（必须走 dsh plugin add，见下方坑 1）
+"$DSH" plugin --profile flowgate add link:/path/to/dsh-flowgate
 
 # 3) 确认组合树里有 FlowGate 的插件行与三个 preset 行
 "$DSH" --profile flowgate --dump-config | grep -i -A4 'flowgate'
 
-# 4) 导入/激活校验（会 import 每个组合模块；只对可信 profile 用）
-"$DSH" --profile flowgate --dump-config-schema > /tmp/flowgate-schema.json && echo OK
+# 4) schema 转储（rc.5 上不保证退出码 0，见下方坑 2；只对可信 profile 用）
+"$DSH" --profile flowgate --dump-config-schema > /tmp/flowgate-schema.json
 ```
 
 **通过标准**
 - `--dump-config` 输出里有 `id: dsh-flowgate` 行，以及 `preset-flowgate` / `preset-flowgate-executor` / `preset-flowgate-reviewer` 三行。
 - `--dump-config-schema` 退出码 0（证明真实 DSH 进程能 import 我们的 host 入口）。
+  **2026-10-31 复验修正**：本机 DSH 0.2.1-rc.5 上这一条**不是可靠判据**——web 基线 profile
+  本身就会因宿主自带的 `@deepseek-ai/dsh-agent-preset` 行报 `unrecognized Loader tree carrier`
+  而退出 1（web 基线 4 处；无 preset 行的 headless 基线 0 处、退出 0）。归因实验：把本插件换成
+  「只有 host 行、无 preset 行」的临时变体后，web 组合错误数仍为 4 处（与基线完全一致）；
+  完整插件在 web 组合为 7 处（= 基线 4 + 本插件 3 个 preset 行各 1），在 headless 组合为 3 处
+  （headless 基线 0 + 本插件 3 个 preset 行）——即错误由「preset 行内嵌套 `plugins` 列表」触发，
+  **与 host 入口无关**（见坑 2）。host 入口是否可加载应以
+  「组合树里有 `id: dsh-flowgate` + 真实会话里 `/flow doctor` 正常」为准。
 - 若 preset 行被跳过（组合缺失 `@deepseek-ai/dsh-agent-preset` 或 `dsh-tool-fs`），记录在
   `skippedBundles`，不影响 `/flow`、工具、守卫——只需在兼容矩阵里标注。
+
+**本轮（2026-10-31，HEAD 43d18e5）复验坑位**
+1. 安装顺序：**必须先建干净 profile，再直接 `dsh plugin add link:<repo>`**。
+   若先 `cd profile && pnpm add link:<repo>`、再 `dsh plugin add`，后者会因依赖已存在而跳过
+   bundle 注册，`dsh.profile.bundles` 里没有 `dsh-flowgate`，`--dump-config` 就看不到插件行
+   （本轮首次隔离 profile 即因此得到 2 项兼容检查失败；重建 profile 后 7/7 通过）。
+   已经搞脏的 profile 重建最稳；也可手工把 `dsh-flowgate` 加进
+   `$DSH_HOME/profiles/<p>/package.json` 的 `dsh.profile.bundles`（上一轮遗留 profile 即这种形态）。
+2. `--dump-config-schema` 在 rc.5 上会对「preset 行内嵌套 `plugins` 列表」报
+   `error: [/N] unrecognized Loader tree carrier; use cordis:group or cordis:include for native child collection`：
+   宿主自带 preset 行同样中招，并非本插件引入；它只说明该命令的 schema 转储不展开嵌套
+   loader 树，不足以判定 host 入口 import 失败。兼容记录见
+   [docs/compat/0.2.1-rc.5.md](../compat/0.2.1-rc.5.md)。
 
 ## 2. 使用工程模式 preset 启动（推荐受管控项目）
 
@@ -119,6 +142,9 @@ pnpm add link:/path/to/dsh-flowgate
 | 面板不更新 | doctor 里 `✗ 会话投影` 或 `✗ 自定义会话事件`：面板会降级为打开时读取；命令仍可用 |
 | 审查/派发失败 | doctor 里 `✗ 子 agent startActivation`；改用 inline 模式 |
 | 账本校验失败 | 锁定模式：先 `/flow repair`；仍失败则备份 `.flowgate/` 后联系负责人 |
+| 账本某行被截断/JSON 非法 | 锁定模式且 `/flow doctor` 报出精确行号与「不是合法的账本事件 JSON」；`/flow repair` 会明确拒绝自动修复（不静默重写坏账本）。先备份 `.flowgate/state/ledger.jsonl`：能恢复该行内容则人工补齐，否则从备份/会话日志重建后再 `/flow repair` |
+| `changes/<id>/status.json` 损坏（非法 JSON） | 当前 HEAD：坏文件会被加载器跳过（宿主不崩、不进入锁定模式，`/flow doctor` 也不单独提示——**与 03 §14 的锁定语义有已知偏差，待修复**）；恢复路径是 `/flow repair`（从账本里的 `change.updated` 快照重建 status.json 与台账），本轮故障注入用例已验证可恢复 |
+| 配置语义非法（如未知 `levels.complexity`） | 宿主仍能启动，但引擎以默认配置降级并进入锁定模式；`/flow doctor` 的「配置：错误」给出字段路径（语义错误无行号）与修复提示，改好 `config.yaml` 后重开会话即恢复 |
 
 ## 6. 清理
 

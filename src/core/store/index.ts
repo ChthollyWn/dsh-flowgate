@@ -30,6 +30,7 @@ export {
   readChangeStatus,
   writeChangeStatus,
   listChanges,
+  listChangesDetailed,
   renderChangesIndex,
   writeChangesIndex,
   readLeases,
@@ -42,7 +43,13 @@ export {
   readLedgerEvents,
   formatActivityTime,
 } from './state'
-export type { LoadProjectStatePorts, RebuildStateResult } from './state'
+export type {
+  CorruptStateFile,
+  ChangesScanResult,
+  LoadedProjectState,
+  LoadProjectStatePorts,
+  RebuildStateResult,
+} from './state'
 
 export {
   freezeContract,

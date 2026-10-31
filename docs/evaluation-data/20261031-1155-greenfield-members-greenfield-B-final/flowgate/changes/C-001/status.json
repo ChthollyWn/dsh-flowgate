@@ -1,0 +1,389 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "空仓库变成能启动、能跑测试的最小 Node 工程",
+  "summary": "按路线图 C0 建立工程骨架：目录结构、构建/依赖配置、可运行的最小入口与基础校验脚本，为后续变更提供可编译、可测试的基线。",
+  "complexity": "low",
+  "risk": "normal",
+  "stage": "S4",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-eKdbVO/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 low · 风险 normal"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T11:54:20+08:00",
+      "passedAt": "2026-10-31T11:54:20+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 4,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做登录、会话、密码哈希、权限判定（C1 范围）。；不做会员列表/搜索/新增/编辑/停用、不做任何业务字段（C2 范围）。；不做数据持久化、不建 `data/` 与存储模块（C2 范围）。；不做静态页面、前端框架、视觉样式。；不安装任何 npm 依赖，不生成 `package-lock.json`。；不做 Docker、CI、部署、HTTPS、反向代理配置。；不做统一错误页、安全响应头、404 美化页（C3 范围）；C0 的 404 只返回最小 JSON。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 5 个 · 场景 9 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1",
+          "details": [
+            "没有记录已知事实"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T11:55:45+08:00",
+      "approvedAt": "2026-10-31T11:59:35+08:00"
+    },
+    "G2": {
+      "state": "passed",
+      "attempts": 1,
+      "passedAt": "2026-10-31T11:56:52+08:00"
+    },
+    "G3": {
+      "state": "passed",
+      "attempts": 4,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做登录、会话、密码哈希、权限判定（C1 范围）。；不做会员列表/搜索/新增/编辑/停用、不做任何业务字段（C2 范围）。；不做数据持久化、不建 `data/` 与存储模块（C2 范围）。；不做静态页面、前端框架、视觉样式。；不安装任何 npm 依赖，不生成 `package-lock.json`。；不做 Docker、CI、部署、HTTPS、反向代理配置。；不做统一错误页、安全响应头、404 美化页（C3 范围）；C0 的 404 只返回最小 JSON。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 5 个 · 场景 9 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1",
+          "details": [
+            "没有记录已知事实"
+          ]
+        },
+        {
+          "item": "g3.taskCards",
+          "label": "任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 3 个"
+          ]
+        },
+        {
+          "item": "g3.traceability",
+          "label": "追溯矩阵无未覆盖场景",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "场景 9 个全部有归属"
+          ]
+        },
+        {
+          "item": "g3.taskCount",
+          "label": "任务数不超过上限",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 3 个"
+          ]
+        },
+        {
+          "item": "g3.newFiles",
+          "label": "new_files 落在 scope 内且不是根级通配",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.verifyCommands",
+          "label": "每个任务都有合法的验证命令",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        },
+        {
+          "item": "g3.cleanWorktree",
+          "label": "工作区没有未提交的改动",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.testNoneRisk",
+          "label": "缺少自动化测试已登记为风险",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T11:59:31+08:00",
+      "approvedAt": "2026-10-31T11:59:35+08:00"
+    }
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "mode": "sequential",
+      "status": "running",
+      "tasks": [
+        "T1",
+        "T2",
+        "T3"
+      ],
+      "startedAt": "2026-10-31T11:59:38+08:00"
+    }
+  ],
+  "tasks": {
+    "T1": {
+      "id": "T1",
+      "batch": "B1",
+      "status": "interrupted",
+      "tdd": "none",
+      "evidenceIds": [
+        "E-0001",
+        "E-0002",
+        "E-0004",
+        "E-0005"
+      ],
+      "reviewIds": [],
+      "startedAt": "2026-10-31T12:05:54+08:00",
+      "failureCount": 1,
+      "interruptedAt": "2026-10-31T12:08:35+08:00"
+    },
+    "T2": {
+      "id": "T2",
+      "batch": "B1",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    },
+    "T3": {
+      "id": "T3",
+      "batch": "B1",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    }
+  },
+  "evidenceIds": [],
+  "pending": [
+    {
+      "id": "BL-1",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T1 连续 3 次验证失败，已暂停",
+      "detail": "先复现、找根因、再修复；不要继续试错。只读取证与 flow_status/flow_report_risk 不受限。\n负责人确认后运行 /flow unblock BL-1 解锁（可只读诊断、查状态、上报风险）。",
+      "status": "approved",
+      "createdAt": "2026-10-31T12:05:21+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "taskId": "T1"
+      },
+      "data": {
+        "taskId": "T1"
+      },
+      "decidedAt": "2026-10-31T12:05:51+08:00",
+      "decisionReason": "evaluation harness auto-approve blocker"
+    },
+    {
+      "id": "RK-1",
+      "kind": "risk",
+      "changeId": "C-001",
+      "title": "agent 上报风险（maintainability）",
+      "detail": "T1 出现 TDD 门禁死锁，无法在不违反门禁的前提下推进。事实链：T1 标记 tdd: required；验证组命令是 `npm test`；但仓库根目录尚无 `package.json`，`npm test` 直接以 ENOENT 退出（E-0005：exitCode 254、parsed=false、run/failed 均为 0，不能判定为 RED）。要消除这个失败，必须先创建 `package.json`；但按 R-TDD-ORDER，在 tdd=none 时创建任何非测试文件都会被拒绝（已拦截 `package.json`、`.gitignore`），而 `package.json` 不在 task.tests 中也不匹配 looksLikeTestPath。结果形成闭环：没有 package.json → npm test 出不了可解析的 RED → 没有 RED → package.json 写不进去。`test/healthz.test.js` 已存在且内容正确（缺少 `src/app.js` 时应失败），本身不是问题。\n\n建议：请负责人二选一放行：(A) 推荐，运行 `/flow allow-once R-TDD-ORDER 引导创建 package.json 以便 npm test 能跑出 RED`（或 `/flow exception add R-TDD-ORDER package.json 引导清单`）；放行后我会先只创建 `package.json`/`.gitignore`，立即 flow_verify 取得 RED，再写 `src/app.js` 取得 GREEN，TDD 证据链保持完整。(B) 在 tasks.md 把 T1 改为 `tdd: optional` 并写明理由（绿地仓库必须先有测试清单才能跑测试），再重新领取任务。长期建议：R-TDD-ORDER 对 `package.json` 等引导清单文件豁免，或允许 TDD 任务的首个非测试文件是运行测试所必需的清单。",
+      "status": "approved",
+      "createdAt": "2026-10-31T12:08:22+08:00",
+      "data": {
+        "category": "maintainability",
+        "description": "T1 出现 TDD 门禁死锁，无法在不违反门禁的前提下推进。事实链：T1 标记 tdd: required；验证组命令是 `npm test`；但仓库根目录尚无 `package.json`，`npm test` 直接以 ENOENT 退出（E-0005：exitCode 254、parsed=false、run/failed 均为 0，不能判定为 RED）。要消除这个失败，必须先创建 `package.json`；但按 R-TDD-ORDER，在 tdd=none 时创建任何非测试文件都会被拒绝（已拦截 `package.json`、`.gitignore`），而 `package.json` 不在 task.tests 中也不匹配 looksLikeTestPath。结果形成闭环：没有 package.json → npm test 出不了可解析的 RED → 没有 RED → package.json 写不进去。`test/healthz.test.js` 已存在且内容正确（缺少 `src/app.js` 时应失败），本身不是问题。",
+        "proposal": "请负责人二选一放行：(A) 推荐，运行 `/flow allow-once R-TDD-ORDER 引导创建 package.json 以便 npm test 能跑出 RED`（或 `/flow exception add R-TDD-ORDER package.json 引导清单`）；放行后我会先只创建 `package.json`/`.gitignore`，立即 flow_verify 取得 RED，再写 `src/app.js` 取得 GREEN，TDD 证据链保持完整。(B) 在 tasks.md 把 T1 改为 `tdd: optional` 并写明理由（绿地仓库必须先有测试清单才能跑测试），再重新领取任务。长期建议：R-TDD-ORDER 对 `package.json` 等引导清单文件豁免，或允许 TDD 任务的首个非测试文件是运行测试所必需的清单。"
+      },
+      "decidedAt": "2026-10-31T12:08:36+08:00",
+      "decisionReason": "evaluation harness auto-approve risk"
+    }
+  ],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T11:54:20+08:00",
+  "updatedAt": "2026-10-31T12:08:36+08:00",
+  "clarifyRounds": 0,
+  "roadmap": "C0",
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T11:54:20+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T12:08:36+08:00"
+  },
+  "baseline": {
+    "commit": null,
+    "summary": {
+      "parser": "none",
+      "parsed": false,
+      "run": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recordedAt": "2026-10-31T11:56:52+08:00"
+  },
+  "plan": {
+    "batches": [
+      {
+        "batch": "B1",
+        "mode": "sequential",
+        "tasks": [
+          "T1",
+          "T2",
+          "T3"
+        ],
+        "why": "三个任务共享同一工作区；T2 依赖 T1 的 src/app.js 与测试基线，T3 的文档命令依赖 T1 的 package.json；串行执行避免并行 worktree 合并，并保证每步验证可复现"
+      }
+    ]
+  },
+  "branch": "flowgate/C-001",
+  "externalChanges": [
+    {
+      "path": "test/healthz.test.js",
+      "at": "2026-10-31T12:00:03+08:00",
+      "origin": "external"
+    }
+  ]
+}

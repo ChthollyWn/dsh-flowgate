@@ -3,6 +3,11 @@
  *
  * 目标不是重复单测细节，而是从"宿主/引擎入口"验证：每种故障下插件要么正常启动，
  * 要么按 fail-closed / 锁定模式给出可解释结果，绝不静默放行或让宿主崩溃。
+ *
+ * 本轮（2026-10-31 T6.2 复验）扩充 3 例，覆盖此前未覆盖的故障类别：
+ * - `changes/<id>/status.json` 内容被截断（非法 JSON）→ 宿主插件仍能启动、修复路径可用；
+ * - `state/ledger.jsonl` 末行被截断（JSON 损坏，而非签名被篡改）→ 锁定 + doctor 报行号 + repair 拒绝；
+ * - `config.yaml` 语义非法（未知 complexity）→ ConfigError 带路径/字段，宿主启动不受影响、写操作 fail-closed。
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import * as fsp from 'node:fs/promises'
@@ -12,11 +17,12 @@ import * as nodePath from 'node:path'
 import { FlowEngine } from '../../src/core/engine'
 import type { CheckOutcome, FlowgateConfig } from '../../src/core/types'
 import { MemoryFileSystem } from '../../src/core/util/memory-fs'
-import { ConfigError, loadConfig } from '../../src/core/store/config'
+import { ConfigError, DEFAULT_CONFIG, loadConfig } from '../../src/core/store/config'
 import { FakeClock, FakeCommandRunner, FakeGit, PASSING_SUMMARY, VITEST_PASS_STDOUT } from '../helpers/fakes'
 import { flush, setupPlugin, type PluginHarness } from '../host/helpers'
 import { activeHostRuntime, apply, resetHostPluginForTest } from '../../src/host/index'
 import { createFakeContext } from '../../src/host/testing/fake-ctx'
+import { executeFlowCommand } from '../../src/host/commands/index'
 import type { DshToolExecution } from '../../src/host/adapters/dsh-types'
 
 const ROOT = ''
@@ -55,6 +61,21 @@ function makeEngineHarness(): EngineHarness {
     sessionId: 'session-fault-injection',
   })
   return { fs, clock, git, runner, engine }
+}
+
+/** 在同一个内存文件系统上新建引擎（模拟"宿主重启后重新加载"）。 */
+function makeReloadedEngine(h: EngineHarness, sessionId: string): FlowEngine {
+  return new FlowEngine({
+    root: ROOT,
+    fs: h.fs,
+    clock: h.clock,
+    git: h.git,
+    commandRunner: h.runner,
+    pluginVersion: '0.1.0',
+    ledgerKey: 'fault-injection-ledger-key',
+    sessionId,
+    host: { gateChecker: ALL_PASS },
+  })
 }
 
 let harness: PluginHarness | null = null
@@ -161,5 +182,140 @@ describe('故障注入：配置文件损坏', () => {
     await expect(loadConfig(fs, ROOT)).rejects.toBeInstanceOf(ConfigError)
     await expect(loadConfig(fs, ROOT)).rejects.toThrow(/config\.yaml/)
     await expect(loadConfig(fs, ROOT)).rejects.toThrow(/第 \d+ 行/)
+  })
+})
+
+describe('故障注入：状态文件损坏（status.json 被截断为非法 JSON）', () => {
+  it('宿主插件仍能启动、/flow doctor 可读，/flow repair 从账本快照重建状态', async () => {
+    const h = makeEngineHarness()
+    await h.engine.init()
+    const created = await h.engine.newChange({ title: '状态损坏演练', summary: '验证 repair 能从账本恢复' })
+    const statusPath = `.flowgate/changes/${created.changeId}/status.json`
+    const rawStatus = await h.fs.readFile(statusPath)
+    // 模拟磁盘写到一半崩溃：把 status.json 截断成非法 JSON。
+    await h.fs.writeFile(statusPath, rawStatus.slice(0, Math.max(10, Math.floor(rawStatus.length / 2))))
+
+    // 宿主插件启动路径（startHostPlugin → runtime.ensureEngine → engine.load）不抛错。
+    const realEngine = makeReloadedEngine(h, 'session-fault-injection-status')
+    harness = await setupPlugin({ engine: realEngine })
+    expect(harness.runtime.engine()).toBe(realEngine)
+    expect(realEngine.snapshot().initialized).toBe(true)
+    // 03 §14：状态文件损坏不能被静默跳过（否则阶段门禁会 fail-open）。
+    // 加载后必须锁定、doctor 指出损坏文件与修复路径，repair 从账本快照重建后解锁。
+    expect(realEngine.snapshot().locked).toBe(true)
+    expect(realEngine.allChanges()).toHaveLength(0)
+
+    const doctorText = await executeFlowCommand(harness.runtime, 'doctor', harness.agent)
+    expect(doctorText).toContain('FlowGate 自检')
+    expect(doctorText).toContain('初始化：是')
+    expect(doctorText).toContain('账本：完整')
+    expect(doctorText).toContain('配置：正常')
+    expect(doctorText).not.toContain('引擎：未就绪')
+    expect(doctorText).toContain('状态文件损坏')
+    expect(doctorText).toContain(statusPath)
+    expect(doctorText).toContain('/flow repair')
+
+    const repairText = await executeFlowCommand(harness.runtime, 'repair', harness.agent)
+    expect(repairText).toContain('修复完成')
+    expect(repairText).toContain('重建 1 个变更')
+    const restored = JSON.parse(await h.fs.readFile(statusPath)) as { id: string; title: string }
+    expect(restored.id).toBe(created.changeId)
+    expect(restored.title).toBe('状态损坏演练')
+    expect(realEngine.allChanges().map((change) => change.id)).toContain(created.changeId)
+    // repair 后锁定解除（写操作恢复正常）。
+    expect(realEngine.snapshot().locked).toBe(false)
+    // 台账 index.md 也随修复重建。
+    expect(await h.fs.exists('.flowgate/changes/index.md')).toBe(true)
+  })
+})
+
+describe('故障注入：账本行被截断（JSON 损坏，非签名篡改）', () => {
+  it('加载进入锁定模式，doctor 报出损坏行号，写操作被拒绝，repair 拒绝在坏账本上重建', async () => {
+    const h = makeEngineHarness()
+    await h.engine.init()
+    await h.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    const ledgerPath = '.flowgate/state/ledger.jsonl'
+    const lines = (await h.fs.readFile(ledgerPath)).split('\n').filter((line) => line.length > 0)
+    const lastLine = lines[lines.length - 1]!
+    // 只截断字节（不篡改签名）：末行变成非法 JSON，哈希链无后续行可断。
+    const truncated = lastLine.slice(0, Math.max(8, Math.floor(lastLine.length / 2)))
+    await h.fs.writeFile(ledgerPath, `${[...lines.slice(0, -1), truncated].join('\n')}\n`)
+
+    const reloaded = makeReloadedEngine(h, 'session-fault-injection-truncated')
+    await reloaded.load() // 不抛错：账本损坏不能把宿主带崩
+    expect(reloaded.snapshot().initialized).toBe(true)
+    expect(reloaded.snapshot().locked).toBe(true)
+
+    const doctor = await reloaded.doctor()
+    expect(doctor.ledgerOk).toBe(false)
+    expect(doctor.ledgerFailures).toHaveLength(1)
+    expect(doctor.ledgerFailures[0]?.line).toBe(lines.length)
+    expect(doctor.ledgerFailures[0]?.reason).toContain('不是合法的账本事件 JSON')
+    expect(doctor.configOk).toBe(true)
+    expect(doctor.message).toContain('锁定模式')
+
+    // 门禁内写入被拒绝且原因可见（host 守卫消费的就是这个判定）。
+    const decision = await reloaded.evaluateAction(
+      { kind: 'write', tool: 'write', path: 'src/index.ts' },
+      { tool: 'write', agentRole: 'main' },
+    )
+    expect(decision.effect).toBe('deny')
+    expect(decision.message).toContain('R-LOCKED')
+    await expect(reloaded.newChange({ title: '趁锁立项', summary: '应被拒绝' })).rejects.toThrow('锁定模式')
+
+    // repair 不静默重写/截断坏账本：明确失败并报出行号。
+    const repaired = await reloaded.repair()
+    expect(repaired.ok).toBe(false)
+    expect(repaired.message).toContain('账本校验失败')
+    expect(repaired.message).toContain(`第 ${lines.length} 行`)
+    expect(await h.fs.readFile(ledgerPath)).toContain(truncated)
+  })
+})
+
+describe('故障注入：配置语义非法（未知 complexity 值）', () => {
+  it('ConfigError 带路径与字段名；宿主插件仍启动，锁定并 fail-closed，doctor 报出配置错误与修复入口', async () => {
+    const h = makeEngineHarness()
+    await h.engine.init()
+    await h.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    // YAML 语法合法但语义非法：未知复杂度档位。
+    await h.fs.writeFile('.flowgate/config.yaml', 'levels:\n  complexity: impossible\n')
+
+    await expect(loadConfig(h.fs, ROOT)).rejects.toBeInstanceOf(ConfigError)
+    const configError = (await loadConfig(h.fs, ROOT).catch((error: unknown) => error)) as ConfigError
+    expect(configError).toBeInstanceOf(ConfigError)
+    expect(configError.path).toBe('.flowgate/config.yaml')
+    expect(configError.message).toContain('levels.complexity')
+    // 语义错误给字段路径（没有行号可指），语法错误才带行号（见上一组用例）。
+    expect(configError.line).toBeUndefined()
+
+    // 宿主插件启动路径不抛错：engine.load() 内部把配置错误降级为默认配置 + 锁定。
+    const realEngine = makeReloadedEngine(h, 'session-fault-injection-config')
+    harness = await setupPlugin({ engine: realEngine })
+    expect(harness.runtime.engine()).toBe(realEngine)
+    expect(realEngine.snapshot().initialized).toBe(true)
+    expect(realEngine.snapshot().locked).toBe(true)
+    // 降级口径：坏配置不生效，运行期用默认配置（不被非法值带偏）。
+    expect(realEngine.getConfig().levels.complexity).toBe(DEFAULT_CONFIG.levels.complexity)
+
+    const doctor = await realEngine.doctor()
+    expect(doctor.configOk).toBe(false)
+    expect(doctor.configError).toContain('levels.complexity')
+    expect(doctor.ledgerOk).toBe(true)
+    expect(doctor.message).toContain('锁定模式')
+    expect(doctor.message).toContain('配置文件损坏')
+
+    // 门禁内写入 fail-closed。
+    const decision = await realEngine.evaluateAction(
+      { kind: 'write', tool: 'write', path: 'src/index.ts' },
+      { tool: 'write', agentRole: 'main' },
+    )
+    expect(decision.effect).toBe('deny')
+    expect(decision.message).toContain('R-LOCKED')
+
+    const doctorText = await executeFlowCommand(harness.runtime, 'doctor', harness.agent)
+    expect(doctorText).toContain('FlowGate 自检')
+    expect(doctorText).toContain('配置：错误')
+    expect(doctorText).toContain('levels.complexity')
+    expect(doctorText).toContain('/flow repair')
   })
 })

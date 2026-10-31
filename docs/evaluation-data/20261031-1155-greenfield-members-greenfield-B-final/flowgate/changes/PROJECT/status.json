@@ -1,0 +1,107 @@
+{
+  "id": "PROJECT",
+  "kind": "change",
+  "title": "会员管理系统 v1：可运行 + 登录",
+  "summary": "从空仓库从 0 搭建一个会员管理系统第一版，最小目标：项目能跑起来、用户能登录。技术栈、登录方式、数据存储均未确定，需要先做需求澄清与路线图，再进入实现。",
+  "complexity": "medium",
+  "risk": "normal",
+  "stage": "roadmap",
+  "lifecycle": "archived",
+  "gates": {
+    "G0": {
+      "state": "pending",
+      "attempts": 0
+    },
+    "GR": {
+      "state": "passed",
+      "attempts": 2,
+      "submittedAt": "2026-10-31T11:54:04+08:00",
+      "items": [
+        {
+          "item": "gr.projectClarify",
+          "label": "项目级六要素闭合",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "gr.roadmapEntries",
+          "label": "路线图至少包含一个变更",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "项目：repo"
+          ]
+        },
+        {
+          "item": "gr.roadmapDeps",
+          "label": "路线图依赖无环且引用存在",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "gr.roadmapC0",
+          "label": "第一个变更是工程骨架 C0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "gr.roadmapMvp",
+          "label": "每项 MVP 能力都有归属的变更",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "gr.roadmapScale",
+          "label": "单个变更预计任务数不超过上限",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "gr.roadmapMvpCut",
+          "label": "MVP 切线已标出",
+          "passed": true,
+          "priority": "P0"
+        }
+      ],
+      "approvedAt": "2026-10-31T11:54:10+08:00"
+    }
+  },
+  "batches": [],
+  "tasks": {},
+  "evidenceIds": [],
+  "pending": [],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T11:53:19+08:00",
+  "updatedAt": "2026-10-31T11:54:10+08:00",
+  "clarifyRounds": 0,
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T11:53:19+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T11:54:10+08:00"
+  }
+}

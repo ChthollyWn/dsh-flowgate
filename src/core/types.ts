@@ -962,6 +962,7 @@ export type LedgerEventType =
   | 'task.started'
   | 'task.done'
   | 'task.blocked'
+  | 'task.unblocked'
   | 'evidence.recorded'
   | 'review.reported'
   | 'violation.detected'

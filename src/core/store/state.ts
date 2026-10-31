@@ -69,16 +69,43 @@ export interface LoadProjectStatePorts {
   clock: Clock
 }
 
+/** 加载时发现的损坏状态文件（路径为仓库相对路径，可直接展示给负责人）。 */
+export interface CorruptStateFile {
+  /** 例如 `.flowgate/changes/C-001/status.json`。 */
+  path: string
+  /** 面向人的原因，例如「非法 JSON（Unexpected end of JSON input）」。 */
+  reason: string
+}
+
+/** 变更状态扫描结果：可解析的变更 + 损坏的 status.json 清单。 */
+export interface ChangesScanResult {
+  changes: ChangeStatus[]
+  corrupt: CorruptStateFile[]
+}
+
+/**
+ * `loadProjectState` 的返回类型：在 `ProjectState` 之上附带损坏清单。
+ *
+ * `corruptStateFiles` 只在存在损坏时出现，保持未损坏项目的返回值形状不变
+ * （现有调用方/快照断言不受影响）。
+ */
+export interface LoadedProjectState extends ProjectState {
+  corruptStateFiles?: CorruptStateFile[]
+}
+
 /**
  * 加载项目级运行态。
  *
  * `project` / `roadmap` 两个解析结果由 engine 在 load 阶段用 artifacts 解析器填入
  * （本函数只负责存储层事实，避免 store 依赖 artifacts 解析模块）。
+ *
+ * 损坏的 `status.json` 不再被静默跳过：汇总到 `corruptStateFiles` 交给 engine
+ * 进入锁定模式（03 §14：状态文件损坏 → 锁定 + `/flow doctor` 诊断 + `/flow repair`）。
  */
-export async function loadProjectState(ports: LoadProjectStatePorts): Promise<ProjectState> {
+export async function loadProjectState(ports: LoadProjectStatePorts): Promise<LoadedProjectState> {
   const l = layout(ports.root)
   const initialized = await ports.fs.exists(l.config)
-  const state: ProjectState = {
+  const state: LoadedProjectState = {
     root: l.root,
     initialized,
     config: ports.config,
@@ -87,7 +114,9 @@ export async function loadProjectState(ports: LoadProjectStatePorts): Promise<Pr
     ledgerSeq: 0,
   }
   if (!initialized) return state
-  state.changes = await listChanges(ports.fs, ports.root)
+  const scan = await listChangesDetailed(ports.fs, ports.root)
+  state.changes = scan.changes
+  if (scan.corrupt.length > 0) state.corruptStateFiles = scan.corrupt
   state.leases = await readLeases(ports.fs, ports.root)
   const events = await readLedgerEvents(ports.fs, l.ledger)
   state.ledgerSeq = events.length > 0 ? events[events.length - 1]!.seq : 0
@@ -104,6 +133,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * 单个 status.json 不可解析/结构非法时抛出的错误。
+ *
+ * 消息保持既有格式（`变更状态文件损坏：<路径>（<原因>）。运行 /flow repair 重建。`），
+ * 同时把 `path` / `reason` 暴露给 {@link listChangesDetailed}，供 engine 汇总成锁定原因。
+ */
+class StateFileCorruptionError extends Error {
+  readonly path: string
+  readonly reason: string
+
+  constructor(path: string, reason: string, hint = '运行 /flow doctor 诊断，/flow repair 重建。') {
+    super(`变更状态文件损坏：${path}（${reason}）。${hint}`)
+    this.name = 'StateFileCorruptionError'
+    this.path = path
+    this.reason = reason
+  }
+}
+
 /** 读取单个变更状态；不存在返回 null，JSON 损坏时抛错（宿主会进入锁定模式）。 */
 export async function readChangeStatus(
   fs: FileSystem,
@@ -117,11 +164,11 @@ export async function readChangeStatus(
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new Error(`变更状态文件损坏：${path}（${reason}）。运行 /flow doctor 诊断，/flow repair 重建。`)
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new StateFileCorruptionError(path, `非法 JSON（${detail}）`)
   }
   if (!isRecord(parsed) || typeof parsed.id !== 'string') {
-    throw new Error(`变更状态文件损坏：${path}（缺少字符串字段 id）。运行 /flow repair 重建。`)
+    throw new StateFileCorruptionError(path, '缺少字符串字段 id', '运行 /flow repair 重建。')
   }
   return parsed as unknown as ChangeStatus
 }
@@ -149,28 +196,58 @@ function compareChangeIdAsc(a: string, b: string): number {
   return diff !== 0 ? diff : a.localeCompare(b)
 }
 
-/** 列出 `changes/` 下的全部变更状态（按编号升序；跳过 index.md 与无法解析的项）。 */
-export async function listChanges(fs: FileSystem, root: string): Promise<ChangeStatus[]> {
+/**
+ * 列出 `changes/` 下的全部变更状态，并单独返回损坏的 `status.json` 清单。
+ *
+ * `listChanges` 保持既有行为（跳过无法解析的项）；需要感知损坏时用本函数：
+ * 引擎在 load 阶段把 `corrupt` 汇总成锁定原因（03 §14 状态损坏 → 锁定），
+ * `/flow repair` 再从账本快照重建这些 status.json。
+ */
+export async function listChangesDetailed(fs: FileSystem, root: string): Promise<ChangesScanResult> {
   const l = layout(root)
   let entries: string[]
   try {
     entries = await fs.readdir(l.changesDir)
   } catch {
-    return []
+    return { changes: [], corrupt: [] }
   }
   const changes: ChangeStatus[] = []
+  const corrupt: CorruptStateFile[] = []
   for (const entry of [...entries].sort()) {
     if (entry.endsWith('.md') || entry.endsWith('.json')) continue
-    let status: ChangeStatus | null = null
+    let statusPath: string
     try {
-      status = await readChangeStatus(fs, root, entry)
+      statusPath = changePaths(root, entry).status
     } catch {
-      // 损坏的单个变更不应拖垮整个项目加载：引擎会在 /flow doctor 中单独报告。
-      status = null
+      // 目录名不是合法变更编号（编辑器杂项文件等）：不是状态损坏，按既有行为跳过。
+      continue
     }
-    if (status) changes.push(status)
+    // 目录里没有 status.json（可能是还没立项完/被删除）不在此处判定为损坏：
+    // 本函数的职责是「存在但读不出来」的状态文件，缺失状态由 /flow repair 按需重建。
+    if (!(await fs.exists(statusPath))) continue
+    try {
+      const status = await readChangeStatus(fs, root, entry)
+      if (status) changes.push(status)
+    } catch (error) {
+      corrupt.push({
+        path: statusPath,
+        reason:
+          error instanceof StateFileCorruptionError
+            ? error.reason
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      })
+    }
   }
-  return changes.sort((a, b) => compareChangeIdAsc(a.id, b.id))
+  changes.sort((a, b) => compareChangeIdAsc(a.id, b.id))
+  corrupt.sort((a, b) => a.path.localeCompare(b.path))
+  return { changes, corrupt }
+}
+
+/** 列出 `changes/` 下的全部变更状态（按编号升序；跳过 index.md 与无法解析的项）。 */
+export async function listChanges(fs: FileSystem, root: string): Promise<ChangeStatus[]> {
+  return (await listChangesDetailed(fs, root)).changes
 }
 
 /** 执行中的批次摘要，用于台账「当前阶段」列，例如 `S4 执行（B2 并行 2/3）`。 */
@@ -484,7 +561,8 @@ function applyIncrementalEvent(
     case 'task.started':
     case 'task.done':
     case 'task.blocked':
-    case 'task.interrupted': {
+    case 'task.interrupted':
+    case 'task.unblocked': {
       if (taskId) {
         const current: TaskState = change.tasks[taskId] ?? {
           id: taskId,
@@ -505,6 +583,11 @@ function applyIncrementalEvent(
         } else if (event.type === 'task.blocked') {
           current.status = 'blocked'
           current.blockReason = str(data.reason) ?? str(data.blockReason)
+        } else if (event.type === 'task.unblocked') {
+          // 负责人解锁连续失败熔断：失败计数清零、任务恢复执行（保留原 startedAt）。
+          current.status = 'running'
+          current.failureCount = 0
+          current.blockReason = undefined
         } else {
           current.status = 'interrupted'
           current.interruptedAt = at

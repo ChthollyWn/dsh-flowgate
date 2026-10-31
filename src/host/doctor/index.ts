@@ -58,6 +58,9 @@ export async function formatDoctorReport(runtime: HostRuntime): Promise<string> 
     lines.push(`账本：${report.ledgerOk ? '完整' : `校验失败 ${report.ledgerFailures.length} 处`}`)
     for (const failure of report.ledgerFailures.slice(0, 5)) lines.push(`  第 ${failure.line} 行：${failure.reason}`)
     lines.push(`配置：${report.configOk ? '正常' : `错误：${report.configError ?? '未知'}`}`)
+    // engine.doctor().message 汇总健康/锁定原因（状态文件损坏时含文件路径与 /flow repair
+    // 修复入口）：03 §14 要求状态损坏在 /flow doctor 可见，不能只藏在 /flow status。
+    lines.push(`引擎状态：${report.message}`)
     lines.push(`阶段：${report.stage ?? '（无活动变更）'}`)
     lines.push(`活动任务：${report.activeTasks.length > 0 ? report.activeTasks.join('、') : '无'}`)
     lines.push(`待处理项：${report.openPending} 个`)

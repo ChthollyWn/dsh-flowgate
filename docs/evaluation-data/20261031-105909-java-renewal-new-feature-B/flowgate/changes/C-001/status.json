@@ -1,0 +1,520 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "续费支持优惠券（下单带券码，按折扣计价）",
+  "summary": "在现有续费回调/订单能力上增加优惠券：下单时携带券码，按券面折扣计算应付金额；需明确券校验、折扣计算、幂等与金额校验规则，保证既有续费、幂等、到期日契约不回归。",
+  "complexity": "medium",
+  "risk": "normal",
+  "stage": "S4",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 medium · 风险 normal"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T10:59:24+08:00",
+      "passedAt": "2026-10-31T10:59:24+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 10,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做多券叠加、券管理后台、发券/领券/用户绑定/核销次数。；不做独立下单/报价接口、数据库持久化、退款与部分退款。；不修改验签算法（R3 范围），不修复 R2 到期日缺陷，不重构遗留营收报表与提醒模块。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 8 个 · 场景 21 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T11:04:44+08:00",
+      "approvedAt": "2026-10-31T11:05:09+08:00"
+    },
+    "G2": {
+      "state": "passed",
+      "attempts": 5,
+      "items": [
+        {
+          "item": "g2.contextSections",
+          "label": "context.md 必填段非空",
+          "passed": false,
+          "hint": "context.md 缺少或为空：接口约束、数据模型、非功能要求。",
+          "priority": "P0",
+          "example": "## 接口约束\n…\n## 数据模型\n…\n## 非功能要求\n…\n## 相关模块\n…",
+          "details": [
+            "接口约束",
+            "数据模型",
+            "非功能要求"
+          ]
+        },
+        {
+          "item": "g2.contextCitations",
+          "label": "接口约束与数据模型带源码引用",
+          "passed": true,
+          "priority": "P1"
+        },
+        {
+          "item": "g2.projectCommands",
+          "label": "project.md 命令可执行",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "test: ./mvnw -B test",
+            "integration: ./mvnw -B verify",
+            "build: ./mvnw -B -DskipTests package",
+            "run: ./mvnw -q spring-boot:run"
+          ]
+        },
+        {
+          "item": "g2.baseline",
+          "label": "基线已记录",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "基线：运行 20，通过 20，失败 0，跳过 0"
+          ]
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T11:06:51+08:00",
+      "passedAt": "2026-10-31T11:07:30+08:00"
+    },
+    "G3": {
+      "state": "passed",
+      "attempts": 2,
+      "submittedAt": "2026-10-31T11:09:29+08:00",
+      "items": [
+        {
+          "item": "g3.risk",
+          "label": "风险登记五类齐全",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "风险项 5 个"
+          ]
+        },
+        {
+          "item": "g3.taskCards",
+          "label": "任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 4 个"
+          ]
+        },
+        {
+          "item": "g3.traceability",
+          "label": "追溯矩阵无未覆盖场景",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "场景 21 个全部有归属"
+          ]
+        },
+        {
+          "item": "g3.taskCount",
+          "label": "任务数不超过上限",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 4 个"
+          ]
+        },
+        {
+          "item": "g3.newFiles",
+          "label": "new_files 落在 scope 内且不是根级通配",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.verifyCommands",
+          "label": "每个任务都有合法的验证命令",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.executionPlan",
+          "label": "执行计划通过检查（依赖顺序、并行范围、热点文件）",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        },
+        {
+          "item": "g3.cleanWorktree",
+          "label": "工作区没有未提交的改动",
+          "passed": true,
+          "priority": "P0"
+        }
+      ],
+      "approvedAt": "2026-10-31T11:09:34+08:00"
+    }
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "mode": "parallel",
+      "status": "running",
+      "tasks": [
+        "T1",
+        "T2"
+      ],
+      "startedAt": "2026-10-31T11:09:38+08:00"
+    },
+    {
+      "id": "B2",
+      "mode": "sequential",
+      "status": "pending",
+      "tasks": [
+        "T3",
+        "T4"
+      ]
+    }
+  ],
+  "tasks": {
+    "T1": {
+      "id": "T1",
+      "batch": "B1",
+      "status": "blocked",
+      "tdd": "none",
+      "evidenceIds": [
+        "E-0002",
+        "E-0005",
+        "E-0007"
+      ],
+      "reviewIds": [],
+      "startedAt": "2026-10-31T11:09:38+08:00",
+      "worktree": ".flowgate/worktrees/C-001/T1",
+      "agent": "e0c56310-f2f0-431c-86f8-7bb8641cf93d",
+      "failureCount": 3,
+      "blockReason": "连续 3 次验证失败"
+    },
+    "T2": {
+      "id": "T2",
+      "batch": "B1",
+      "status": "interrupted",
+      "tdd": "none",
+      "evidenceIds": [
+        "E-0004",
+        "E-0006"
+      ],
+      "reviewIds": [],
+      "startedAt": "2026-10-31T11:09:38+08:00",
+      "worktree": ".flowgate/worktrees/C-001/T2",
+      "agent": "fddff823-31cf-4075-a45d-ae38912147cd",
+      "failureCount": 2,
+      "interruptedAt": "2026-10-31T11:11:51+08:00"
+    },
+    "T3": {
+      "id": "T3",
+      "batch": "B2",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    },
+    "T4": {
+      "id": "T4",
+      "batch": "B2",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    }
+  },
+  "evidenceIds": [],
+  "pending": [
+    {
+      "id": "BL-1",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T1 连续 3 次验证失败，已暂停",
+      "detail": "先复现、找根因、再修复；不要继续试错。负责人确认后继续。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:17+08:00",
+      "data": {
+        "taskId": "T1"
+      }
+    },
+    {
+      "id": "BL-2",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：flow_status",
+      "detail": "other: flow_status\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:19+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:97020921a1a6a138793add2179c20bcf8ce0924e3cf5524d8f54356d3a6c57aa"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "tool": "flow_status"
+      }
+    },
+    {
+      "id": "BL-3",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/state/evidence/E-0007.log",
+      "detail": "read /private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/state/evidence/E-0007.log\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:28+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:515c660d8d77de240e4bbe43520b1a552facd96706928ed637287a119beb9e35"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "target": "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/state/evidence/E-0007.log",
+        "tool": "read"
+      }
+    },
+    {
+      "id": "BL-4",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/config.yaml",
+      "detail": "read /private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/config.yaml\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:31+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:c390636f55ff6332274c1b44ed6ae342f81ac322a2033a3c040a3e3d88cebcd0"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "target": "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/config.yaml",
+        "tool": "read"
+      }
+    },
+    {
+      "id": "BL-5",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/project.md",
+      "detail": "read /private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/project.md\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:31+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:1182c96f44c6460252a08f690771af9a1f52dc9e810bd850c748764a21001775"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "target": "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-HatlgT/repo/.flowgate/project.md",
+        "tool": "read"
+      }
+    },
+    {
+      "id": "BL-6",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：src/main/java/com/acme/member/renewal/RenewalService.java",
+      "detail": "read src/main/java/com/acme/member/renewal/RenewalService.java\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:34+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:fb2ca81788bcb11d4c8bda79f1ce544455c1dceef3fed156b68357eee769d0d4"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "target": "src/main/java/com/acme/member/renewal/RenewalService.java",
+        "tool": "read"
+      }
+    },
+    {
+      "id": "BL-7",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T-FAILURE-LIMIT：src/main/java/com/acme/member/renewal/RenewalOrder.java",
+      "detail": "write src/main/java/com/acme/member/renewal/RenewalOrder.java\n同一任务验证连续失败达到上限（默认 3 次）：先停下按\"复现 → 定位根因 → 修复 → 回归\"排障。\n解锁：负责人确认后可继续（/flow risk approve <RK-n>）；先写清失败现象与根因假设。",
+      "status": "open",
+      "createdAt": "2026-10-31T11:11:42+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-FAILURE-LIMIT",
+        "actionFingerprint": "sha256:d7a851a7b41a79aafcc025c908360f669dc3f727299a14d54592eb2e4a84ddec"
+      },
+      "data": {
+        "ruleId": "T-FAILURE-LIMIT",
+        "stage": "S4",
+        "target": "src/main/java/com/acme/member/renewal/RenewalOrder.java",
+        "tool": "write"
+      }
+    }
+  ],
+  "overrides": [],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T10:59:24+08:00",
+  "updatedAt": "2026-10-31T11:11:51+08:00",
+  "clarifyRounds": 0,
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T10:59:24+08:00"
+  },
+  "session": {
+    "attached": "session-…2338ac",
+    "heartbeat": "2026-10-31T11:09:35+08:00"
+  },
+  "baseline": {
+    "commit": "5e74ea4086b519662b3e5595c06cb6334ef11b19",
+    "summary": {
+      "parser": "junit-xml",
+      "parsed": true,
+      "run": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 47
+    },
+    "recordedAt": "2026-10-31T11:06:38+08:00",
+    "receiptId": "E-0001"
+  },
+  "plan": {
+    "batches": [
+      {
+        "batch": "B1",
+        "mode": "parallel",
+        "tasks": [
+          "T1",
+          "T2"
+        ],
+        "why": "T1 只新增券模型/仓储/服务，T2 只改订单模型，两组文件互不重叠、互不依赖，可并行；都不碰 pom.xml 等热点文件。"
+      },
+      {
+        "batch": "B2",
+        "mode": "sequential",
+        "tasks": [
+          "T3",
+          "T4"
+        ],
+        "why": "T3 依赖 T1 的计价与 T2 的订单字段后才能接入回调；T4 又依赖 T3 暴露的 CallbackRequest.couponCode 与券异常类型，必须排在其后顺序执行。"
+      }
+    ]
+  },
+  "branch": "flowgate/C-001"
+}

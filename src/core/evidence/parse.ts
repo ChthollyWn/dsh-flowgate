@@ -333,6 +333,197 @@ export function parsePytestConsole(output: string): TestSummary {
 }
 
 // ---------------------------------------------------------------------------
+// Python unittest console (default output goes to stderr)
+// ---------------------------------------------------------------------------
+
+/**
+ * `Ran 3 tests in 0.002s` — plural is conditional (`Ran 1 test in 0.000s`).
+ * Python 3.13 prints `NO TESTS RAN` instead of `OK` when nothing ran.
+ */
+const UNITTEST_RAN_RE = /^Ran\s+(\d+)\s+tests?\s+in\s+([\d.]+)s\s*$/
+
+/**
+ * Failure sections start with `FAIL: name (module.Class.test)` or the same
+ * shape with `ERROR:`. `subTest` failures append a parameter group, e.g.
+ * `FAIL: test_each (test_sub.SubTests.test_each) (i=1)`.
+ */
+const UNITTEST_FAILURE_RE = /^(FAIL|ERROR):\s+(.+?)\s*$/
+const UNITTEST_DESCRIPTION_RE = /^(.+?)\s+\(([^()]+)\)(\s+\(.*\))?$/
+
+/** `-v` prints one `<description> ... <status>` line per executed test. */
+const UNITTEST_VERBOSE_RE =
+  /^(.+?) \(([^()]+)\)(?: \(.*\))? \.\.\. (ok|FAIL|ERROR|skipped(?: '.*')?|expected failure|unexpected success)$/
+
+interface UnittestOutcome {
+  failures: number
+  errors: number
+  skipped: number
+}
+
+/**
+ * Parse the parenthesised detail of the result line, e.g.
+ * `skipped=2, expected failures=1` / `failures=1, errors=2`.
+ */
+function parseUnittestResultCounts(detail: string | undefined): UnittestOutcome | null {
+  const counts: UnittestOutcome = { failures: 0, errors: 0, skipped: 0 }
+  if (detail === undefined || detail.trim() === '') return counts
+  let recognized = 0
+  for (const match of detail.matchAll(/(failures|errors|skipped|expected failures|unexpected successes)\s*=\s*(\d+)/g)) {
+    const value = Number.parseInt(match[2] ?? '', 10)
+    if (!Number.isFinite(value)) continue
+    recognized += 1
+    const name = match[1]
+    if (name === 'failures') counts.failures = value
+    else if (name === 'errors') counts.errors = value
+    else if (name === 'skipped') counts.skipped = value
+    // `expected failures` / `unexpected successes` are valid result tokens but
+    // are never counted as failed: FR-5.2 uses failed = failures + errors.
+  }
+  // An `OK`/`FAILED` line we cannot interpret is not a result: keep looking.
+  return recognized > 0 ? counts : null
+}
+
+function parseUnittestOutcome(line: string): UnittestOutcome | null {
+  const trimmed = line.trim()
+  if (trimmed === 'NO TESTS RAN') return { failures: 0, errors: 0, skipped: 0 }
+  const okMatch = /^OK(?:\s+\((.+)\))?$/.exec(trimmed)
+  if (okMatch) return parseUnittestResultCounts(okMatch[1])
+  const failedMatch = /^FAILED\s+\((.+)\)$/.exec(trimmed)
+  if (failedMatch) return parseUnittestResultCounts(failedMatch[1])
+  return null
+}
+
+/** Canonical test id from `name (module.Class.test_name)`, keeping subtest params. */
+function unittestFailureName(description: string): string {
+  const match = UNITTEST_DESCRIPTION_RE.exec(description.trim())
+  if (!match) return normalizeName(description)
+  const label = normalizeName(match[1])
+  const testId = normalizeName(match[2])
+  const suffix = normalizeName(match[3])
+  const name = testId !== '' ? testId : label
+  return suffix === '' ? name : `${name} ${suffix}`
+}
+
+const PYTHON_FRAME_RE = /File\s+"([^"]+)",\s*line\s+(\d+)/g
+
+/**
+ * Python tracebacks print `File "path", line N` instead of `path:N`.
+ * Prefer the first non-library frame (the test/app frame closest to the
+ * failing assertion); fall back to `locationFromText` for non-Python stacks.
+ */
+function pointerFromPythonTraceback(text: string): { file?: string; line?: number } {
+  const frames = [...text.matchAll(PYTHON_FRAME_RE)]
+  if (frames.length > 0) {
+    const isLibraryFrame = (file: string): boolean =>
+      /(?:^|\/)lib(?:64)?\/python[\d.]+\//.test(file) || /(?:^|\/)(?:unittest|importlib)\//.test(file)
+    const frame = frames.find((match) => !isLibraryFrame(match[1] ?? '')) ?? frames[frames.length - 1]
+    if (frame) {
+      const location: { file?: string; line?: number } = {}
+      if (frame[1]) location.file = frame[1]
+      const line = Number.parseInt(frame[2] ?? '', 10)
+      if (Number.isFinite(line)) location.line = line
+      return location
+    }
+  }
+  return locationFromText(text)
+}
+
+/** unittest prints the exception line at column 0; frames and source lines are indented. */
+function unittestMessage(body: string): string {
+  for (const rawLine of body.split(/\r?\n/)) {
+    const trimmed = rawLine.trim()
+    if (trimmed === '') continue
+    if (/^[=-]{5,}$/.test(trimmed)) continue
+    if (/^Traceback \(most recent call last\):$/.test(trimmed)) continue
+    if (/^\s/.test(rawLine)) continue
+    return normalizeName(rawLine)
+  }
+  return firstMeaningful(body)
+}
+
+export function parseUnittestConsole(output: string): TestSummary {
+  const parser = 'unittest'
+  let ran: { run: number; durationMs: number } | null = null
+  let outcome: UnittestOutcome | null = null
+  let verbosePassed = 0
+  let verboseFailed = 0
+  let verboseSkipped = 0
+  const failureBlocks: { description: string; body: string[] }[] = []
+  let current: { description: string; body: string[] } | null = null
+
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.replace(/\r$/, '')
+    const ranMatch = UNITTEST_RAN_RE.exec(line.trim())
+    if (ranMatch) {
+      const seconds = Number.parseFloat(ranMatch[2] ?? '0')
+      ran = {
+        run: Number.parseInt(ranMatch[1] ?? '0', 10),
+        durationMs: Number.isFinite(seconds) ? Math.round(seconds * 1000) : 0,
+      }
+      current = null
+      continue
+    }
+    const parsedOutcome = parseUnittestOutcome(line)
+    if (parsedOutcome) {
+      outcome = parsedOutcome
+      current = null
+      continue
+    }
+    const failureHeader = UNITTEST_FAILURE_RE.exec(line)
+    if (failureHeader) {
+      current = { description: failureHeader[2] ?? '', body: [] }
+      failureBlocks.push(current)
+      continue
+    }
+    // `UNEXPECTED SUCCESS` sections have no body and never count as failures.
+    if (/^UNEXPECTED SUCCESS:/.test(line)) {
+      current = null
+      continue
+    }
+    // `-v` per-test lines also double as a fallback when the `Ran` line was lost.
+    const verboseMatch = UNITTEST_VERBOSE_RE.exec(line)
+    if (verboseMatch) {
+      const status = verboseMatch[3] ?? ''
+      if (status === 'ok') verbosePassed += 1
+      else if (status === 'FAIL' || status === 'ERROR' || status === 'unexpected success') verboseFailed += 1
+      else verboseSkipped += 1 // skipped '<reason>' / expected failure
+      continue
+    }
+    if (current) {
+      if (/^={5,}$/.test(line.trim())) current = null
+      else current.body.push(line)
+    }
+  }
+
+  // A recognizable result line is mandatory: `Ran ...` alone may be a killed or
+  // truncated run and must never be treated as evidence (FR-5.2 / docs 6.3).
+  if (!outcome) return emptySummary(parser)
+  const verboseTotal = verbosePassed + verboseFailed + verboseSkipped
+  const run = ran ? ran.run : verboseTotal
+  if (!ran && verboseTotal === 0) return emptySummary(parser)
+
+  const failed = outcome.failures + outcome.errors
+  const skipped = outcome.skipped
+  const summary: TestSummary = {
+    parser,
+    parsed: true,
+    run,
+    passed: Math.max(0, run - failed - skipped),
+    failed,
+    skipped,
+  }
+  if (ran && ran.durationMs > 0) summary.durationMs = ran.durationMs
+  if (failed > 0 && failureBlocks.length > 0) {
+    summary.failures = failureBlocks.map((block) => {
+      const body = block.body.join('\n')
+      const location = pointerFromPythonTraceback(body)
+      return failureOf(unittestFailureName(block.description), location.file, location.line, unittestMessage(body))
+    })
+  }
+  return summary
+}
+
+// ---------------------------------------------------------------------------
 // Vitest console
 // ---------------------------------------------------------------------------
 
@@ -692,6 +883,11 @@ const CONSOLE_PARSERS: { id: string; match: RegExp; parse: (output: string) => T
   { id: 'maven', match: /(?:^|[\s/])(?:mvn(?:w)?|maven)(?:\s|$)/i, parse: parseMavenConsole },
   { id: 'gradle', match: /(?:^|[\s/])gradle(?:w)?(?:\s|$)/i, parse: parseGradleConsole },
   { id: 'pytest', match: /(?:^|[\s/])(?:pytest|py\.test)(?:\s|$)/i, parse: parsePytestConsole },
+  {
+    id: 'unittest',
+    match: /(?:^|[\s/])(?:python(?:\d+(?:\.\d+)*)?\s+-m\s+unittest|unittest)(?:\s|$)/i,
+    parse: parseUnittestConsole,
+  },
   { id: 'vitest', match: /(?:^|[\s/])vitest(?:\s|$)/i, parse: parseVitestConsole },
   { id: 'jest', match: /(?:^|[\s/])jest(?:\s|$)/i, parse: parseJestConsole },
   { id: 'go', match: /\bgo\s+test\b/i, parse: parseGoTestJson },
@@ -714,7 +910,10 @@ function consoleParserOrder(command: string): ((output: string) => TestSummary)[
 export function detectEvidenceKind(command: string): EvidenceKind {
   const normalized = command.trim().toLowerCase()
   if (normalized === '') return 'run'
-  if (/\b(?:test|tests|pytest|vitest|jest|mocha|junit|cargo\s+nextest)\b/.test(normalized) || /\bgo\s+test\b/.test(normalized)) {
+  if (
+    /\b(?:test|tests|pytest|vitest|jest|mocha|junit|unittest|cargo\s+nextest)\b/.test(normalized) ||
+    /\bgo\s+test\b/.test(normalized)
+  ) {
     if (/\btest\s*:\s*none\b/.test(normalized)) return 'manual'
     return 'test'
   }

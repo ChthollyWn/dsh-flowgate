@@ -118,6 +118,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 | `/flow risk approve\|reject <RK-n> [理由]` | 处理风险接管项 |
 | `/flow plan approve\|reject <PC-n> [理由]` | 处理计划修订申请 |
 | `/flow rule approve\|reject <RL-n> [理由]` | 处理规则沉淀提议 |
+| `/flow unblock [BL-n\|任务 id] [理由]` | 解除连续失败熔断（T-FAILURE-LIMIT）：清零失败计数、把暂停的任务恢复为运行中，并一并关闭该任务残留的 BL 待处理项；无参时作用于当前变更唯一的 open blocker |
 | `/flow complexity <级别> [理由]` / `/flow risk-level <级别> [理由]` | 调整流程等级；降低必须由人执行并写理由 |
 | `/flow learn <detail\|brief\|off>` | 学习模式详细度 |
 | `/flow metrics [--csv]` | 查看指标（M-1～M-18） |
@@ -166,7 +167,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 
 **判定顺序：** 受保护路径 → 锁定模式 → 风险触发器（转人工）→ 阶段策略 → 任务范围 → 新文件控制 → TDD 顺序 → 例外与单次放行 → 默认允许。前面的规则一旦拒绝，后面不再翻转；单次放行只抵消指定的那条规则。
 
-**内置风险触发器（可在 `config.yaml` 的 `triggers` 调整）：** 敏感路径（鉴权 / 支付 / 迁移 / 基础设施 / CI / 生产配置）、依赖清单变更、危险命令（`rm -rf`、`git push --force`、`git reset --hard`、`DROP`/`TRUNCATE`、`curl … | sh` 等）、写入疑似密钥、成本超预算、范围膨胀、连续失败。命中即拒绝当前动作并生成待处理项，负责人批准后单次放行。
+**内置风险触发器（可在 `config.yaml` 的 `triggers` 调整）：** 敏感路径（鉴权 / 支付 / 迁移 / 基础设施 / CI / 生产配置）、依赖清单变更、危险命令（`rm -rf`、`git push --force`、`git reset --hard`、`DROP`/`TRUNCATE`、`curl … | sh` 等）、写入疑似密钥、成本超预算、范围膨胀、连续失败。命中即拒绝当前动作并生成待处理项，负责人批准后单次放行。**连续失败熔断只拦"会推进或修改"的动作**（写文件、会改工作区的命令、`flow_verify`/`flow_task_done` 等进度类工具），`read`/`glob`/`grep`、只读命令、`flow_status`/`flow_diff`/`flow_report_risk` 始终放行，让 agent 先取证定位根因，再由负责人 `/flow unblock <BL-n>` 解锁。
 
 规则的完整定义、命令分词与误伤回归用例见 [docs/03-技术方案.md](docs/03-技术方案.md) §4–§5。
 
@@ -210,13 +211,13 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 产物解析与 GR/G0/G1/G2/G3/G5/G6 检查（46 项）、任务卡检查、执行计划与执行图 | ✅ 已实现（每项检查一正一反） |
 | `.flowgate/` 目录、台账、账本哈希链 + HMAC、跨会话接续与租约、锁定模式与 `/flow repair` | ✅ 已实现（篡改可定位第 N 行；重建可严格往返） |
 | 证据回执、输入哈希判定过期、风险引擎、返工失效范围、可核验源码引用 | ✅ 已实现 |
-| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 27 例专项单测；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门与审查（RV-1 verdict=pass、coverageOk），worktree 合并/集成检查点因一次性运行提前退出待交互式会话复验 |
-| 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主渲染验证（11 张截图）；剩余：面板按钮 Remote 兜底、低复杂度确认卡 |
+| 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 35 例专项单测；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
+| 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：状态条、8 视图、会话内切换工程模式 preset、面板按钮 Remote 兜底、低复杂度确认卡（25 张截图，`13-`～`26-` 为本轮新增）；拦截视图误判反馈为组件级验证 |
 | HTML 交付报告、跨会话看板 | ✅ 已实现（单文件离线可用，样例见 test/fixtures） |
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
-| 有 / 无插件对照评测报告 | 🟡 **18/18 run 已完成**（9 任务 × A/B，真实模型 + headless）：B 回归通过数与 A 相同、验收 2/3 vs 3/3，但耗时与人工门显著增加；含 B 更差的反例与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) §6.4 |
+| 有 / 无插件对照评测报告 | ✅ **18/18 run 完成 + 4 项主观指标人工评分 18/18**（9 任务 × A/B，真实模型 + headless）；本轮另补跑从 0 开发演练与派发（inline vs auto）对照（[§6.5–§6.7](docs/evaluation.md)）。诚实结论：B 在需求覆盖上没有胜出（多数 B run 被环境/人工门阻塞），真实收益是 0 虚假完成与可审计过程；样本小、不可外推 |
 
-**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（69 文件 / 995 用例）；真实 DSH 0.2.1-rc.5 下 `--dump-config` / `--dump-config-schema` 已加载本插件（[docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run（9 任务 × A/B），结论含反例与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
+**验证边界**：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（90 文件 / 1289 用例）；`pnpm coverage` 通过 thresholds（core 语句 90.34% / 分支 80.16%，host 纳入口径）；真实 DSH 0.2.1-rc.5 下 `--dump-config` 已加载本插件（`--dump-config-schema` 在 rc.5 上会因宿主自带 preset 行同样报错，不作为判据，见 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run 并补齐主观评分，结论含反例/阻塞原因与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。
 
 ## 界面
 
@@ -288,6 +289,10 @@ pnpm measure:startup  # 插件 host 入口加载耗时增量（T6.2，验收线 
 - [docs/impl/dsh-plugin-api-cheatsheet.md](docs/impl/dsh-plugin-api-cheatsheet.md)：DSH 扩展点速查表（含 d.ts 出处）
 - [docs/impl/host-integration.md](docs/impl/host-integration.md)：宿主集成与验证步骤
 - [docs/impl/implementation-status.md](docs/impl/implementation-status.md)：里程碑交付状态与已知缺口
+- [docs/evaluation.md](docs/evaluation.md)：有 / 无插件对照评测（18/18 + 主观评分）与从 0 开发 / 派发对照
+- [docs/impl/web-walkthrough.md](docs/impl/web-walkthrough.md)：真实 Web 宿主交互走查（preset 切换、面板按钮、确认卡）
+- [docs/screenshots/](docs/screenshots/)：真实 Web 宿主界面实拍（25 张）
+- [docs/evaluation-data/](docs/evaluation-data/)：评测原始数据与人工评分结果
 - [docs/interview-notes.md](docs/interview-notes.md)：面试/作品集材料（能力→机制→指标→真实故事）
 - [docs/compat/](docs/compat/)：DSH 版本兼容验证记录
 - [docs/reference/](docs/reference/)：本机 DSH 0.2.1-rc.5 的官方包参考

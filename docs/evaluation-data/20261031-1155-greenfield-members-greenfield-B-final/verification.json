@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-10-31T04:08:36.292Z",
+  "repo": "greenfield-members",
+  "task": "greenfield",
+  "condition": "B",
+  "rounds": 6,
+  "skipped": true,
+  "note": "该仓库/任务没有预置的本地验收命令（greenfield 的验收在 C0/C1 交付物中人工核对）",
+  "results": []
+}

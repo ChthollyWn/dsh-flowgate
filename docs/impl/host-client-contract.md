@@ -23,6 +23,12 @@ interface FlowgateProjection {
   revision: number
   /** 生成时间 ISO */
   updatedAt: string
+  /**
+   * 写入该记录的宿主进程 epoch（可选；旧版本记录没有）。
+   * 宿主重启后 revision 会从 0 重新计数，投影 apply 靠 epoch 识别"新进程记录"，
+   * 避免被旧会话日志里更大的 revision 挡住而显示陈旧快照；客户端可忽略本字段。
+   */
+  epoch?: string
 }
 ```
 

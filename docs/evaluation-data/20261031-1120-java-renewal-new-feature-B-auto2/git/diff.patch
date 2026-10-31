@@ -1,0 +1,964 @@
+diff --git a/src/main/java/com/acme/member/coupon/Coupon.java b/src/main/java/com/acme/member/coupon/Coupon.java
+new file mode 100644
+index 0000000..43650fb
+--- /dev/null
++++ b/src/main/java/com/acme/member/coupon/Coupon.java
+@@ -0,0 +1,74 @@
++package com.acme.member.coupon;
++
++import java.time.LocalDateTime;
++import java.util.Locale;
++import java.util.Objects;
++
++/** 券模型：券码规范化、闭区间有效期与整数分折扣计算。 */
++public class Coupon {
++
++    private final String code;
++    private final int discountPercent;
++    private final LocalDateTime validFrom;
++    private final LocalDateTime validUntil;
++    private final boolean enabled;
++
++    public Coupon(String code, int discountPercent, LocalDateTime validFrom, LocalDateTime validUntil, boolean enabled) {
++        this.code = normalizeCode(code);
++        if (discountPercent < 1 || discountPercent > 100) {
++            throw new IllegalArgumentException("discountPercent must be between 1 and 100: " + discountPercent);
++        }
++        this.discountPercent = discountPercent;
++        this.validFrom = Objects.requireNonNull(validFrom, "validFrom");
++        this.validUntil = Objects.requireNonNull(validUntil, "validUntil");
++        if (validUntil.isBefore(validFrom)) {
++            throw new IllegalArgumentException("validUntil must not be before validFrom");
++        }
++        this.enabled = enabled;
++    }
++
++    private static String normalizeCode(String code) {
++        if (code == null || code.trim().isEmpty()) {
++            throw new IllegalArgumentException("coupon code must not be blank");
++        }
++        return code.trim().toUpperCase(Locale.ROOT);
++    }
++
++    public String getCode() {
++        return code;
++    }
++
++    public int getDiscountPercent() {
++        return discountPercent;
++    }
++
++    public LocalDateTime getValidFrom() {
++        return validFrom;
++    }
++
++    public LocalDateTime getValidUntil() {
++        return validUntil;
++    }
++
++    public boolean isEnabled() {
++        return enabled;
++    }
++
++    /** 闭区间判定：validFrom <= at <= validUntil，且券处于启用状态。 */
++    public boolean isValidAt(LocalDateTime at) {
++        Objects.requireNonNull(at, "at");
++        return enabled && !at.isBefore(validFrom) && !at.isAfter(validUntil);
++    }
++
++    /** 优惠分：原价 × 折扣百分比，按 HALF_UP 取整到分。 */
++    public long discountCents(long originalAmountCents) {
++        if (originalAmountCents <= 0) {
++            throw new IllegalArgumentException("originalAmountCents must be positive: " + originalAmountCents);
++        }
++        return (originalAmountCents * discountPercent + 50) / 100;
++    }
++
++    public long payableCents(long originalAmountCents) {
++        return originalAmountCents - discountCents(originalAmountCents);
++    }
++}
+diff --git a/src/main/java/com/acme/member/coupon/CouponRepository.java b/src/main/java/com/acme/member/coupon/CouponRepository.java
+new file mode 100644
+index 0000000..4b6897a
+--- /dev/null
++++ b/src/main/java/com/acme/member/coupon/CouponRepository.java
+@@ -0,0 +1,50 @@
++package com.acme.member.coupon;
++
++import java.time.LocalDateTime;
++import java.util.Collection;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Objects;
++import java.util.Optional;
++import java.util.concurrent.ConcurrentHashMap;
++
++/** 券目录仓储：默认装载内置演示券，也可注入自定义券目录。 */
++public class CouponRepository {
++
++    private final Map<String, Coupon> couponsByCode = new ConcurrentHashMap<>();
++
++    public CouponRepository() {
++        this(builtInCoupons());
++    }
++
++    public CouponRepository(Collection<Coupon> coupons) {
++        Objects.requireNonNull(coupons, "coupons");
++        for (Coupon coupon : coupons) {
++            Coupon nonNull = Objects.requireNonNull(coupon, "coupon");
++            couponsByCode.put(nonNull.getCode(), nonNull);
++        }
++    }
++
++    /** 券码 trim + 大写后查找；null 或空白返回空。 */
++    public Optional<Coupon> findByCode(String code) {
++        if (code == null || code.trim().isEmpty()) {
++            return Optional.empty();
++        }
++        String normalized = code.trim().toUpperCase(Locale.ROOT);
++        return Optional.ofNullable(couponsByCode.get(normalized));
++    }
++
++    private static List<Coupon> builtInCoupons() {
++        LocalDateTime from = LocalDateTime.parse("2024-01-01T00:00:00");
++        LocalDateTime until = LocalDateTime.parse("2026-12-31T23:59:59");
++        return List.of(
++                new Coupon("WELCOME10", 10, from, until, true),
++                new Coupon("RENEW15", 15, from, until, true),
++                new Coupon("RENEW20", 20, from, until, true),
++                new Coupon("EXPIRED10", 10,
++                        LocalDateTime.parse("2024-01-01T00:00:00"),
++                        LocalDateTime.parse("2025-01-01T00:00:00"),
++                        true));
++    }
++}
+diff --git a/src/main/java/com/acme/member/renewal/RenewalController.java b/src/main/java/com/acme/member/renewal/RenewalController.java
+index 78da837..a2c1d71 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalController.java
++++ b/src/main/java/com/acme/member/renewal/RenewalController.java
+@@ -32,7 +32,9 @@ public class RenewalController {
+                     request.memberId(),
+                     request.months(),
+                     request.amountCents(),
+-                    request.signature()
++                    request.signature(),
++                    request.couponCode(),
++                    request.originalAmountCents()
+             ));
+             return ResponseEntity.ok(Map.of(
+                     "code", 0,
+@@ -45,6 +47,34 @@ public class RenewalController {
+         } catch (MemberService.MemberNotFoundException exception) {
+             return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                     .body(Map.of("code", 404, "error", "会员不存在"));
++        } catch (RenewalService.CouponValidationException exception) {
++            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
++                    .body(Map.of("code", 400, "error", exception.getMessage()));
++        }
++    }
++
++    @PostMapping("/quote")
++    public ResponseEntity<Map<String, Object>> quote(@RequestBody QuoteRequest request) {
++        try {
++            RenewalService.QuoteResult result = renewalService.quote(new RenewalService.QuoteCommand(
++                    request.memberId(),
++                    request.months(),
++                    request.originalAmountCents(),
++                    request.couponCode()
++            ));
++            return ResponseEntity.ok(Map.of(
++                    "originalAmountCents", result.originalAmountCents(),
++                    "discountCents", result.discountCents(),
++                    "payableAmountCents", result.payableAmountCents(),
++                    "couponCode", result.couponCode(),
++                    "discountPercent", result.discountPercent()
++            ));
++        } catch (MemberService.MemberNotFoundException exception) {
++            return ResponseEntity.status(HttpStatus.NOT_FOUND)
++                    .body(Map.of("code", 404, "error", "会员不存在"));
++        } catch (RenewalService.CouponValidationException exception) {
++            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
++                    .body(Map.of("code", 400, "error", exception.getMessage()));
+         }
+     }
+ 
+@@ -56,12 +86,31 @@ public class RenewalController {
+                         "memberId", order.getMemberId(),
+                         "externalTxnId", order.getExternalTxnId(),
+                         "months", order.getMonths(),
++                        "originalAmountCents", order.getOriginalAmountCents(),
++                        "discountCents", order.getDiscountCents(),
++                        "discountPercent", order.getDiscountPercent(),
++                        "couponCode", order.getCouponCode(),
+                         "amountCents", order.getAmountCents(),
+                         "status", order.getStatus().name()
+                 ))
+                 .toList();
+     }
+ 
+-    public record CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    /** 回调请求；couponCode/originalAmountCents 可选，旧五字段入口保持兼容。 */
++    public record CallbackRequest(String externalTxnId,
++                                  String memberId,
++                                  int months,
++                                  long amountCents,
++                                  String signature,
++                                  String couponCode,
++                                  Long originalAmountCents) {
++
++        public CallbackRequest(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null, null);
++        }
++    }
++
++    /** 试算请求：不落单、不顺延，只返回金额明细。 */
++    public record QuoteRequest(String memberId, int months, Long originalAmountCents, String couponCode) {
+     }
+ }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalOrder.java b/src/main/java/com/acme/member/renewal/RenewalOrder.java
+index b246da9..ffc0747 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalOrder.java
++++ b/src/main/java/com/acme/member/renewal/RenewalOrder.java
+@@ -16,15 +16,42 @@ public class RenewalOrder {
+     private final String memberId;
+     private final String externalTxnId;
+     private final int months;
++    private final long originalAmountCents;
++    private final long discountCents;
++    private final int discountPercent;
++    private final String couponCode;
+     private final long amountCents;
+     private final Status status;
+     private final LocalDateTime paidAt;
+ 
++    /** 无券兼容入口：原价等于实付、优惠为 0、券码为空。 */
+     public RenewalOrder(String memberId, String externalTxnId, int months, long amountCents, LocalDateTime paidAt) {
++        this(memberId, externalTxnId, months, amountCents, 0L, 0, "", amountCents, paidAt);
++    }
++
++    public RenewalOrder(String memberId,
++                        String externalTxnId,
++                        int months,
++                        long originalAmountCents,
++                        long discountCents,
++                        int discountPercent,
++                        String couponCode,
++                        long amountCents,
++                        LocalDateTime paidAt) {
+         this.id = UUID.randomUUID().toString();
+         this.memberId = Objects.requireNonNull(memberId);
+         this.externalTxnId = Objects.requireNonNull(externalTxnId);
+         this.months = months;
++        if (originalAmountCents - discountCents != amountCents) {
++            throw new IllegalArgumentException("originalAmountCents - discountCents must equal amountCents");
++        }
++        if (discountCents < 0) {
++            throw new IllegalArgumentException("discountCents must not be negative");
++        }
++        this.originalAmountCents = originalAmountCents;
++        this.discountCents = discountCents;
++        this.discountPercent = discountPercent;
++        this.couponCode = couponCode == null ? "" : couponCode;
+         this.amountCents = amountCents;
+         this.status = Status.PAID;
+         this.paidAt = Objects.requireNonNull(paidAt);
+@@ -46,6 +73,22 @@ public class RenewalOrder {
+         return months;
+     }
+ 
++    public long getOriginalAmountCents() {
++        return originalAmountCents;
++    }
++
++    public long getDiscountCents() {
++        return discountCents;
++    }
++
++    public int getDiscountPercent() {
++        return discountPercent;
++    }
++
++    public String getCouponCode() {
++        return couponCode;
++    }
++
+     public long getAmountCents() {
+         return amountCents;
+     }
+diff --git a/src/main/java/com/acme/member/renewal/RenewalService.java b/src/main/java/com/acme/member/renewal/RenewalService.java
+index ff327e1..fc57e36 100644
+--- a/src/main/java/com/acme/member/renewal/RenewalService.java
++++ b/src/main/java/com/acme/member/renewal/RenewalService.java
+@@ -1,5 +1,7 @@
+ package com.acme.member.renewal;
+ 
++import com.acme.member.coupon.Coupon;
++import com.acme.member.coupon.CouponRepository;
+ import com.acme.member.member.MemberService;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.beans.factory.annotation.Value;
+@@ -13,7 +15,7 @@ import java.time.ZoneId;
+  * 续费回调处理。
+  *
+  * <p>规则：验签失败拒绝；同一支付流水号只处理一次（幂等）；处理成功只顺延一次到期日。
+- * 基准任务 R3（风险改造）会改这里调用的 {@link SignatureVerifier}，但不改变幂等语义。
++ * 券码可选：有券时按券面百分比计算优惠分与实付分，并在落单前完成全部校验。
+  */
+ @Service
+ public class RenewalService {
+@@ -21,6 +23,7 @@ public class RenewalService {
+     private final RenewalRepository renewalRepository;
+     private final MemberService memberService;
+     private final SignatureVerifier signatureVerifier;
++    private final CouponRepository couponRepository;
+     private final Clock clock;
+     private final ZoneId zoneId;
+ 
+@@ -30,7 +33,7 @@ public class RenewalService {
+                           SignatureVerifier signatureVerifier,
+                           Clock clock,
+                           @Value("${renewal.timezone:Asia/Shanghai}") String zoneId) {
+-        this(renewalRepository, memberService, signatureVerifier, clock, ZoneId.of(zoneId));
++        this(renewalRepository, memberService, signatureVerifier, clock, ZoneId.of(zoneId), new CouponRepository());
+     }
+ 
+     RenewalService(RenewalRepository renewalRepository,
+@@ -38,9 +41,19 @@ public class RenewalService {
+                    SignatureVerifier signatureVerifier,
+                    Clock clock,
+                    ZoneId zoneId) {
++        this(renewalRepository, memberService, signatureVerifier, clock, zoneId, new CouponRepository());
++    }
++
++    RenewalService(RenewalRepository renewalRepository,
++                   MemberService memberService,
++                   SignatureVerifier signatureVerifier,
++                   Clock clock,
++                   ZoneId zoneId,
++                   CouponRepository couponRepository) {
+         this.renewalRepository = renewalRepository;
+         this.memberService = memberService;
+         this.signatureVerifier = signatureVerifier;
++        this.couponRepository = couponRepository;
+         this.clock = clock;
+         this.zoneId = zoneId;
+     }
+@@ -49,7 +62,7 @@ public class RenewalService {
+         if (!signatureVerifier.verify(command.externalTxnId(), command.amountCents(), command.signature())) {
+             throw new InvalidSignatureException();
+         }
+-        // 幂等：同一流水号直接返回已处理，不再顺延到期日。
++        // 幂等：同一流水号直接返回已处理，不再顺延到期日，也不再计算优惠。
+         return renewalRepository.findByExternalTxnId(command.externalTxnId())
+                 .map(existing -> new CallbackResult(true, existing))
+                 .orElseGet(() -> process(command));
+@@ -57,33 +70,144 @@ public class RenewalService {
+ 
+     private CallbackResult process(CallbackCommand command) {
+         memberService.getMember(command.memberId());
++        LocalDateTime paidAt = LocalDateTime.now(clock.withZone(zoneId));
++        CouponApplication coupon = applyCoupon(command, paidAt);
++
+         RenewalOrder order = new RenewalOrder(
+                 command.memberId(),
+                 command.externalTxnId(),
+                 command.months(),
++                coupon.originalAmountCents(),
++                coupon.discountCents(),
++                coupon.discountPercent(),
++                coupon.couponCode(),
+                 command.amountCents(),
+-                LocalDateTime.now(clock.withZone(zoneId))
++                paidAt
+         );
+         renewalRepository.save(order);
+         memberService.renew(command.memberId(), command.months());
+         return new CallbackResult(false, order);
+     }
+ 
++    /**
++     * 券计算（纯函数）：无券保持原价；有券时校验存在性、有效期、原价与折后金额。
++     * 所有校验都在落单/顺延之前完成，失败不占用 externalTxnId。
++     */
++    private CouponApplication applyCoupon(CallbackCommand command, LocalDateTime paidAt) {
++        String rawCouponCode = command.couponCode();
++        if (rawCouponCode == null || rawCouponCode.isBlank()) {
++            return new CouponApplication(command.amountCents(), 0L, 0, "", command.amountCents());
++        }
++
++        Long originalAmountCents = command.originalAmountCents();
++        if (originalAmountCents == null || originalAmountCents <= 0) {
++            throw new CouponValidationException("使用券码时 originalAmountCents 必填且必须为正数");
++        }
++
++        Coupon coupon = requireValidCoupon(rawCouponCode, originalAmountCents, paidAt);
++
++        long discountCents = coupon.discountCents(originalAmountCents);
++        long payableCents = coupon.payableCents(originalAmountCents);
++        if (payableCents != command.amountCents()) {
++            throw new CouponValidationException(
++                    "折后金额与 amountCents 不一致: originalAmountCents=" + originalAmountCents
++                            + ", discountCents=" + discountCents
++                            + ", payableCents=" + payableCents
++                            + ", amountCents=" + command.amountCents());
++        }
++        return new CouponApplication(
++                originalAmountCents,
++                discountCents,
++                coupon.getDiscountPercent(),
++                coupon.getCode(),
++                payableCents);
++    }
++
++    private Coupon requireValidCoupon(String rawCouponCode, long originalAmountCents, LocalDateTime paidAt) {
++        return couponRepository.findByCode(rawCouponCode)
++                .filter(candidate -> candidate.isValidAt(paidAt))
++                .orElseThrow(() -> new CouponValidationException(
++                        "券码不存在、未生效、已过期或已停用: " + rawCouponCode.trim()));
++    }
++
++    /**
++     * 下单试算：只校验会员与券并返回金额明细，不落单、不改到期日。
++     * 与回调复用同一券有效性判断与折扣算法，避免试算与实付金额分叉。
++     */
++    public QuoteResult quote(QuoteCommand command) {
++        memberService.getMember(command.memberId());
++        Long originalAmountCents = command.originalAmountCents();
++        if (originalAmountCents == null || originalAmountCents <= 0) {
++            throw new CouponValidationException("originalAmountCents 必填且必须为正数");
++        }
++
++        String rawCouponCode = command.couponCode();
++        if (rawCouponCode == null || rawCouponCode.isBlank()) {
++            return new QuoteResult(originalAmountCents, 0L, originalAmountCents, "", 0);
++        }
++
++        LocalDateTime paidAt = LocalDateTime.now(clock.withZone(zoneId));
++        Coupon coupon = requireValidCoupon(rawCouponCode, originalAmountCents, paidAt);
++        long discountCents = coupon.discountCents(originalAmountCents);
++        long payableCents = coupon.payableCents(originalAmountCents);
++        return new QuoteResult(
++                originalAmountCents,
++                discountCents,
++                payableCents,
++                coupon.getCode(),
++                coupon.getDiscountPercent());
++    }
++
+     public boolean verifySignature(String externalTxnId, long amountCents, String signature) {
+         return signatureVerifier.verify(externalTxnId, amountCents, signature);
+     }
+ 
+-    /** 回调命令。 */
+-    public record CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++    /** 回调命令。couponCode/originalAmountCents 为可选字段，旧五参数入口保持兼容。 */
++    public record CallbackCommand(String externalTxnId,
++                                  String memberId,
++                                  int months,
++                                  long amountCents,
++                                  String signature,
++                                  String couponCode,
++                                  Long originalAmountCents) {
++
++        public CallbackCommand(String externalTxnId, String memberId, int months, long amountCents, String signature) {
++            this(externalTxnId, memberId, months, amountCents, signature, null, null);
++        }
+     }
+ 
+     /** 处理结果：duplicate 表示命中幂等。 */
+     public record CallbackResult(boolean duplicate, RenewalOrder order) {
+     }
+ 
++    /** 试算命令：与回调同名的券字段；months 仅作接口语义保留，不影响金额。 */
++    public record QuoteCommand(String memberId, int months, Long originalAmountCents, String couponCode) {
++    }
++
++    /** 试算结果：不落单、不顺延，只返回金额明细。 */
++    public record QuoteResult(long originalAmountCents,
++                              long discountCents,
++                              long payableAmountCents,
++                              String couponCode,
++                              int discountPercent) {
++    }
++
++    private record CouponApplication(long originalAmountCents,
++                                     long discountCents,
++                                     int discountPercent,
++                                     String couponCode,
++                                     long payableCents) {
++    }
++
+     public static class InvalidSignatureException extends RuntimeException {
+         public InvalidSignatureException() {
+             super("回调签名校验失败");
+         }
+     }
++
++    public static class CouponValidationException extends RuntimeException {
++        public CouponValidationException(String message) {
++            super(message);
++        }
++    }
+ }
+diff --git a/src/test/java/com/acme/member/renewal/CouponRenewalTest.java b/src/test/java/com/acme/member/renewal/CouponRenewalTest.java
+new file mode 100644
+index 0000000..39f45d4
+--- /dev/null
++++ b/src/test/java/com/acme/member/renewal/CouponRenewalTest.java
+@@ -0,0 +1,454 @@
++package com.acme.member.renewal;
++
++import com.acme.member.coupon.Coupon;
++import com.acme.member.coupon.CouponRepository;
++import com.acme.member.member.Member;
++import com.acme.member.member.MemberRepository;
++import com.acme.member.member.MemberService;
++import com.fasterxml.jackson.databind.DeserializationFeature;
++import com.fasterxml.jackson.databind.ObjectMapper;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++import org.springframework.http.ResponseEntity;
++
++import java.lang.reflect.Method;
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDateTime;
++import java.time.ZoneId;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.Optional;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertThrows;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++/**
++ * 券目录与折扣计算（R1.S1、R1.S2、R1.S4）。
++ *
++ * <p>T1 只覆盖券模型、内置目录与整数分折扣算法；回调与试算在 T2/T3 扩展本类。
++ */
++class CouponRenewalTest {
++
++    private static final LocalDateTime NOW = LocalDateTime.parse("2025-12-01T00:00:00");
++    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2025-12-01T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
++    private static final ObjectMapper JSON = new ObjectMapper()
++            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
++
++    private final CouponRepository repository = new CouponRepository();
++
++    private MemberRepository memberRepository;
++    private MemberService memberService;
++    private RenewalRepository renewalRepository;
++    private SignatureVerifier signatureVerifier;
++    private RenewalService renewalService;
++    private RenewalController controller;
++
++    @BeforeEach
++    void setUpRenewalService() {
++        memberRepository = new MemberRepository();
++        renewalRepository = new RenewalRepository();
++        memberService = new MemberService(memberRepository, FIXED_CLOCK, ZoneId.of("Asia/Shanghai"));
++        signatureVerifier = new SignatureVerifier();
++        renewalService = new RenewalService(renewalRepository, memberService, signatureVerifier,
++                FIXED_CLOCK, ZoneId.of("Asia/Shanghai"));
++        controller = new RenewalController(renewalService, renewalRepository);
++    }
++
++    @Test
++    void builtInCatalogIsLookupable() {
++        assertEquals(10, repository.findByCode("WELCOME10").orElseThrow().getDiscountPercent());
++        assertEquals(15, repository.findByCode("RENEW15").orElseThrow().getDiscountPercent());
++        assertEquals(20, repository.findByCode("RENEW20").orElseThrow().getDiscountPercent());
++        assertTrue(repository.findByCode("EXPIRED10").isPresent());
++        assertTrue(repository.findByCode("NO-SUCH-COUPON").isEmpty());
++    }
++
++    @Test
++    void couponCodeIsTrimmedAndUppercased() {
++        Optional<Coupon> found = repository.findByCode("  welcome10  ");
++
++        assertTrue(found.isPresent());
++        assertEquals("WELCOME10", found.orElseThrow().getCode());
++    }
++
++    @Test
++    void blankOrMissingCouponCodeFindsNothing() {
++        assertTrue(repository.findByCode(null).isEmpty());
++        assertTrue(repository.findByCode("   ").isEmpty());
++    }
++
++    @Test
++    void validityWindowIsInclusiveAndDependsOnInjectedTime() {
++        Coupon welcome = repository.findByCode("WELCOME10").orElseThrow();
++        Coupon expired = repository.findByCode("EXPIRED10").orElseThrow();
++
++        assertTrue(welcome.isValidAt(NOW));
++        assertFalse(expired.isValidAt(NOW));
++
++        Coupon future = new Coupon("FUTURE10", 10,
++                LocalDateTime.parse("2026-01-01T00:00:00"),
++                LocalDateTime.parse("2026-12-31T23:59:59"),
++                true);
++        assertFalse(future.isValidAt(NOW));
++        assertTrue(future.isValidAt(LocalDateTime.parse("2026-01-01T00:00:00")));
++        assertTrue(future.isValidAt(LocalDateTime.parse("2026-12-31T23:59:59")));
++        assertFalse(future.isValidAt(LocalDateTime.parse("2027-01-01T00:00:00")));
++    }
++
++    @Test
++    void disabledCouponIsInvalidEvenInsideWindow() {
++        Coupon disabled = new Coupon("DISABLED10", 10,
++                LocalDateTime.parse("2024-01-01T00:00:00"),
++                LocalDateTime.parse("2026-12-31T23:59:59"),
++                false);
++
++        assertFalse(disabled.isValidAt(NOW));
++    }
++
++    @Test
++    void discountUsesIntegerHalfUpRounding() {
++        Coupon welcome = repository.findByCode("WELCOME10").orElseThrow();
++        Coupon renew15 = repository.findByCode("RENEW15").orElseThrow();
++
++        assertEquals(990, welcome.discountCents(9900));
++        assertEquals(8910, welcome.payableCents(9900));
++
++        assertEquals(1500, renew15.discountCents(9999));
++        assertEquals(8499, renew15.payableCents(9999));
++
++        // 10 * 15% = 1.5 分，HALF_UP 应进位到 2。
++        assertEquals(2, renew15.discountCents(10));
++        assertEquals(8, renew15.payableCents(10));
++    }
++
++    @Test
++    void customCatalogCanReplaceBuiltInCoupons() {
++        Coupon vip = new Coupon("VIP25", 25,
++                LocalDateTime.parse("2025-01-01T00:00:00"),
++                LocalDateTime.parse("2025-12-31T23:59:59"),
++                true);
++        CouponRepository custom = new CouponRepository(List.of(vip));
++
++        assertEquals(25, custom.findByCode(" vip25 ").orElseThrow().getDiscountPercent());
++        assertTrue(custom.findByCode("WELCOME10").isEmpty());
++    }
++
++    @Test
++    void invalidAmountOrPercentIsRejected() {
++        Coupon welcome = repository.findByCode("WELCOME10").orElseThrow();
++
++        assertThrows(IllegalArgumentException.class, () -> welcome.discountCents(0));
++        assertThrows(IllegalArgumentException.class, () -> welcome.discountCents(-1));
++        assertThrows(IllegalArgumentException.class, () -> new Coupon("BAD", 0,
++                NOW, NOW.plusDays(1), true));
++        assertThrows(IllegalArgumentException.class, () -> new Coupon("BAD", 101,
++                NOW, NOW.plusDays(1), true));
++    }
++
++    // ---------- T2：回调带券下单（R1.S3、R2、R3） ----------
++
++    @Test
++    void callbackWithoutCouponKeepsOriginalPrice() throws Exception {
++        Member member = registerMember("无券会员", "13800000001");
++
++        var response = controller.callback(callbackRequest(
++                "TXN-NO-COUPON", member.getId(), 1, 9900L, null, null));
++
++        assertEquals(200, response.getStatusCode().value());
++        Map<String, Object> order = orderOf("TXN-NO-COUPON");
++        assertEquals(9900L, order.get("originalAmountCents"));
++        assertEquals(0L, order.get("discountCents"));
++        assertEquals(0, order.get("discountPercent"));
++        assertEquals("", order.get("couponCode"));
++        assertEquals(9900L, order.get("amountCents"));
++    }
++
++    @Test
++    void unknownCouponIsRejectedWithoutSideEffects() throws Exception {
++        Member member = registerMember("未知券会员", "13800000002");
++        LocalDateTime before = memberService.getMember(member.getId()).getExpireAt();
++
++        var response = controller.callback(callbackRequest(
++                "TXN-UNKNOWN", member.getId(), 1, 8910L, "NO-SUCH-COUPON", 9900L));
++
++        assertEquals(400, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++        assertEquals(before, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void expiredCouponIsRejectedWithoutSideEffects() throws Exception {
++        Member member = registerMember("过期券会员", "13800000003");
++        LocalDateTime before = memberService.getMember(member.getId()).getExpireAt();
++
++        var response = controller.callback(callbackRequest(
++                "TXN-EXPIRED", member.getId(), 1, 8910L, "EXPIRED10", 9900L));
++
++        assertEquals(400, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++        assertEquals(before, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void couponDiscountMismatchIsRejectedWithoutSideEffects() throws Exception {
++        Member member = registerMember("金额不匹配会员", "13800000004");
++        LocalDateTime before = memberService.getMember(member.getId()).getExpireAt();
++
++        var response = controller.callback(callbackRequest(
++                "TXN-MISMATCH", member.getId(), 1, 8900L, "WELCOME10", 9900L));
++
++        assertEquals(400, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++        assertEquals(before, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void couponWithoutOriginalAmountIsRejected() throws Exception {
++        Member member = registerMember("缺原价会员", "13800000005");
++
++        var response = controller.callback(callbackRequest(
++                "TXN-NO-ORIGINAL", member.getId(), 1, 8910L, "WELCOME10", null));
++
++        assertEquals(400, response.getStatusCode().value());
++        String error = String.valueOf(response.getBody().get("error"));
++        assertTrue(error.contains("originalAmountCents"), error);
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void validCouponPersistsDiscountDetails() throws Exception {
++        Member member = registerMember("用券会员", "13800000006");
++
++        var response = controller.callback(callbackRequest(
++                "TXN-COUPON", member.getId(), 1, 8910L, "WELCOME10", 9900L));
++
++        assertEquals(200, response.getStatusCode().value());
++        Map<String, Object> order = orderOf("TXN-COUPON");
++        assertEquals(9900L, order.get("originalAmountCents"));
++        assertEquals(990L, order.get("discountCents"));
++        assertEquals(10, order.get("discountPercent"));
++        assertEquals("WELCOME10", order.get("couponCode"));
++        assertEquals(8910L, order.get("amountCents"));
++    }
++
++    @Test
++    void duplicateCallbackWithCouponTakesEffectOnlyOnce() throws Exception {
++        Member member = registerMember("重复回调会员", "13800000007");
++        var first = controller.callback(callbackRequest(
++                "TXN-DUP", member.getId(), 1, 8910L, "WELCOME10", 9900L));
++        assertEquals(200, first.getStatusCode().value());
++        LocalDateTime afterFirst = memberService.getMember(member.getId()).getExpireAt();
++        Map<String, Object> firstOrder = orderOf("TXN-DUP");
++        assertEquals(990L, firstOrder.get("discountCents"));
++        assertEquals("WELCOME10", firstOrder.get("couponCode"));
++
++        var second = controller.callback(callbackRequest(
++                "TXN-DUP", member.getId(), 1, 8910L, "WELCOME10", 9900L));
++
++        assertEquals(200, second.getStatusCode().value());
++        assertEquals(Boolean.TRUE, second.getBody().get("duplicate"));
++        assertEquals(1, renewalRepository.count());
++        assertEquals(8910L, orderOf("TXN-DUP").get("amountCents"));
++        assertEquals(afterFirst, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void couponDoesNotChangeExpiryExtension() throws Exception {
++        Member withCoupon = registerMember("券续费会员", "13800000008");
++        Member withoutCoupon = registerMember("原价续费会员", "13800000009");
++        LocalDateTime before = withCoupon.getExpireAt();
++
++        assertEquals(200, controller.callback(callbackRequest(
++                "TXN-COUPON-EXPIRY", withCoupon.getId(), 1, 8910L, "WELCOME10", 9900L))
++                .getStatusCode().value());
++        assertEquals(200, controller.callback(callbackRequest(
++                "TXN-PLAIN-EXPIRY", withoutCoupon.getId(), 1, 9900L, null, null))
++                .getStatusCode().value());
++
++        LocalDateTime couponExpiry = memberService.getMember(withCoupon.getId()).getExpireAt();
++        LocalDateTime plainExpiry = memberService.getMember(withoutCoupon.getId()).getExpireAt();
++        assertEquals(couponExpiry, plainExpiry);
++        assertTrue(couponExpiry.isAfter(before));
++        assertEquals(990L, orderOf("TXN-COUPON-EXPIRY").get("discountCents"));
++    }
++
++    @Test
++    void failedCouponCallbackCanRetryWithSameTxnId() throws Exception {
++        Member member = registerMember("重试会员", "13800000010");
++
++        var failed = controller.callback(callbackRequest(
++                "TXN-RETRY", member.getId(), 1, 8910L, "NO-SUCH-COUPON", 9900L));
++        assertEquals(400, failed.getStatusCode().value());
++
++        var retried = controller.callback(callbackRequest(
++                "TXN-RETRY", member.getId(), 1, 8910L, "WELCOME10", 9900L));
++
++        assertEquals(200, retried.getStatusCode().value());
++        assertEquals(1, renewalRepository.count());
++        assertEquals(8910L, orderOf("TXN-RETRY").get("amountCents"));
++        assertEquals("WELCOME10", orderOf("TXN-RETRY").get("couponCode"));
++    }
++
++    // ---------- T3：下单试算与订单查询（R1.S1、R1.S2、R1.S4、R1.S5、R4） ----------
++
++    @Test
++    void quoteWithValidCouponReturnsDiscountWithoutSideEffects() throws Exception {
++        Member member = registerMember("试算会员", "13800000011");
++        LocalDateTime before = memberService.getMember(member.getId()).getExpireAt();
++
++        var response = quote(member.getId(), 1, 9900L, " welcome10 ");
++
++        assertEquals(200, response.getStatusCode().value());
++        Map<String, Object> body = response.getBody();
++        assertEquals(9900L, body.get("originalAmountCents"));
++        assertEquals(990L, body.get("discountCents"));
++        assertEquals(8910L, body.get("payableAmountCents"));
++        assertEquals("WELCOME10", body.get("couponCode"));
++        assertEquals(10, body.get("discountPercent"));
++        assertEquals(0, renewalRepository.count());
++        assertEquals(before, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void quoteRoundsDiscountHalfUp() throws Exception {
++        Member member = registerMember("取整试算会员", "13800000012");
++
++        var response = quote(member.getId(), 1, 9999L, "RENEW15");
++
++        assertEquals(200, response.getStatusCode().value());
++        assertEquals(1500L, response.getBody().get("discountCents"));
++        assertEquals(8499L, response.getBody().get("payableAmountCents"));
++    }
++
++    @Test
++    void quoteWithoutCouponKeepsOriginalPrice() throws Exception {
++        Member member = registerMember("无券试算会员", "13800000013");
++        LocalDateTime before = memberService.getMember(member.getId()).getExpireAt();
++
++        var response = quote(member.getId(), 1, 9900L, null);
++
++        assertEquals(200, response.getStatusCode().value());
++        Map<String, Object> body = response.getBody();
++        assertEquals(9900L, body.get("originalAmountCents"));
++        assertEquals(0L, body.get("discountCents"));
++        assertEquals(9900L, body.get("payableAmountCents"));
++        assertEquals("", body.get("couponCode"));
++        assertEquals(0, body.get("discountPercent"));
++        assertEquals(0, renewalRepository.count());
++        assertEquals(before, memberService.getMember(member.getId()).getExpireAt());
++    }
++
++    @Test
++    void quoteForUnknownMemberReturns404() throws Exception {
++        var response = quote("no-such-member", 1, 9900L, null);
++
++        assertEquals(404, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void quoteWithInvalidCouponReturns400() throws Exception {
++        Member member = registerMember("无效券试算会员", "13800000014");
++
++        var response = quote(member.getId(), 1, 9900L, "NO-SUCH-COUPON");
++
++        assertEquals(400, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void quoteWithNonPositiveOriginalAmountReturns400() throws Exception {
++        Member member = registerMember("非正原价试算会员", "13800000015");
++
++        var response = quote(member.getId(), 1, 0L, "WELCOME10");
++
++        assertEquals(400, response.getStatusCode().value());
++        assertEquals(0, renewalRepository.count());
++    }
++
++    @Test
++    void orderQueryReturnsCouponDetails() throws Exception {
++        Member member = registerMember("查单会员", "13800000016");
++        assertEquals(200, controller.callback(callbackRequest(
++                "TXN-QUERY-COUPON", member.getId(), 1, 8910L, "WELCOME10", 9900L))
++                .getStatusCode().value());
++
++        Map<String, Object> order = orderOf("TXN-QUERY-COUPON");
++
++        assertEquals(9900L, order.get("originalAmountCents"));
++        assertEquals(990L, order.get("discountCents"));
++        assertEquals(10, order.get("discountPercent"));
++        assertEquals("WELCOME10", order.get("couponCode"));
++        assertEquals(8910L, order.get("amountCents"));
++    }
++
++    @Test
++    void orderQueryShowsZeroDiscountForOrderWithoutCoupon() throws Exception {
++        Member member = registerMember("无券查单会员", "13800000017");
++        assertEquals(200, controller.callback(callbackRequest(
++                "TXN-QUERY-PLAIN", member.getId(), 1, 9900L, null, null))
++                .getStatusCode().value());
++
++        Map<String, Object> order = orderOf("TXN-QUERY-PLAIN");
++
++        assertEquals(9900L, order.get("originalAmountCents"));
++        assertEquals(0L, order.get("discountCents"));
++        assertEquals(0, order.get("discountPercent"));
++        assertEquals("", order.get("couponCode"));
++        assertEquals(9900L, order.get("amountCents"));
++    }
++
++    private Member registerMember(String name, String phone) {
++        return memberService.register(name, phone, LocalDateTime.parse("2026-01-15T00:00:00"));
++    }
++
++    private RenewalController.CallbackRequest callbackRequest(String externalTxnId,
++                                                              String memberId,
++                                                              int months,
++                                                              long amountCents,
++                                                              String couponCode,
++                                                              Long originalAmountCents) throws Exception {
++        Map<String, Object> body = new LinkedHashMap<>();
++        body.put("externalTxnId", externalTxnId);
++        body.put("memberId", memberId);
++        body.put("months", months);
++        body.put("amountCents", amountCents);
++        body.put("signature", signatureVerifier.sign(externalTxnId, amountCents));
++        if (couponCode != null) {
++            body.put("couponCode", couponCode);
++        }
++        if (originalAmountCents != null) {
++            body.put("originalAmountCents", originalAmountCents);
++        }
++        return JSON.readValue(JSON.writeValueAsString(body), RenewalController.CallbackRequest.class);
++    }
++
++    @SuppressWarnings("unchecked")
++    private ResponseEntity<Map<String, Object>> quote(String memberId,
++                                                       int months,
++                                                       Long originalAmountCents,
++                                                       String couponCode) throws Exception {
++        Map<String, Object> body = new LinkedHashMap<>();
++        body.put("memberId", memberId);
++        body.put("months", months);
++        body.put("originalAmountCents", originalAmountCents);
++        if (couponCode != null) {
++            body.put("couponCode", couponCode);
++        }
++        Class<?> requestType = Class.forName("com.acme.member.renewal.RenewalController$QuoteRequest");
++        Object request = JSON.readValue(JSON.writeValueAsString(body), requestType);
++        Method quote = RenewalController.class.getMethod("quote", requestType);
++        return (ResponseEntity<Map<String, Object>>) quote.invoke(controller, request);
++    }
++
++    private Map<String, Object> orderOf(String externalTxnId) {
++        return controller.orders().stream()
++                .filter(order -> externalTxnId.equals(order.get("externalTxnId")))
++                .findFirst()
++                .orElseThrow();
++    }
++}

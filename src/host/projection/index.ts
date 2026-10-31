@@ -42,6 +42,7 @@ export function sanitizeProjection(value: unknown): FlowgateProjection | null {
     revision,
     updatedAt,
   }
+  if (typeof record.epoch === 'string' && record.epoch !== '') projection.epoch = record.epoch
   if (record.panel !== undefined && record.panel !== null && typeof record.panel === 'object') {
     projection.panel = record.panel as FlowgateProjection['panel']
   }
@@ -66,8 +67,10 @@ export function createFlowgateProjection(now: () => string, latest?: () => Flowg
       if (event && event.type === STATE_RECORD_TYPE) {
         const next = sanitizeProjection(event.data)
         if (next) {
-          // revision 单调：忽略乱序/重复事件。
-          if (next.revision >= state.revision) return next
+          // 宿主重启后 revision 从 0 重新计数，而日志里旧进程的 revision 可能更大：
+          // epoch 不同视为"新进程记录"，直接接受（否则 UI 会停留在重启前快照）。
+          const newEpoch = next.epoch !== undefined && next.epoch !== state.epoch
+          if (newEpoch || next.revision >= state.revision) return next
           return state
         }
       }
@@ -76,7 +79,10 @@ export function createFlowgateProjection(now: () => string, latest?: () => Flowg
       // on any committed event. The projection then tracks command/tool activity
       // without depending on the experimental record API.
       const fresh = latest?.()
-      if (fresh && fresh.revision > state.revision) return fresh
+      if (fresh) {
+        const newEpoch = fresh.epoch !== undefined && fresh.epoch !== state.epoch
+        if (newEpoch || fresh.revision > state.revision) return fresh
+      }
       return state
     },
     wire: {

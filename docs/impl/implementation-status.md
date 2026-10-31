@@ -1,6 +1,6 @@
-# 实现状态报告（v0.1 交付时点）
+# 实现状态报告（v0.1 交付时点，第二轮开发后）
 
-> 日期：2026-10-30。基线：DSH `0.2.1-rc.5`。对应执行方案：[docs/04-执行方案.md](../04-执行方案.md)。
+> 日期：2026-10-31（第二轮开发后）。基线：DSH `0.2.1-rc.5`。对应执行方案：[docs/04-执行方案.md](../04-执行方案.md)。
 > 本报告按里程碑说明**已完成 / 部分完成 / 未开始**，并给出可复现的验证命令。功能状态的对外表述以本文件为准。
 
 ## 1. 总览
@@ -11,26 +11,28 @@
 | M1 门禁内核、项目目录与工程模式 | 状态机、规则引擎、账本、守卫、命令、状态条 | ✅ 完成 | 迁移表数据驱动测试；守卫双保险；账本哈希链 + HMAC；`/flow` 命令族与 14 个工具 |
 | M2 规格层 | 产物检查、澄清/上下文/设计/拆解、路线图、执行图、引用 | ✅ 完成 | 46 项门禁检查（每项正反例）；执行图 mermaid；技术栈探测；路线图 GR |
 | M3 执行纪律与跨会话接续 | 范围/TDD/证据/审查/风险/接续/返工 | ✅ 完成 | 验证由插件执行、输入哈希过期、并发会话租约、`/flow repair` |
-| M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点在 host 侧接线并已有 host 单测（test/host/dispatch.test.ts）；缺 provider/git 时降级 |
-| M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 主体完成 | 真实 web 宿主走查 + 11 张截图（见 §3.1/§3.3）；剩余：面板按钮 Remote 兜底、低复杂度确认卡、误判反馈截图 |
-| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 兼容 7/7；host 单测 119 例 + 故障注入 4 例；java-renewal S0→S6 + 审查真机完成；故障注入 4/4、启动增量 +14.2ms、卸载干净度通过；对照评测 pilot 1/9 已完成、完整矩阵在跑；未发布 npm（用户决定暂缓） |
+| M4 交付闭环、工程判断、派发、上下文 | S5/S6/指标/派发/压缩/交接/并行/分析 | ✅ 主体完成 | 派发/worktree/集成检查点/重派发安全 host 侧补齐（§3.8）；真实 headless 顺序派发完整结算到 S5、并行批次真实启动（worktree+子 agent+证据）但一次性进程在集成检查点前退出；剩余 `run: main` 路由与"集成失败自动生成修复任务"未实现（§4 #4） |
+| M5 可视化与学习 | 面板 8 视图、阶段卡、HTML 报告、看板 | ✅ 完成 | 本轮在真实 Web 宿主补走查：会话内 preset 切换、8 视图、Remote 兜底、低复杂度确认卡、拦截反馈（组件级），新增 14 张截图；投影 epoch 陈旧 bug 已修（§3.8） |
+| M6 评测、加固与发布 | 基准评测、故障注入、兼容矩阵、文档发布 | 🟡 主体完成 | 对照评测 18/18 + 4 项主观指标人工评分完成；从 0 开发与派发对照真机补跑；兼容 7/7、故障注入 7/7、启动增量 +12.1/+15.5ms、卸载干净度通过；未发布 npm、Desktop 未走查（用户决定暂缓发布） |
 
 ## 2. 可复现验证（截至本报告）
 
 ```bash
 pnpm install
 pnpm lint        # 分层规则（core 不得依赖 DSH/host/client）+ tsc --noEmit
-pnpm test        # 63 个测试文件 / 944 用例（含新增 host dispatch/review 测试后为 65 / 969）
+pnpm test        # 89 个测试文件 / 1285 用例（2026-10-31 第二轮实测）
 pnpm build       # lib/host.js（ESM）+ lib/client.js（loader 包装）
+pnpm coverage    # 覆盖率 + thresholds（core+host 口径）
 pnpm verify:client
 pnpm verify:package
 DSH_HOME=/tmp/fg-home node scripts/verify-dsh-compat.mjs --profile flowgate --write
 # 真实 DSH 进程组合并导入插件（隔离 DSH_HOME，不碰日常 profile）：
 DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --dump-config
-DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/null
 ```
 
-最近一次结果（2026-10-31 复核）：lint 通过（123 个源文件）；`test` 63 files / 944 tests 全绿（新增 dispatch/review/git/命令执行器/故障注入/检查点/util 测试后 69 files / 995 tests）；构建产物 host 993KB / client 192KB；`verify:package` 通过（39 文件 / 850.6KB）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。核心逻辑覆盖率：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%（`pnpm coverage`）。
+最近一次结果（2026-10-31 第二轮复核）：lint 通过（125 个源文件）；`test` **90 files / 1289 tests** 全绿（约 3.5s）；构建产物 host 约 1016KB / client 约 187.5KB；`verify:package` 通过（**39 文件 / 888.4KB**）；`verify:client` 通过；`verify:compat` 7 项全过（DSH 0.2.1-rc.5，隔离 `DSH_HOME`）。覆盖率（`pnpm coverage`，含 host，thresholds 通过）：core 语句 **90.34%** / 分支 **80.16%** / 函数 90.77%（coverage-final.json 计算）；host 语句 74.14% / 分支 61.01%；core+host 合计 语句 86.40% / 分支 75.97% / 函数 85.96% / 行 89.53%（文本报告）。
+
+> 注：`pnpm verify:package` 在 `~/.npm` 不可写的沙箱环境里会把 npm cache/logs 固定到系统临时目录（2026-10-31 修复）；`verify:compat` 的 `--dump-config-schema` 在 rc.5 上因宿主自带 preset 行同样报错，不作为本插件的兼容判据（见 [compat/0.2.1-rc.5.md](../compat/0.2.1-rc.5.md)）。
 
 ## 3. 关键实现决策（与 03 方案的差异）
 
@@ -208,33 +210,55 @@ DSH_HOME=/tmp/fg-home "…/dsh" --profile flowgate --dump-config-schema >/dev/nu
 - **缺陷 C：并行执行者的范围判定用全局 activeTask**。C-005 里 T2 写自己 `new_files` 中的文件被 T1 的 scope 拒绝（`rule.denied R-SCOPE target=RenewalSummaryText.java`）。已修：`Engine.evaluateAction` 优先用 `caller.dispatch.taskId` 定位任务卡，再回退 activeTask；新增 engine 集成回归测试（T2 执行者允许、主会话按 T1 拒绝）。
 - 并行批次内的 `scope.requested`（SC-n）仍需负责人审批；headless 下拉不到审批通知，交互式会话可在面板处理，E2E 用 `admin pending <id> approve`。
 - **缺陷 D：命令执行器超时后可能永久挂起**（2026-10-31 真机发现）：`flow_verify` 执行 `spring-boot:start` 时 java 后代进程继承 stdout/stderr，只 kill shell 不会触发 'close'，宿主在超时后仍然悬挂（风险 B 评测卡住 >10 分钟）。已修 `NodeCommandRunner`：POSIX 用 detached 进程组、超时对整组 SIGTERM/SIGKILL，并在宽限期后强制 resolve(exitCode=124)；新增 3 个回归测试（含"后代持有管道"场景）。
+
+## 3.8 第二轮开发：评测收尾、覆盖率、派发/并行、熔断恢复（2026-10-31）
+
+本轮按 [04 执行方案](../04-执行方案.md) 与 §6「下一步」补齐剩余内容；详细数字见 §2，评测结论见 [evaluation.md](../evaluation.md) §6.5–§6.7。
+
+| 方向 | 产出 | 证据 |
+|---|---|---|
+| T6.1 评测收尾 | 18 组 run 的 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）人工评分 18/18；新增评分口径与 `scores.json`；结论与局限入档 | [evaluation.md](../evaluation.md) §6.5、[evaluation-data/scoring](../evaluation-data/scoring/README.md) |
+| 覆盖率 | `src/host/**` 纳入 vitest coverage 口径并加 thresholds；core 语句 83.03→90.02%、分支 68.36→80.01%、函数 86.47→90.64%、行 87.56→92.64%（host 74.01/60.74/72.81/78.87%）；新增 9 文件 / 158 例 | `pnpm coverage`（通过 thresholds 80/80/80/70） |
+| 派发/并行 host 收尾 | 结算后把 open 待处理项注入主会话且不重复、`flow_dispatch_next` 暴露 `data.pending`；集成检查点返回结论并写通知；中断任务重派发前确认旧子 agent 已停止（否则阻塞 + 待处理项）；派发前复核 open scope/plan/risk；新增 27 例 | `src/host/dispatch/{pending,redispatch}.ts`、`test/host/dispatch-{pending,redispatch,checkpoint}.test.ts` |
+| T-FAILURE-LIMIT 熔断恢复 | 只拦"推进/修改"动作（read、只读 shell、`flow_status`/`flow_diff`/`flow_report_risk` 放行）；同任务只生成 1 个 BL；新增 `/flow unblock`（计数清零、任务恢复、残留 BL 一并关闭、账本 `task.unblocked`）；新增 18 例（含真实 run `BL-1..BL-8` 卡死快照复刻） | `src/core/rules/risk-triggers.ts`、`src/core/engine.ts`、`src/host/commands/index.ts`、`test/core/risk/breaker-recovery.test.ts` |
+| 状态损坏 fail-closed | `status.json` 损坏不再 fail-open：锁定模式 + `/flow doctor` 显示路径与修复入口 + `/flow repair` 重建后解锁；修不好的损坏保持锁定；新增 14 例 | `src/core/store/state.ts`、`src/core/engine.ts`、`src/host/doctor/index.ts`、`test/core/store/state-corruption.test.ts` |
+| 测试输出解析 | 新增 Python 标准库 `unittest` 控制台解析器（`Ran N tests`、OK/FAILED/NO TESTS RAN、失败名称与 文件:行、subTest），修正 `detectEvidenceKind`；25 例含真实 Python 3.13 输出与仓库证据回放 | `src/core/evidence/parse.ts`、`test/core/evidence/parse-unittest.test.ts` |
+| 从 0 开发缺陷 | PROJECT（路线图阶段）可跨会话自动接续并批准 GR；修复 `approveGate('GR')` 归档 PROJECT 时绕过 `saveChange` 导致 GR 批准不落盘、GR 后清空 current；GR 后第一个变更强制从路线图立项（否则 C0 失去 skeleton 标记，G2 project.md 与 R-PROTECTED 死锁）；T-DEPENDENCY 改为按清单内容判定（新建无依赖 package.json 不再误伤）；共 10 例新回归 + 35 例依赖触发器回归 | `src/core/engine.ts`、`test/core/engine-project-attach.test.ts` |
+| Web 宿主走查 | 会话内切换 FlowGate 工程模式 preset（`agentPresets/select` 返回 flowgate、0 pageerror）、`/flow init`/`/flow new`、8 视图面板、面板按钮 Remote 兜底、低复杂度方案确认卡三按钮、拦截视图误判反馈（组件级）；14 张截图；修复投影进程 epoch（重启后 UI 陈旧，新增 6 例） | [web-walkthrough.md](web-walkthrough.md)、[screenshots/](../screenshots/README.md)、`test/host/projection-epoch.test.ts` |
+| T6.2 加固复验 | 故障注入 7/7（新增 3 例）、启动增量 +12.1ms / +15.5ms（<200ms）、卸载干净度通过、兼容 7/7；`--dump-config-schema` 归因为 rc.5 preset 嵌套限制（宿主自带 preset 同样中招） | [compat/0.2.1-rc.5.md](../compat/0.2.1-rc.5.md)、[compat/startup.md](../compat/startup.md) |
+| 真机评测补跑 | 真实模型 + 隔离 headless：greenfield 从 0 开发演练 6 次完整迭代（另有 1 次未完成未计入；真实走通"项目级澄清 → 路线图 GR → C0 立项 → G1/G2/G3 → S4"，期间暴露并修复 7 个真实缺陷）；`java-renewal` 新功能 `dispatch=auto`：顺序派发完整结算到 S5（3 批次 done、G4 passed、外部回归 20/20），并行批次真实启动（worktree + 独立子 agent + 证据）但 headless 进程在集成检查点前退出 | [evaluation.md](../evaluation.md) §6.6/§6.7、`docs/evaluation-data/20261031-11*/` |
+
+**本轮真机发现并修复的产品缺陷（均有回归测试）**：状态文件损坏 fail-open；T-FAILURE-LIMIT 过度拦截 / 无解锁路径 / BL 膨胀；GR 批准不落盘；PROJECT 不自动接续；Python unittest 解析缺失；宿主重启后投影 revision 回退导致 UI 陈旧；评测工具链缺口（headless preset 注册表、租约残留、待处理项自动处理）。
+
 ## 4. 已知缺口（如实列出）
 
 | # | 缺口 | 影响 | 后续 |
 |---|---|---|---|
-| 1 | ~~浏览器端交互未在真实 DSH web/desktop 会话里跑过~~（已 2026-10-30 实测，见 §3.1） | 剩余：人工按钮点击流程（Remote 兜底）、低复杂度确认卡、误判反馈截图 | 用桌面会话补做 |
-| 2 | 三个 preset 已在真实 web 宿主的预设菜单出现（§3.3）；headless 用 overlay 补 `@deepseek-ai/dsh-agent-preset-registry` 后可激活（§3.5 实测），但**会话内切换**仍未验证 | 工程模式/执行者/只读 preset 的运行时行为仍需确认 | 桌面/Web 会话切换实测；overlay 写法已记入 host-integration |
-| 3 | 有 / 无插件对照评测未执行（M6 T6.1）；评测脚本 `scripts/run-evaluation.mjs` 与 greenfield 空仓库已就绪并通过 dry-run | 无法给出 M-15/M-18 实测数字 | 按 [evaluation.md](../evaluation.md) 跑 9 任务 × 2 条件 |
-| 4 | 审查子 agent 真机跑通（RV-1 verdict=pass + coverageOk）；派发/worktree 真机已验证创建、分支命名、子 agent 启动、data 回填、任务门/审查/task.done；**worktree 合并 + 集成检查点**已有 2 个 host 单测（合并成功/冲突 abort）覆盖逻辑，但真实宿主上的合并结算仍待交互式会话（headless 一次性运行提前退出）；scope 变更请求需负责人审批 | 非 git 仓库或 provider 缺失时降级为顺序 | 交互式会话复验合并 + 集成检查点；scope 变更审批通知 |
+| 1 | ~~浏览器端交互未在真实 DSH web/desktop 会话里跑过~~ → 2026-10-31 第二轮已在真实 Web 宿主走查（§3.8）：preset 切换、`/flow init`/`/flow new`、8 视图、Remote 兜底、低复杂度确认卡、误判反馈（组件级） | 剩余：拦截视图"真实 guard 拦截 → 面板 → 按钮"端到端（零模型无法产生真实拦截记录） | 需真模型 + 真实拦截的会话再走查一次 |
+| 2 | ~~三个 preset 的会话内切换未验证~~ → 已在真实 Web 会话内切换到 FlowGate 工程模式（`agentPresets/select` 返回 `flowgate`、0 pageerror）；**persona / 工具集运行时差异仍需真模型会话观察** | 桌面端走查 + 真模型会话 | 用真模型跑一轮观察 preset 注入效果 |
+| 3 | 对照评测 18/18 + 4 项主观指标已完成；从 0 开发与并行对照已用真实模型补跑（§3.8、[evaluation.md](../evaluation.md) §6.6/§6.7）。**M-18 并行加速比仍不能给统计结论**：真实并行批次已跑通并结算到 G4，但样本 1 次、精简 headless、计划/环境受模型影响 | 无法外推"并行 vs 顺序"的性能结论 | 在可执行 sandbox 宿主上每条件重跑 ≥3 次 |
+| 4 | 派发/并行 host 缺口已补齐（§3.8：pending 通知、检查点结论、重派发安全、派发前复核；27 例测试）；剩余功能缺口：**`run: main` 路由未实现**（T4.6 验收项，需改 core `dispatchNext` 过滤）、**集成测试失败自动生成修复任务未实现**（需 core plan 修订 API，当前落为 conflict pending + 保留 worktree）、`max_agents` 为 wave 级排队（非槽位级补位）、合并冲突只 abort 不生成修复任务、scope 审批在交互式会话的通知/审批 UI 只到 pending/inject 层 | 与 03 §7.5 完整语义有差距 | 后续按 core API 演进补 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
-| 7 | 覆盖率分支 68.4% 低于 80% 目标（语句 83.0% 达标）；host 层不在 vitest coverage 口径内 | 部分错误/降级分支缺测 | 补 config 错误分支、host 降级路径测试，并把 host 纳入口径 |
-| 8 | npm 未发布、无 GitHub Release；tag `v0.1.0` 落后 HEAD 4 个提交 | 无法按 README 的 npm 安装路径使用 | 发布物料已备（CHANGELOG、release notes、release.yml），待配置 `NODE_AUTH_TOKEN` 后发布并刷新 tag |
-| 9 | Desktop 宿主未验证（T6.2 的启动耗时与卸载干净度已完成，见 §3.6） | 兼容矩阵只有 Web / headless 证据 | 桌面会话人工走查 |
+| 7 | ~~覆盖率分支 68.4% 低于 80% 目标；host 不在口径内~~ → 已补：core 语句 90.34% / 分支 80.16% / 函数 90.77%；host 纳入 coverage 口径（74.14 / 61.01 / 72.80）；thresholds 入 vitest.config | 剩余：core 的 engine 编排/少数解析器组合分支、报告/指标组合分支未覆盖（host 侧另有独立单测） | 随功能改动继续补；已确认若干死代码/不可达分支可清理 |
+| 8 | npm 未发布、无 GitHub Release；tag `v0.1.0` 落后于本轮 HEAD | 无法按 README 的 npm 安装路径使用 | 需负责人决定版本/tag 方案并配置 `NODE_AUTH_TOKEN`；物料已备（CHANGELOG、release notes、release.yml） |
+| 9 | Desktop 宿主未验证（启动耗时与卸载干净度已完成，见 §3.6） | 兼容矩阵只有 Web / headless 证据 | 桌面会话人工走查 |
+| 10 | `.flowgate/state/sessions.json` 损坏时 `engine.load` 抛错 → 宿主 markInert（engine 未就绪时 guard 直接放行，仍是一条 fail-open） | 状态损坏场景仍有未覆盖入口 | 单独任务：`loadProjectState` 对租约文件损坏降级为锁定状态，并加故障注入 |
+| 11 | 从 0 开发演练：本轮真实模型已跑通"项目级澄清 → 路线图 → GR → C0 立项"并修复了 PROJECT 接续/GR 落盘/unittest 解析/熔断恢复；完整 C0→C1 交付仍受 headless 一次性运行与工具链环境影响（见 [evaluation.md](../evaluation.md) §6.6） | 无法给出从 0 开发完整交付的确认次数/耗时终值 | 在可执行 sandbox 宿主上重跑至 C1 交付 |
 
 ## 5. 文件地图（主干）
 
 - 纯逻辑：`src/core/{state,rules,shell,artifacts,plan,citations,detect,roadmap,ledger,store,evidence,risk,revision,metrics,report,dashboard,learn}/`，编排入口 `src/core/engine.ts`。
-- 宿主适配：`src/host/`（入口 `index.ts`；`adapters/`、`guard/`、`commands/`、`tools/`、`projection/`、`review/`、`dispatch/` 等）。
+- 宿主适配：`src/host/`（入口 `index.ts`；`adapters/`、`guard/`、`commands/`、`tools/`、`projection/`、`review/`、`dispatch/`（含 `pending.ts` 待处理项通知、`redispatch.ts` 中断任务重派发安全）等）。
 - 浏览器半侧：`src/client/`（`dock/StatusBar.tsx`、`panel/` 8 视图、`learn/`、`actions.ts`、`i18n/`）。
-- 内容：`skills/`（15 技能 × SKILL+learn）、`examples/`（3 个基准仓库）、`docs/`（00–04 原始方案 + 本目录实现文档 + spike-report + compat）。
-- 脚本：`scripts/{lint-layers,verify-package,verify-client-bundle,verify-dsh-compat}.mjs`；CI：`.github/workflows/ci.yml`。
+- 内容：`skills/`（15 技能 × SKILL+learn）、`examples/`（3 个基准仓库 + 空仓库）、`docs/`（00–04 原始方案 + 本目录实现文档 + spike-report + compat + screenshots + evaluation-data）。
+- 脚本：`scripts/{lint-layers,run-evaluation,collate-evaluation,verify-package,verify-client-bundle,verify-dsh-compat,verify-uninstall,measure-startup}.mjs`；CI：`.github/workflows/ci.yml`。
 
 ## 6. 下一步（按优先级）
 
-1. **派发/并行 worktree 收尾**：在交互式会话里复验 worktree 合并 + 集成检查点（headless 一次性运行会提前退出）；补 `maybeCheckpoint` 单测与 scope 变更审批通知；交互式会话验证审批。
-2. **M6 对照评测收尾**：18/18 run 已完成；下一步人工复盘 18 组事件流补齐隐藏需求遗漏/越界/虚假完成/验收覆盖 4 项主观指标，在可执行 sandbox 宿主重跑，并做从 0 开发与并行对照。
-3. 真实会话里切换三个 preset；更新 `cordis.patch.yml` 的"待实测"注释（当前已刷新为实际剩余项）。
-4. 补覆盖率分支缺口、把 host 层纳入覆盖率口径；Desktop 宿主人工走查（启动耗时/卸载干净度已完成，见 §3.6）。
-5. 发布：提交发布物料，配置 `NODE_AUTH_TOKEN` 后重打 tag / npm publish / GitHub Release；README 演示动图与 awesome-dsh-plugin 收录申请。
-6. 自举：用 FlowGate 管理自身仓库开发（04 方案第 9 节），当前仍以 demo 仓库做 E2E。
+1. **评测终局**：在**可执行 sandbox** 宿主（PATH 有 pytest、`~/.m2` 可写）上重跑 18 组并做双人独立评分；把 `run-evaluation.mjs` 的自动 owner 扩展到 RK/PC/BL 之外的真实人工负载场景（或 `--owner manual` 记录真实人工负担）；从 0 开发重跑到 C1 交付；并行/顺序各 ≥3 次得到可统计的 M-18。
+2. **桌面端人工走查**：启动/卸载、面板按钮、preset 运行时差异、真实拦截→误判反馈端到端；补齐兼容矩阵 Desktop 一列（§3.6 已有启动/卸载离线数据）。
+3. **发布**：负责人确定版本/tag 方案，配置 `NODE_AUTH_TOKEN` 后 npm publish + GitHub Release；README 演示动图与 awesome-dsh-plugin 收录申请（见 [release/v0.1.0.md](../release/v0.1.0.md)）。
+4. **剩余功能缺口**：`run: main` 路由、集成测试失败生成修复任务、`sessions.json` 损坏 fail-closed、交互式 scope 审批通知、`max_agents` 槽位级补位与合并冲突修复任务（§4 #4/#10）。
+5. **自举**：用 FlowGate 管理自身仓库开发（04 方案第 9 节）——双 profile（`flowgate-dev` link 源码 / 一个打标签的 tgz profile 管本仓库），把 M4–M6 任务卡搬进 `.flowgate/changes/` 走完 S0→S6。
+6. 可选的清理项（来自覆盖率报告）：`detect/stack.ts`、`shell/classify.ts`、`evidence/parse.ts`、`artifacts/checks.ts`、`rules/evaluate.ts` 中已确认的死代码/不可达分支。

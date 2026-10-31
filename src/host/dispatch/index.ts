@@ -26,8 +26,34 @@ import { FLOWGATE_PRESETS } from '../guard/delegation.js'
 import { reviewCapability, runTaskReview } from '../review/index.js'
 import { runGit } from '../adapters/node-git.js'
 import { normalizeSlashes } from '../adapters/windows-path.js'
+import {
+  blockingPendingItems,
+  consumeUnnotifiedOwnerPending,
+  openOwnerPending,
+  pendingHint,
+  pendingLines,
+  pendingView,
+  resetPendingNotificationForTest,
+} from './pending.js'
+import {
+  checkInterruptedRedispatch,
+  recordDispatchedChild,
+  recordReleasedChild,
+  resetRedispatchStateForTest,
+} from './redispatch.js'
 import * as nodePath from 'node:path'
 import * as fsp from 'node:fs/promises'
+
+export {
+  blockingPendingItems,
+  consumeUnnotifiedOwnerPending,
+  openOwnerPending,
+  OWNER_PENDING_KINDS,
+  BLOCKING_PENDING_KINDS,
+  pendingHint,
+  pendingView,
+} from './pending.js'
+export { checkInterruptedRedispatch, DISPATCH_SAFETY_CATEGORY, recordDispatchedChild, recordReleasedChild } from './redispatch.js'
 
 /** 执行者子 agent 的结构化回传 schema。 */
 export const EXECUTOR_OUTPUT_SCHEMA: Record<string, unknown> = {
@@ -66,6 +92,8 @@ export function dispatchBusy(): boolean {
  */
 export function resetDispatchStateForTest(): void {
   running.clear()
+  resetPendingNotificationForTest()
+  resetRedispatchStateForTest()
 }
 
 /**
@@ -100,10 +128,32 @@ export function installDispatch(runtime: HostRuntime): void {
             validValues: { dispatch: ['inline', 'auto', 'subagent'] },
           })
         }
+        // 派发前复核（T4.6）：中断任务必须确认旧子 agent 已停止/资源已释放；
+        // scope/plan/risk 待处理项未审批时不能静默开始新任务。
+        const redispatch = await checkInterruptedRedispatch(runtime, engine)
+        if (!redispatch.ok) {
+          return fail(redispatch.message ?? '不能重新派发中断任务', redispatch.hint ?? '先处理待处理项后再派发', {
+            pending: pendingView(redispatch.pending),
+            tasks: redispatch.problems,
+          })
+        }
+        const blocking = blockingPendingItems(engine)
+        if (blocking.length > 0) {
+          return fail(
+            `有 ${blocking.length} 个未审批的待处理项，不能继续派发`,
+            `先处理：${blocking.map((item) => `${item.id} ${item.title}（处理：${pendingHint(item)}）`).join('；')}`,
+            { pending: pendingView(blocking) },
+          )
+        }
         const outcome = await engine.dispatchNext()
         runtime.emit()
+        const pendingNow = pendingView(openOwnerPending(engine))
+        const pendingData = pendingNow.length > 0 ? { pending: pendingNow } : {}
         if (outcome.dispatched.length === 0) {
-          return ok(outcome.message, { dispatched: [], batchId: outcome.batchId, mode: outcome.mode })
+          const emptyLines = [outcome.message]
+          const knownPending = pendingLines(openOwnerPending(engine))
+          if (knownPending.length > 0) emptyLines.push('', ...knownPending)
+          return ok(emptyLines.join('\n'), { dispatched: [], batchId: outcome.batchId, mode: outcome.mode, ...pendingData })
         }
         const lines = [outcome.message]
         // 结构化 data 必须回填 startExecutor 实际创建的 worktree：envelope 是派发前的
@@ -130,11 +180,15 @@ export function installDispatch(runtime: HostRuntime): void {
           })
         }
         lines.push('任务结束后会收到完成通知（摘要、任务门、集成检查点结果）；收到后再调用 flow_dispatch_next。')
+        if (pendingNow.length > 0) {
+          lines.push(`⚠ 仍有 ${pendingNow.length} 个待处理项需要负责人处理：${pendingNow.map((item) => item.id).join('、')}（/flow status 查看）。`)
+        }
         runtime.emit()
         return ok(lines.join('\n'), {
           dispatched: dispatchedData,
           batchId: outcome.batchId,
           mode: outcome.mode,
+          ...pendingData,
         })
       },
     })
@@ -199,6 +253,9 @@ async function startExecutor(
   const childId = String(activation.childId)
   runtime.registerAgentRole(childId, 'executor', { changeId: change.id, taskId: envelope.taskId, ...(worktree ? { worktree } : {}) }, worktree)
   running.set(envelope.taskId, { taskId: envelope.taskId, ...(envelope.batch ? { batchId: envelope.batch } : {}), childId, startedAt: runtime.isoNow(), ...(worktree ? { worktree } : {}) })
+  // 记下 taskId → childId，供"中断任务重新派发"时确认旧子 agent 是否已停止
+  // （顺序任务没有 worktree，engine 侧不会持久化 agentId）。
+  recordDispatchedChild(change.id, envelope.taskId, childId)
   if (worktree) {
     try {
       await engine.setTaskWorktree(envelope.taskId, worktree, childId)
@@ -220,8 +277,9 @@ async function startExecutor(
       clearTimeout(timer)
       try {
         await activation.dispose()
+        recordReleasedChild(childId)
       } catch {
-        // 忽略。
+        // 忽略 dispose 失败；此时不能宣称资源已释放，重新派发检查会保持阻塞。
       }
     }
     const summary = parseExecutorSummary(result?.structured)
@@ -335,8 +393,19 @@ async function finalizeTask(
   }
   runtime.emit()
   // 批次集成检查点（仅并行批次；顺序批次由 engine.dispatchNext 自己推进）。
-  if (envelope.mode === 'parallel' && envelope.batch) {
-    await runIntegrationCheckpoint(runtime, engine, envelope.batch)
+  const checkpoint = envelope.mode === 'parallel' && envelope.batch ? await runIntegrationCheckpoint(runtime, engine, envelope.batch) : null
+  if (checkpoint) {
+    lines.push(
+      checkpoint.ok
+        ? `集成检查点：批次 ${checkpoint.batchId} 通过（worktree 已合并并清理）。`
+        : `集成检查点：批次 ${checkpoint.batchId} 失败 —— ${checkpoint.detail ?? '原因未知'}。worktree 已保留便于排查；处理待处理项后重新派发。`,
+    )
+  }
+  // T4.6：子 agent 越界会生成 scope 等待处理项；结算后必须让主会话/负责人看到
+  // （同一项只通知一次，避免并行批次多任务结算时重复刷屏）。
+  const unnotifiedPending = consumeUnnotifiedOwnerPending(engine)
+  if (unnotifiedPending.length > 0) {
+    lines.push('', ...pendingLines(unnotifiedPending))
   }
   // 通知主会话（delivery:'caller' 不会自动通知；用 inject 不唤醒）。
   const target = runtime.mainAgent()
@@ -349,19 +418,30 @@ async function finalizeTask(
   }
 }
 
+/** 集成检查点结果（宿主侧）。 */
+export interface CheckpointOutcome {
+  batchId: string
+  ok: boolean
+  detail?: string
+}
+
 /** 并行批次全部任务结束后做集成检查点（合并 worktree 分支 + integration 命令）。导出供单测。 */
-export async function runIntegrationCheckpoint(runtime: HostRuntime, engine: EngineLike, batchId: string): Promise<void> {
+export async function runIntegrationCheckpoint(
+  runtime: HostRuntime,
+  engine: EngineLike,
+  batchId: string,
+): Promise<CheckpointOutcome | null> {
   try {
     const snapshot = engine.snapshot()
     const batch = snapshot.batches.find((item) => item.id === batchId)
-    if (!batch) return
+    if (!batch) return null
     const change = engine.currentChange()
-    if (!change) return
+    if (!change) return null
     const notDone = batch.tasks.filter((taskId) => change.tasks[taskId]?.status !== 'done' && change.tasks[taskId]?.status !== 'skipped')
-    if (notDone.length > 0) return
+    if (notDone.length > 0) return null
     const root = runtime.root()
     const ports = runtime.ports()
-    if (!root || !ports) return
+    if (!root || !ports) return null
     // 1) 合并各任务分支回变更分支（当前 root 所在分支）。
     const failures: string[] = []
     for (const taskId of batch.tasks) {
@@ -386,9 +466,10 @@ export async function runIntegrationCheckpoint(runtime: HostRuntime, engine: Eng
       }
     }
     if (failures.length > 0) {
-      await engine.completeCheckpoint(batchId, { ok: false, detail: failures.join('；') })
-      runtime.noteFeature('dispatch', `批次 ${batchId} 集成检查点失败：${failures.join('；')}`)
-      return
+      const detail = failures.join('；')
+      await engine.completeCheckpoint(batchId, { ok: false, detail })
+      runtime.noteFeature('dispatch', `批次 ${batchId} 集成检查点失败：${detail}`)
+      return { batchId, ok: false, detail }
     }
     await engine.completeCheckpoint(batchId, { ok: true })
     runtime.noteFeature('dispatch', `批次 ${batchId} 集成检查点通过`)
@@ -398,18 +479,24 @@ export async function runIntegrationCheckpoint(runtime: HostRuntime, engine: Eng
       if (!task?.worktree) continue
       const absolute = runtime.absolute(task.worktree)
       const removed = await runGit(['worktree', 'remove', '--force', absolute], root, 60_000)
-      if (removed.exitCode === 0) {
-        await runGit(['branch', '-D', taskWorktreeBranch(change.id, taskId)], root, 30_000)
+      if (removed.exitCode !== 0) {
+        // 保留 worktree 对应的分支（可能仍被占用），只记降级说明，不影响检查点结论。
+        runtime.noteFeature('dispatch', `worktree 清理失败（${task.worktree}）：${removed.stderr.trim().slice(0, 200)}`)
+        continue
       }
+      await runGit(['branch', '-D', taskWorktreeBranch(change.id, taskId)], root, 30_000)
     }
     runtime.emit()
+    return { batchId, ok: true }
   } catch (error) {
-    runtime.noteFeature('dispatch', `集成检查点异常：${toAgentError(error).error}`)
+    const detail = toAgentError(error).error
+    runtime.noteFeature('dispatch', `集成检查点异常：${detail}`)
     try {
-      await engine.completeCheckpoint(batchId, { ok: false, detail: toAgentError(error).error })
+      await engine.completeCheckpoint(batchId, { ok: false, detail })
     } catch {
       // 忽略。
     }
+    return { batchId, ok: false, detail }
   }
 }
 

@@ -1,0 +1,454 @@
+{
+  "id": "C-001",
+  "kind": "change",
+  "title": "能启动、能跑测试、有运行文档",
+  "summary": "从空仓库搭建 Node.js 20+ 标准库工程骨架：package.json、src/、test/、.gitignore；原生 http 服务提供 /health；统一响应与基础安全响应头；node:test 骨架测试；补齐 README 启动/测试/目录说明。技术栈与边界依据 .flowgate/project-clarify.md 已确认假设（Node 20+、无第三方运行时依赖、默认端口 3000）。",
+  "complexity": "low",
+  "risk": "normal",
+  "stage": "S4",
+  "lifecycle": "active",
+  "gates": {
+    "G0": {
+      "state": "passed",
+      "items": [
+        {
+          "item": "g0.changeDir",
+          "label": "变更目录已创建",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "/private/var/folders/gd/sjt2j1zj5gqd7pxj0tn5znf40000gn/T/flowgate-eval-IAP1p7/repo/.flowgate/changes/C-001"
+          ]
+        },
+        {
+          "item": "g0.title",
+          "label": "标题和一句话目标非空",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g0.levels",
+          "label": "复杂度和风险已建议",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "复杂度 low · 风险 normal"
+          ]
+        },
+        {
+          "item": "g0.contract",
+          "label": "契约已冻结",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "插件 0.1.0"
+          ]
+        }
+      ],
+      "submittedAt": "2026-10-31T11:28:08+08:00",
+      "passedAt": "2026-10-31T11:28:08+08:00",
+      "attempts": 1
+    },
+    "G1": {
+      "state": "passed",
+      "attempts": 6,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做管理员登录、会话、Cookie 与退出登录（留给 C1）。；不做会员列表、会员新增/编辑/删除（留给 C1/C2）。；不引入数据库、ORM、缓存、消息队列。；不引入任何第三方运行时依赖、TypeScript 或前端构建链。；不做 Docker、容器编排、CI 流水线与公网部署配置。；不做多角色、多租户、审计日志。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 4 个 · 场景 9 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T11:29:45+08:00",
+      "approvedAt": "2026-10-31T11:32:44+08:00"
+    },
+    "G2": {
+      "state": "passed",
+      "attempts": 1,
+      "passedAt": "2026-10-31T11:30:51+08:00"
+    },
+    "G3": {
+      "state": "passed",
+      "attempts": 4,
+      "items": [
+        {
+          "item": "g1.sixElements",
+          "label": "六要素各有结论或被接受为假设",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.scenarioCoverage",
+          "label": "每条需求至少一个可测试场景",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.vagueTerms",
+          "label": "场景的 THEN 无未量化模糊词",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.outOfScope",
+          "label": "「不做」清单非空",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "不做管理员登录、会话、Cookie 与退出登录（留给 C1）。；不做会员列表、会员新增/编辑/删除（留给 C1/C2）。；不引入数据库、ORM、缓存、消息队列。；不引入任何第三方运行时依赖、TypeScript 或前端构建链。；不做 Docker、容器编排、CI 流水线与公网部署配置。；不做多角色、多租户、审计日志。"
+          ]
+        },
+        {
+          "item": "g1.openQuestions",
+          "label": "未决问题 = 0",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g1.specFormat",
+          "label": "增量规格格式合法",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "需求 4 个 · 场景 9 个"
+          ]
+        },
+        {
+          "item": "g1.factsCitations",
+          "label": "已知事实都带可核验引用",
+          "passed": true,
+          "priority": "P1"
+        },
+        {
+          "item": "g3.taskCards",
+          "label": "任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 2 个"
+          ]
+        },
+        {
+          "item": "g3.traceability",
+          "label": "追溯矩阵无未覆盖场景",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "场景 9 个全部有归属"
+          ]
+        },
+        {
+          "item": "g3.taskCount",
+          "label": "任务数不超过上限",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "任务 2 个"
+          ]
+        },
+        {
+          "item": "g3.newFiles",
+          "label": "new_files 落在 scope 内且不是根级通配",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.verifyCommands",
+          "label": "每个任务都有合法的验证命令",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.frozenArtifacts",
+          "label": "已冻结产物未被修改",
+          "passed": true,
+          "priority": "P0",
+          "details": [
+            "产物尚未冻结"
+          ]
+        },
+        {
+          "item": "g3.cleanWorktree",
+          "label": "工作区没有未提交的改动",
+          "passed": true,
+          "priority": "P0"
+        },
+        {
+          "item": "g3.testNoneRisk",
+          "label": "缺少自动化测试已登记为风险",
+          "passed": true,
+          "priority": "P1"
+        }
+      ],
+      "submittedAt": "2026-10-31T11:32:41+08:00",
+      "approvedAt": "2026-10-31T11:32:44+08:00"
+    }
+  },
+  "batches": [
+    {
+      "id": "B1",
+      "mode": "sequential",
+      "status": "running",
+      "tasks": [
+        "T1"
+      ],
+      "startedAt": "2026-10-31T11:32:47+08:00"
+    },
+    {
+      "id": "B2",
+      "mode": "sequential",
+      "status": "pending",
+      "tasks": [
+        "T2"
+      ]
+    }
+  ],
+  "tasks": {
+    "T1": {
+      "id": "T1",
+      "batch": "B1",
+      "status": "interrupted",
+      "tdd": "none",
+      "evidenceIds": [
+        "E-0004",
+        "E-0005",
+        "E-0006"
+      ],
+      "reviewIds": [],
+      "startedAt": "2026-10-31T11:34:55+08:00",
+      "failureCount": 0,
+      "interruptedAt": "2026-10-31T11:35:18+08:00"
+    },
+    "T2": {
+      "id": "T2",
+      "batch": "B2",
+      "status": "pending",
+      "tdd": "none",
+      "evidenceIds": [],
+      "reviewIds": []
+    }
+  },
+  "evidenceIds": [],
+  "pending": [
+    {
+      "id": "RK-1",
+      "kind": "risk",
+      "changeId": "C-001",
+      "title": "T-DEPENDENCY：package.json",
+      "detail": "write package.json\n依赖清单/锁文件变更涉及供应链安全与许可证合规，按内置触发器转人工确认。\n解锁：让负责人在面板确认依赖变更（/flow risk approve <RK-n>），只对该次修改单次放行。",
+      "status": "approved",
+      "createdAt": "2026-10-31T11:33:07+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-DEPENDENCY",
+        "actionFingerprint": "sha256:aaa782d350eefeac5dd328330a1cd31b2d53179a06191677c8477de0658d4d6c"
+      },
+      "data": {
+        "ruleId": "T-DEPENDENCY",
+        "stage": "S4",
+        "target": "package.json",
+        "tool": "write"
+      },
+      "decidedAt": "2026-10-31T11:33:28+08:00",
+      "decisionReason": "evaluation harness auto-approve risk"
+    },
+    {
+      "id": "RK-2",
+      "kind": "risk",
+      "changeId": "C-001",
+      "title": "T-DEPENDENCY：package.json",
+      "detail": "write package.json\n依赖清单/锁文件变更涉及供应链安全与许可证合规，按内置触发器转人工确认。\n解锁：让负责人在面板确认依赖变更（/flow risk approve <RK-n>），只对该次修改单次放行。",
+      "status": "approved",
+      "createdAt": "2026-10-31T11:33:51+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-DEPENDENCY",
+        "actionFingerprint": "sha256:70bb165fdfdb6dac8d08f2b62a410b0403cfc998acf16ee3fa35d5f2a37ddfe7"
+      },
+      "data": {
+        "ruleId": "T-DEPENDENCY",
+        "stage": "S4",
+        "target": "package.json",
+        "tool": "write"
+      },
+      "decidedAt": "2026-10-31T11:34:52+08:00",
+      "decisionReason": "evaluation harness auto-approve risk"
+    },
+    {
+      "id": "RK-3",
+      "kind": "risk",
+      "changeId": "C-001",
+      "title": "T-DEPENDENCY：package.json",
+      "detail": "write package.json\n依赖清单/锁文件变更涉及供应链安全与许可证合规，按内置触发器转人工确认。\n解锁：让负责人在面板确认依赖变更（/flow risk approve <RK-n>），只对该次修改单次放行。",
+      "status": "approved",
+      "createdAt": "2026-10-31T11:35:03+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "ruleId": "T-DEPENDENCY",
+        "actionFingerprint": "sha256:d4f3fc181a6e1d704a0f8aea91d01a78f5cd1430a41e380b20b3cf4c9dd0ec74"
+      },
+      "data": {
+        "ruleId": "T-DEPENDENCY",
+        "stage": "S4",
+        "target": "package.json",
+        "tool": "write"
+      },
+      "decidedAt": "2026-10-31T11:35:18+08:00",
+      "decisionReason": "evaluation harness auto-approve risk"
+    },
+    {
+      "id": "BL-1",
+      "kind": "blocker",
+      "changeId": "C-001",
+      "title": "T1 连续 3 次验证失败，已暂停",
+      "detail": "先复现、找根因、再修复；不要继续试错。只读取证与 flow_status/flow_report_risk 不受限。\n负责人确认后运行 /flow unblock BL-1 解锁（可只读诊断、查状态、上报风险）。",
+      "status": "approved",
+      "createdAt": "2026-10-31T11:35:11+08:00",
+      "scope": {
+        "changeId": "C-001",
+        "taskId": "T1"
+      },
+      "data": {
+        "taskId": "T1"
+      },
+      "decidedAt": "2026-10-31T11:35:18+08:00",
+      "decisionReason": "evaluation harness auto-approve blocker"
+    }
+  ],
+  "overrides": [
+    {
+      "id": "OV-1",
+      "ruleId": "T-DEPENDENCY",
+      "changeId": "C-001",
+      "reason": "evaluation harness auto-approve risk",
+      "actionFingerprint": "sha256:aaa782d350eefeac5dd328330a1cd31b2d53179a06191677c8477de0658d4d6c",
+      "createdAt": "2026-10-31T11:33:28+08:00"
+    },
+    {
+      "id": "OV-2",
+      "ruleId": "T-DEPENDENCY",
+      "changeId": "C-001",
+      "reason": "evaluation harness auto-approve risk",
+      "actionFingerprint": "sha256:70bb165fdfdb6dac8d08f2b62a410b0403cfc998acf16ee3fa35d5f2a37ddfe7",
+      "createdAt": "2026-10-31T11:34:52+08:00"
+    },
+    {
+      "id": "OV-3",
+      "ruleId": "T-DEPENDENCY",
+      "changeId": "C-001",
+      "reason": "evaluation harness auto-approve risk",
+      "actionFingerprint": "sha256:d4f3fc181a6e1d704a0f8aea91d01a78f5cd1430a41e380b20b3cf4c9dd0ec74",
+      "createdAt": "2026-10-31T11:35:18+08:00"
+    }
+  ],
+  "exceptions": [],
+  "violations": [],
+  "reviews": [],
+  "createdAt": "2026-10-31T11:28:08+08:00",
+  "updatedAt": "2026-10-31T11:35:18+08:00",
+  "clarifyRounds": 0,
+  "roadmap": "C0",
+  "contract": {
+    "plugin": "0.1.0",
+    "rules": "sha256:7bf60c36aa84231e98e7f4c0fc018676eda9456953841ed2e1d41b25ab353b86",
+    "levels": "sha256:83b63095ab38edc814c8b0f58c0d566227e63719064136c17f9f54b2dc27a852",
+    "skills": {
+      "flow-analysis": "v1",
+      "flow-clarify": "v1",
+      "flow-context": "v1",
+      "flow-debug": "v1",
+      "flow-design": "v1",
+      "flow-orchestrate": "v1",
+      "flow-plan": "v1",
+      "flow-qa": "v1",
+      "flow-retro": "v1",
+      "flow-review": "v1",
+      "flow-roadmap": "v1",
+      "flow-scope": "v1",
+      "flow-ship": "v1",
+      "flow-tdd": "v1",
+      "flow-verify": "v1"
+    },
+    "createdAt": "2026-10-31T11:28:08+08:00"
+  },
+  "session": {
+    "attached": "eval-owner",
+    "heartbeat": "2026-10-31T11:35:18+08:00"
+  },
+  "baseline": {
+    "commit": null,
+    "summary": {
+      "parser": "none",
+      "parsed": false,
+      "run": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recordedAt": "2026-10-31T11:30:51+08:00"
+  },
+  "plan": {
+    "batches": [
+      {
+        "batch": "B1",
+        "mode": "sequential",
+        "tasks": [
+          "T1"
+        ],
+        "why": "先建立工程骨架与可运行服务，T2 的 README 必须记录 T1 已确定的真实命令"
+      },
+      {
+        "batch": "B2",
+        "mode": "sequential",
+        "tasks": [
+          "T2"
+        ],
+        "why": "文档依赖 T1 的脚本与目录落地，单独执行后做一次全量文档断言"
+      }
+    ]
+  },
+  "branch": "flowgate/C-001"
+}

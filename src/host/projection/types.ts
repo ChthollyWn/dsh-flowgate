@@ -130,6 +130,14 @@ export interface FlowgateProjection {
   learning?: 'detail' | 'brief' | 'off'
   revision: number
   updatedAt: string
+  /**
+   * 写入本条记录的宿主进程 epoch（可选，旧版本记录没有）。
+   *
+   * 宿主重启后 `revision` 会从 0 重新计数，而会话日志里旧进程的 revision 可能已经很大；
+   * 投影 `apply` 靠 epoch 区分"新进程的第一条记录"，避免单调保护把重启后的更新丢弃，
+   * 导致面板/状态条停留在重启前快照。
+   */
+  epoch?: string
 }
 
 /** 学习模式默认值。 */

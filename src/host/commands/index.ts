@@ -10,7 +10,7 @@
 import type { DshAgent, DshCommandDefinition, DshCommandRuntime, DshContext } from '../adapters/dsh-types.js'
 import type { EngineLike } from '../types.js'
 import type { HostRuntime } from '../runtime.js'
-import type { Complexity, GateId, RiskLevel } from '../../core/types.js'
+import type { Complexity, GateId, PendingItem, RiskLevel } from '../../core/types.js'
 import { HostError, describeError, toAgentError } from '../errors.js'
 import { approveHumanGate, confirmCardText, rejectCurrentGate } from '../gates/index.js'
 import { formatDoctorReport, runRepair } from '../doctor/index.js'
@@ -45,6 +45,7 @@ export const FLOW_COMMAND_HELP = [
   '/flow allow-once <规则id|last> <理由> — 单次放行',
   '/flow scope approve|reject <SC-n> [理由] — 范围变更申请',
   '/flow risk approve|reject <RK-n> [理由] — 风险接管项',
+  '/flow unblock [BL-n|任务id] [理由] — 解除连续失败熔断：清零失败计数、任务恢复执行（无参时处理唯一 open blocker）',
   '/flow plan approve|reject <PC-n> [理由] — 计划修订申请',
   '/flow rule approve|reject <RL-n> [理由] — 规则沉淀提议',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
@@ -71,7 +72,7 @@ export function installCommands(runtime: HostRuntime): void {
     const definition: DshCommandDefinition = {
       name: 'flow',
       description: 'FlowGate 流程门禁：状态、立项、门禁、放行、指标与自检',
-      input: { hint: 'init | status | new <描述> | approve <门> | reject <意见> | doctor' },
+      input: { hint: 'init | status | new <描述> | approve <门> | unblock [BL-n] | doctor' },
       recordInput: true,
       handler: async (invocation) => {
         try {
@@ -121,6 +122,8 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
     case 'plan':
     case 'rule':
       return pendingCommand(runtime, verb, args)
+    case 'unblock':
+      return unblockCommand(runtime, args)
     case 'complexity':
       return complexityCommand(runtime, rest)
     case 'risk-level':
@@ -326,6 +329,92 @@ async function pendingCommand(runtime: HostRuntime, kind: 'scope' | 'risk' | 'pl
   runtime.emit()
   const label = kind === 'scope' ? '范围变更' : kind === 'risk' ? '风险接管' : kind === 'plan' ? '计划修订' : '规则提议'
   return `${label} ${item.id} 已${action === 'approve' ? '批准' : '退回'}。${item.title}`
+}
+
+/** 非 blocker 待处理项对应的处理命令（错误提示用）。 */
+function pendingKindHint(kind: string): string {
+  switch (kind) {
+    case 'scope':
+      return '/flow scope approve <SC-n>'
+    case 'risk':
+      return '/flow risk approve <RK-n>'
+    case 'plan':
+      return '/flow plan approve <PC-n>'
+    case 'rule':
+      return '/flow rule approve <RL-n>'
+    default:
+      return '运行 /flow 查看待处理项列表'
+  }
+}
+
+/**
+ * `/flow unblock [BL-id|任务id] [理由]`：负责人确认「熔断解除，任务继续」。
+ *
+ * 命令只是入口，真正的状态迁移在 engine.decidePending(...,'approved') 的 blocker 分支：
+ * 失败计数清零、任务恢复执行、同任务其它 open BL 一并关闭，并写 task.unblocked 账本事件。
+ * 无参数时只处理当前变更里**唯一**的 open blocker（多个时必须显式指定，避免误放行）。
+ */
+async function unblockCommand(runtime: HostRuntime, args: string[]): Promise<string> {
+  const engine = await engineFor(runtime)
+  const change = engine.currentChange()
+  if (!change) throw new HostError('当前没有进行中的变更', '没有活动变更时没有需要解锁的熔断阻断项；运行 /flow 查看状态')
+  const openBlockers = change.pending.filter((item) => item.status === 'open' && item.kind === 'blocker')
+  const requested = args[0]
+  const reason = args.slice(1).join(' ') || undefined
+  let target: PendingItem | undefined
+
+  if (requested === undefined || requested === '') {
+    if (openBlockers.length === 0) {
+      throw new HostError('当前没有待解锁的熔断阻断项（BL-n）', '连续验证失败达到上限时才会产生阻断项；运行 /flow 查看当前状态')
+    }
+    if (openBlockers.length > 1) {
+      throw new HostError(
+        `有 ${openBlockers.length} 个待解锁阻断项，需要指定 BL id：${openBlockers.map((item) => item.id).join('、')}`,
+        `例：/flow unblock ${openBlockers[0]?.id}；无条件解锁会误放行其它任务`,
+      )
+    }
+    target = openBlockers[0]
+  } else {
+    const byId = change.pending.find((item) => item.id === requested)
+    if (byId) {
+      if (byId.kind !== 'blocker') {
+        throw new HostError(
+          `${byId.id} 不是熔断阻断项（kind=${byId.kind}），不能用 /flow unblock`,
+          `${byId.id} 的处理方式：${pendingKindHint(byId.kind)}`,
+        )
+      }
+      if (byId.status !== 'open') {
+        throw new HostError(`${byId.id} 已经处理过（${byId.status}）`, '不能重复解锁；运行 /flow 查看待处理项')
+      }
+      target = byId
+    } else {
+      const forTask = openBlockers.filter((item) => String(item.data?.taskId ?? item.scope?.taskId ?? '') === requested)
+      if (forTask.length === 0) {
+        throw new HostError(
+          `没有待解锁的阻断项：${requested}`,
+          '按 BL id（如 BL-1）或任务 id（如 T1）解锁；运行 /flow 查看待处理项与任务列表',
+        )
+      }
+      if (forTask.length > 1) {
+        throw new HostError(
+          `任务 ${requested} 有多个待解锁阻断项：${forTask.map((item) => item.id).join('、')}`,
+          `例：/flow unblock ${forTask[0]?.id}`,
+        )
+      }
+      target = forTask[0]
+    }
+  }
+  if (!target) throw new HostError(`没有待解锁的阻断项：${requested ?? ''}`, '运行 /flow 查看待处理项与任务列表')
+
+  const blockerId = target.id
+  const taskId = String(target.data?.taskId ?? target.scope?.taskId ?? '')
+  await engine.decidePending(blockerId, 'approved', reason)
+  runtime.emit()
+  return [
+    `已解锁熔断阻断项 ${blockerId}${taskId ? `（任务 ${taskId}）` : ''}：失败计数清零、任务恢复执行。`,
+    ...(taskId ? [`agent 现在可以继续 flow_* 调用（flow_verify / flow_task_done 等）；只读动作本就未受限。`] : []),
+    '同任务的其它 open 阻断项与旧版熔断残留项已一并关闭。',
+  ].join('\n')
 }
 
 async function complexityCommand(runtime: HostRuntime, rest: string): Promise<string> {

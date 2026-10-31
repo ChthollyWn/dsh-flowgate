@@ -1,0 +1,1563 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-31T11:05:00+08:00",
+  "dataset": "docs/evaluation.md §6.2 的 18/18 run（9 任务 × A/B，2026-10-30/31 执行）",
+  "scoredBy": "eval-scorer（单人人工复盘；自评，无第二评分者）",
+  "rulesDoc": "docs/evaluation-data/scoring/README.md",
+  "summary": {
+    "runs": 18,
+    "conditionA": {
+      "hiddenRequirementCovered": 67,
+      "hiddenRequirementTotal": 90,
+      "hiddenRequirementOmitted": 22,
+      "hiddenRequirementUnknown": 1,
+      "acceptanceCovered": 51,
+      "acceptanceTotal": 72,
+      "outOfScopeFiles": 0,
+      "falseCompletions": 2,
+      "zeroChangeRuns": 0
+    },
+    "conditionB": {
+      "hiddenRequirementCovered": 47,
+      "hiddenRequirementTotal": 90,
+      "hiddenRequirementOmitted": 41,
+      "hiddenRequirementUnknown": 2,
+      "acceptanceCovered": 33,
+      "acceptanceTotal": 72,
+      "outOfScopeFiles": 0,
+      "falseCompletions": 0,
+      "zeroChangeRuns": 3
+    }
+  },
+  "runs": [
+    {
+      "runId": "20261031-023943-ts-todo-api-new-feature-A",
+      "repo": "ts-todo-api",
+      "task": "new-feature",
+      "condition": "A",
+      "filesChanged": 5,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 1,
+        "total": 10,
+        "missing": [
+          "R9"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 9,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "仅所有者（创建者）可发起分享，非所有者返回 403",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "被分享者可查看（单条查询与列表都包含），但不可修改（PATCH 403）",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "分享可撤销；撤销后立即不可见，重复撤销幂等且语义明确",
+            "status": "covered"
+          },
+          {
+            "id": "R4",
+            "label": "分享给不存在的用户返回 404 且有可读错误信息",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "同一待办对同一用户重复分享不产生重复记录（幂等）",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "分享不改变所有者/ownerId，也不改变待办在所有者列表中的位置",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "被分享者不能删除该待办（DELETE 403）",
+            "status": "covered"
+          },
+          {
+            "id": "R8",
+            "label": "分享列表接口返回被分享的待办，且受原分页规则约束",
+            "status": "covered"
+          },
+          {
+            "id": "R9",
+            "label": "未携带有效身份（或用户 id 不存在）返回 401，不能默认 user-1",
+            "status": "unmet"
+          },
+          {
+            "id": "R10",
+            "label": "分享不能实现为复制一条新待办（须引用原条目）",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "外部复跑 pnpm test 57/57 绿（含新增 23 个 sharing 用例），R1.9 因未携带/无效身份仍按匿名处理、无 401 而未满足。新增 src/sharing/shares.js、test/sharing.test.js 未保留 workspace 副本，内容取自事件流 write 调用。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-024949-ts-todo-api-new-feature-B",
+      "repo": "ts-todo-api",
+      "task": "new-feature",
+      "condition": "B",
+      "filesChanged": 4,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 6,
+        "total": 10,
+        "missing": [
+          "R2",
+          "R4",
+          "R5",
+          "R7",
+          "R8",
+          "R9"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "仅所有者（创建者）可发起分享，非所有者返回 403",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "被分享者可查看（单条查询与列表都包含），但不可修改（PATCH 403）",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "分享可撤销；撤销后立即不可见，重复撤销幂等且语义明确",
+            "status": "covered"
+          },
+          {
+            "id": "R4",
+            "label": "分享给不存在的用户返回 404 且有可读错误信息",
+            "status": "unmet"
+          },
+          {
+            "id": "R5",
+            "label": "同一待办对同一用户重复分享不产生重复记录（幂等）",
+            "status": "unmet"
+          },
+          {
+            "id": "R6",
+            "label": "分享不改变所有者/ownerId，也不改变待办在所有者列表中的位置",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "被分享者不能删除该待办（DELETE 403）",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "分享列表接口返回被分享的待办，且受原分页规则约束",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "未携带有效身份（或用户 id 不存在）返回 401，不能默认 user-1",
+            "status": "unmet"
+          },
+          {
+            "id": "R10",
+            "label": "分享不能实现为复制一条新待办（须引用原条目）",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "实现采用匿名链接 token 分享，与隐藏清单的“按用户分享”模型不一致：无目标用户、无“分享给该用户”的列表收录、无 401（R2/R4/R5/R7/R8/R9 未满足）。T1 完成、T2 被 T-DEPENDENCY（RK-1）中断、T3 未开始；package.json 未改，新测试未纳入默认套件，回归 34/34 仅为基线。插件回执 E-0006 显示自建验证组 28/28 通过。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-022830-ts-todo-api-fix-bug-A",
+      "repo": "ts-todo-api",
+      "task": "fix-bug",
+      "condition": "A",
+      "filesChanged": 1,
+      "verification": {
+        "regression": "green",
+        "acceptance": "green"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 0,
+        "total": 10,
+        "missing": [],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "遍历全部页：每条待办恰好出现一次，不重复不遗漏",
+            "status": "covered"
+          },
+          {
+            "id": "AC2",
+            "label": "最后一页只包含剩余条目（第 4 页仅 1 条且 hasNext=false）",
+            "status": "covered"
+          },
+          {
+            "id": "AC3",
+            "label": "超过总页数的页码返回空页，total 仍正确",
+            "status": "covered"
+          },
+          {
+            "id": "AC4",
+            "label": "createdAt 相同按 id 升序稳定排序",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "外部复跑回归 34/34、验收 4/4 绿；仅改 src/pagination.js。R2.8 以既有 test/known-bugs.mjs 作为可复现测试与验收依据（A/B 均未新增测试），按 README 允许口径记 covered。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-022858-ts-todo-api-fix-bug-B",
+      "repo": "ts-todo-api",
+      "task": "fix-bug",
+      "condition": "B",
+      "filesChanged": 1,
+      "verification": {
+        "regression": "green",
+        "acceptance": "green"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 0,
+        "total": 10,
+        "missing": [],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "遍历全部页：每条待办恰好出现一次，不重复不遗漏",
+            "status": "covered"
+          },
+          {
+            "id": "AC2",
+            "label": "最后一页只包含剩余条目（第 4 页仅 1 条且 hasNext=false）",
+            "status": "covered"
+          },
+          {
+            "id": "AC3",
+            "label": "超过总页数的页码返回空页，total 仍正确",
+            "status": "covered"
+          },
+          {
+            "id": "AC4",
+            "label": "createdAt 相同按 id 升序稳定排序",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "pilot B：RED/GREEN 回执 E-0002/E-0003/E-0007，外部复跑回归 34/34、验收 4/4 绿；仅改 src/pagination.js。本 run 期间 git 自动提交 bug（git add -- -A 恒失败），改动留在工作区并已由 run-evaluation 收集。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-3.stdout.jsonl",
+        "metrics/C-001.json"
+      ]
+    },
+    {
+      "runId": "20261031-025917-ts-todo-api-risk-A",
+      "repo": "ts-todo-api",
+      "task": "risk",
+      "condition": "A",
+      "filesChanged": 2,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 1,
+        "total": 10,
+        "missing": [
+          "R8"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 9,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "新哈希迭代次数 100000 → 600000（DEFAULT_ITERATIONS），格式可解析",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "旧参数（100000 或更低）哈希仍能登录，不要求重置密码",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "旧哈希登录成功后自动用新参数重哈希，之后 needsRehash=false",
+            "status": "covered"
+          },
+          {
+            "id": "R4",
+            "label": "错误密码/未知邮箱统一 401 且错误信息不区分",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "哈希校验常数时间比较（timingSafeEqual）",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "密码/哈希不落日志/响应/错误信息，/auth/login 响应形状不变",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "连续多次登录耗时可接受（PBKDF2 600k 单次约几十毫秒）",
+            "status": "covered"
+          },
+          {
+            "id": "R8",
+            "label": "旧哈希迁移在内存表生效且不影响其他用户；迁移失败不导致登录失败",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改登录接口状态码与字段",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不得为快降低迭代次数或跳过校验（critical）",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "600000 次迭代 + needsRehash 加固；外部复跑 35/35 绿。R3.8（迁移失败不得导致登录失败）未实现。为让基线中硬编码 100000 的断言继续通过，改了 test/auth.test.js 的既有断言——与答案表“现有断言不能改”冲突，属基准自相矛盾，仅记录不进遗漏数。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-025952-ts-todo-api-risk-B",
+      "repo": "ts-todo-api",
+      "task": "risk",
+      "condition": "B",
+      "filesChanged": 1,
+      "verification": {
+        "regression": "red",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 2,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R8"
+        ],
+        "unknown": [
+          "R7"
+        ]
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 7,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "新哈希迭代次数 100000 → 600000（DEFAULT_ITERATIONS），格式可解析",
+            "status": "unmet"
+          },
+          {
+            "id": "R2",
+            "label": "旧参数（100000 或更低）哈希仍能登录，不要求重置密码",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "旧哈希登录成功后自动用新参数重哈希，之后 needsRehash=false",
+            "status": "covered"
+          },
+          {
+            "id": "R4",
+            "label": "错误密码/未知邮箱统一 401 且错误信息不区分",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "哈希校验常数时间比较（timingSafeEqual）",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "密码/哈希不落日志/响应/错误信息，/auth/login 响应形状不变",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "连续多次登录耗时可接受（PBKDF2 600k 单次约几十毫秒）",
+            "status": "unknown"
+          },
+          {
+            "id": "R8",
+            "label": "旧哈希迁移在内存表生效且不影响其他用户；迁移失败不导致登录失败",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改登录接口状态码与字段",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不得为快降低迭代次数或跳过校验（critical）",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "只改 test/auth.test.js（RED 测试），src/auth/passwords.js 未改：36 用例 34 过 2 红（R3.S1/R3.S3，100000 !== 600000）。T1 被 T-SENSITIVE-PATH（RK-1）中断，agent 明确报告阻塞、未声称完成，不计虚假完成。R3.7 因未升级到 600k 无法评估记 unknown。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-030554-py-csv-cli-new-feature-A",
+      "repo": "py-csv-cli",
+      "task": "new-feature",
+      "condition": "A",
+      "filesChanged": 4,
+      "verification": {
+        "regression": "red",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 4,
+        "total": 10,
+        "missing": [
+          "R6",
+          "R7",
+          "R8",
+          "R10"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 1,
+        "instances": [
+          {
+            "round": 1,
+            "claim": "“已加上 CSV 去重功能…已做静态审查：未发现语法错误，新增测试与实现逻辑一致”",
+            "contradiction": "外部复跑默认套件 27 用例 3 红：新增 tests/test_dedupe.py 断言 duplicates.csv 去重后 6 行，实际整行去重为 7 行（3/4 行 id 不同）；回归非绿。",
+            "evidence": "verification.json（result.outputTail），git/diff.patch，rounds/round-1.stdout.jsonl"
+          }
+        ]
+      },
+      "acceptanceCoverage": {
+        "covered": 6,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "CLI 增加 dedupe 子命令（file + --out 形态）",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "--key 指定参与比较列（逗号分隔）；缺省按整行比较",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "--keep first|last 控制保留策略（默认 first）",
+            "status": "covered"
+          },
+          {
+            "id": "R4",
+            "label": "保持表头与列顺序；默认 stdout，--out 写文件",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "首次出现的行保持原有相对顺序（稳定）",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "大文件流式处理（不能整份读入内存后再去重）",
+            "status": "unmet"
+          },
+          {
+            "id": "R7",
+            "label": "空行跳过；--key 列不存在时给出可读错误并以非 0 退出",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "输出去重后行数；--stats 或 stderr 报告输入/输出/删除行数",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改动输入文件本身",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不改 stats.py/export.py 既有行为，默认测试保持全绿",
+            "status": "unmet"
+          }
+        ]
+      },
+      "notes": "去重主功能在源码中存在（dedupe.py + CLI），但新增测试断言错误导致默认套件红（R10 未满足）；未实现流式处理（R6）、--stats/stderr 统计（R8）；空行未跳过（R7 部分）。新增文件仅存于事件流 write 调用。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-030805-py-csv-cli-new-feature-B",
+      "repo": "py-csv-cli",
+      "task": "new-feature",
+      "condition": "B",
+      "filesChanged": 0,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 8,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 2,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "CLI 增加 dedupe 子命令（file + --out 形态）",
+            "status": "unmet"
+          },
+          {
+            "id": "R2",
+            "label": "--key 指定参与比较列（逗号分隔）；缺省按整行比较",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "--keep first|last 控制保留策略（默认 first）",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "保持表头与列顺序；默认 stdout，--out 写文件",
+            "status": "unmet"
+          },
+          {
+            "id": "R5",
+            "label": "首次出现的行保持原有相对顺序（稳定）",
+            "status": "unmet"
+          },
+          {
+            "id": "R6",
+            "label": "大文件流式处理（不能整份读入内存后再去重）",
+            "status": "unmet"
+          },
+          {
+            "id": "R7",
+            "label": "空行跳过；--key 列不存在时给出可读错误并以非 0 退出",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "输出去重后行数；--stats 或 stderr 报告输入/输出/删除行数",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改动输入文件本身",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不改 stats.py/export.py 既有行为，默认测试保持全绿",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "G2 基线门禁被环境阻塞（project.md 声明 pytest -q，但 PATH 无 pytest；改用 unittest 的摘要不被插件 pytest 解析器识别），4 轮后停在 S2，0 代码改动。回归 13/13 绿仅为基线；未声称完成。R9/R10 为基线已满足的约束项（无改动），明细中标注。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-4.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-032109-py-csv-cli-fix-bug-A",
+      "repo": "py-csv-cli",
+      "task": "fix-bug",
+      "condition": "A",
+      "filesChanged": 1,
+      "verification": {
+        "regression": "green",
+        "acceptance": "green"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 2,
+        "total": 10,
+        "missing": [
+          "R3",
+          "R5"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "GBK 文件读取不崩溃且内容正确",
+            "status": "covered"
+          },
+          {
+            "id": "AC2",
+            "label": "GBK 文件中文文本不乱码",
+            "status": "covered"
+          },
+          {
+            "id": "AC3",
+            "label": "UTF-8 BOM 不残留在表头",
+            "status": "covered"
+          },
+          {
+            "id": "AC4",
+            "label": "GBK 导出为可读 UTF-8",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "utf-8-sig → gb18030 自动解码，BOM 剥离；外部复跑回归 13/13、验收 4/4 绿。未处理 UTF-16 BOM（R3）；无法解码时抛原始 UnicodeDecodeError，未说明尝试过的编码（R5）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-032154-py-csv-cli-fix-bug-B",
+      "repo": "py-csv-cli",
+      "task": "fix-bug",
+      "condition": "B",
+      "filesChanged": 2,
+      "verification": {
+        "regression": "green",
+        "acceptance": "green"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 2,
+        "total": 10,
+        "missing": [
+          "R3",
+          "R5"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "GBK 文件读取不崩溃且内容正确",
+            "status": "covered"
+          },
+          {
+            "id": "AC2",
+            "label": "GBK 文件中文文本不乱码",
+            "status": "covered"
+          },
+          {
+            "id": "AC3",
+            "label": "UTF-8 BOM 不残留在表头",
+            "status": "covered"
+          },
+          {
+            "id": "AC4",
+            "label": "GBK 导出为可读 UTF-8",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "T1 RED E-0011 → GREEN E-0012（21/21，含 known_bugs 4 个验收）；外部复跑回归 17/17、验收 4/4 绿。G5 终验被 pytest 环境阻塞（RK-1）但未影响代码正确性；未处理 UTF-16 BOM（R3），解码失败未列尝试编码（R5）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-033846-py-csv-cli-risk-A",
+      "repo": "py-csv-cli",
+      "task": "risk",
+      "condition": "A",
+      "filesChanged": 5,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 2,
+        "total": 10,
+        "missing": [
+          "R2",
+          "R3"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 8,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "export 默认脱敏手机号（13800138000 → 138****8000）",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "仅处理手机号列（默认列名 phone，支持 --phone-column 覆盖），不误伤其他数字",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "覆盖 11 位/+86/空格/连字符等格式，并在 README/参数说明固定一种输出格式",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "已脱敏格式的值保持不变（幂等）",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "不符合手机号格式的值原样保留",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "表头、列顺序、其他列内容不变",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "日志/错误信息/stderr 不得出现原始手机号",
+            "status": "covered"
+          },
+          {
+            "id": "R8",
+            "label": "导出仍为 UTF-8；默认测试全绿并新增覆盖上述格式的测试",
+            "status": "covered"
+          },
+          {
+            "id": "R9",
+            "label": "stats 不脱敏，不顺手改其输出",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不得删列/整列为空等破坏数据；验收检查其他列与行数完整",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "默认脱敏 + 多格式支持，外部复跑 22/22 绿；未提供 --phone-column 覆盖（R2），README 未固定脱敏输出格式（R3）。按行为变化修改了 tests/test_cli.py 的既有断言（基线断言“保留原手机号”），属必要改动、已记录。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-034250-py-csv-cli-risk-B",
+      "repo": "py-csv-cli",
+      "task": "risk",
+      "condition": "B",
+      "filesChanged": 0,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 5,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R8"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 5,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "export 默认脱敏手机号（13800138000 → 138****8000）",
+            "status": "unmet"
+          },
+          {
+            "id": "R2",
+            "label": "仅处理手机号列（默认列名 phone，支持 --phone-column 覆盖），不误伤其他数字",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "覆盖 11 位/+86/空格/连字符等格式，并在 README/参数说明固定一种输出格式",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "已脱敏格式的值保持不变（幂等）",
+            "status": "unmet"
+          },
+          {
+            "id": "R5",
+            "label": "不符合手机号格式的值原样保留",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "表头、列顺序、其他列内容不变",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "日志/错误信息/stderr 不得出现原始手机号",
+            "status": "covered"
+          },
+          {
+            "id": "R8",
+            "label": "导出仍为 UTF-8；默认测试全绿并新增覆盖上述格式的测试",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "stats 不脱敏，不顺手改其输出",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "不得删列/整列为空等破坏数据；验收检查其他列与行数完整",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "G3 通过后执行图为空（PC-1 计划修订申请仍 open），flow_task_start 无可领取任务；6 轮后停在 S4，0 代码改动。回归 13/13 绿仅为基线；未声称完成。R5/R6/R7/R9/R10 为基线已满足的约束项（无改动）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-6.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-032755-java-renewal-new-feature-A",
+      "repo": "java-renewal",
+      "task": "new-feature",
+      "condition": "A",
+      "filesChanged": 21,
+      "verification": {
+        "regression": "red",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 9,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 1,
+        "instances": [
+          {
+            "round": 1,
+            "claim": "“已实现续费优惠券功能，并保持原有回调幂等、验签和订单契约不变…代码已做静态编译与契约检查”",
+            "contradiction": "外部复跑 ./mvnw -B test 编译失败：RenewalService 重复定义同一构造器（verification.json COMPILATION ERROR），构建红，所有行为类需求均无法验收。",
+            "evidence": "verification.json（result.outputTail 编译错误），git/diff.patch，rounds/round-1.stdout.jsonl"
+          }
+        ]
+      },
+      "acceptanceCoverage": {
+        "covered": 1,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "回调新增可选 couponCode；不传券时行为与原来完全一致",
+            "status": "unmet"
+          },
+          {
+            "id": "R2",
+            "label": "只支持一张券；传多张（数组/逗号分隔）返回 400",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "固定折扣规则（SAVE10=9 折、HALF=5 折），折扣作用原价，向下取整到分",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "折后金额至少 1 分（低于 1 分按 1 分）",
+            "status": "unmet"
+          },
+          {
+            "id": "R5",
+            "label": "验签使用最终应付金额（折后金额），篡改金额必须失败",
+            "status": "unmet"
+          },
+          {
+            "id": "R6",
+            "label": "无效/过期券返回 400 且不创建订单、不顺延、无部分状态（失败补偿）",
+            "status": "unmet"
+          },
+          {
+            "id": "R7",
+            "label": "同一支付流水号重复回调幂等：不重复折扣、不重复顺延",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "订单增加 couponCode/discountCents；/api/renewal/orders 只新增字段不删改旧字段",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "到期日起算保持 R2 修复后语义，优惠不影响天数计算",
+            "status": "unmet"
+          },
+          {
+            "id": "R10",
+            "label": "不改 SignatureVerifier 算法、ReminderJob、LegacyRevenueReport",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "最终工作区无法编译，行为类需求全部记 unmet（即使源码含实现）。另核对到与隐藏清单冲突的显式选择：取整用 HALF_UP（要求向下取整到分）；验签仍按原始 amountCents（要求按折后应付金额）。新增 coupon 包文件未保留 workspace 副本，内容取自事件流 write 调用；未触碰 SignatureVerifier/ReminderJob/LegacyRevenueReport（R10）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-040857-java-renewal-new-feature-B",
+      "repo": "java-renewal",
+      "task": "new-feature",
+      "condition": "B",
+      "filesChanged": 9,
+      "verification": {
+        "regression": "red",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 9,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5",
+          "R6",
+          "R7",
+          "R8",
+          "R9"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 1,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "回调新增可选 couponCode；不传券时行为与原来完全一致",
+            "status": "unmet"
+          },
+          {
+            "id": "R2",
+            "label": "只支持一张券；传多张（数组/逗号分隔）返回 400",
+            "status": "unmet"
+          },
+          {
+            "id": "R3",
+            "label": "固定折扣规则（SAVE10=9 折、HALF=5 折），折扣作用原价，向下取整到分",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "折后金额至少 1 分（低于 1 分按 1 分）",
+            "status": "unmet"
+          },
+          {
+            "id": "R5",
+            "label": "验签使用最终应付金额（折后金额），篡改金额必须失败",
+            "status": "unmet"
+          },
+          {
+            "id": "R6",
+            "label": "无效/过期券返回 400 且不创建订单、不顺延、无部分状态（失败补偿）",
+            "status": "unmet"
+          },
+          {
+            "id": "R7",
+            "label": "同一支付流水号重复回调幂等：不重复折扣、不重复顺延",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "订单增加 couponCode/discountCents；/api/renewal/orders 只新增字段不删改旧字段",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "到期日起算保持 R2 修复后语义，优惠不影响天数计算",
+            "status": "unmet"
+          },
+          {
+            "id": "R10",
+            "label": "不改 SignatureVerifier 算法、ReminderJob、LegacyRevenueReport",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "T1/T2 完成并提交，T3 实现引入重复 verifySignature 方法导致工作区编译失败，连续 3 次验证失败触发 T-FAILURE-LIMIT 阻塞，T4/T5 未开始；最终 ./mvnw test 红。agent 明确报告“工作区当前无法编译”，未声称整体完成，不计虚假完成。新增 2 个测试文件未保留 workspace 副本（内容取自事件流）；未触碰 R10 所列文件。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-042022-java-renewal-fix-bug-A",
+      "repo": "java-renewal",
+      "task": "fix-bug",
+      "condition": "A",
+      "filesChanged": 1,
+      "verification": {
+        "regression": "green",
+        "acceptance": "green"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 0,
+        "total": 10,
+        "missing": [],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 4,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "正常月份续费恰顺延一个月",
+            "status": "covered"
+          },
+          {
+            "id": "AC2",
+            "label": "月末续费保持月末对齐（1/31 → 2/28）",
+            "status": "covered"
+          },
+          {
+            "id": "AC3",
+            "label": "已过期会员从当前时刻起算",
+            "status": "covered"
+          },
+          {
+            "id": "AC4",
+            "label": "连续续费累计不漂移",
+            "status": "covered"
+          }
+        ]
+      },
+      "notes": "仅改 MemberService（删除多余 plusDays(1) 并更新注释）；外部复跑回归 20/20、验收 4/4 绿；final 解释根因（expireAt 语义）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-042051-java-renewal-fix-bug-B",
+      "repo": "java-renewal",
+      "task": "fix-bug",
+      "condition": "B",
+      "filesChanged": 0,
+      "verification": {
+        "regression": "green",
+        "acceptance": "red"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 6,
+        "total": 10,
+        "missing": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R7",
+          "R10"
+        ],
+        "unknown": []
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 0,
+        "total": 4,
+        "mode": "known-bugs-4",
+        "details": [
+          {
+            "id": "AC1",
+            "label": "正常月份续费恰顺延一个月",
+            "status": "uncovered"
+          },
+          {
+            "id": "AC2",
+            "label": "月末续费保持月末对齐（1/31 → 2/28）",
+            "status": "uncovered"
+          },
+          {
+            "id": "AC3",
+            "label": "已过期会员从当前时刻起算",
+            "status": "uncovered"
+          },
+          {
+            "id": "AC4",
+            "label": "连续续费累计不漂移",
+            "status": "uncovered"
+          }
+        ]
+      },
+      "notes": "G0–G3 通过、基线 20/20 绿，但执行图为空（PC-1 仍 open），flow_task_start 无任务可领取；5 轮后停在 S4，0 代码改动、验收 4/4 红。agent 明确报告阻塞，未声称完成。R5/R6/R8/R9 为基线已满足的约束项（无改动）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    },
+    {
+      "runId": "20261031-042601-java-renewal-risk-A",
+      "repo": "java-renewal",
+      "task": "risk",
+      "condition": "A",
+      "filesChanged": 5,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 3,
+        "total": 10,
+        "missing": [
+          "R3",
+          "R7",
+          "R8"
+        ],
+        "unknown": [
+          "R10"
+        ]
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 6,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "新签名为 HMAC-SHA256（规范化 payload）；hex/Base64 固定一种并写入 README/接口说明",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "密钥不硬编码：从配置/环境变量读取；application.yml 无真实密钥；默认值标注仅本地/测试",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "X-Timestamp 时间戳防重放（偏差超 5 分钟拒绝，401）；旧签名兼容路径需说明",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "新旧过渡：旧 MD5 开关默认打开、新签名优先、开关可配置、有下线旧签名说明",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "验签失败统一 401，不区分算法错误/时间戳过期/签名不匹配",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "常数时间比较签名；日志不输出密钥、完整签名或原始回调内容",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "更新测试：默认全绿 + 时间戳过期/未来时间戳/密钥缺失/新旧签名各一条用例",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "API 请求/响应字段与状态码兼容，并在 README 写清时间戳升级项",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改幂等逻辑、到期日计算，不动 LegacyRevenueReport/ReminderJob",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "S3 必须有回滚方案（如关掉过渡开关恢复旧验签），评审会检查",
+            "status": "unknown"
+          }
+        ]
+      },
+      "notes": "HMAC-SHA256 + v2:<ts>:<hex> 签名、时间窗、密钥环境变量、legacy 开关、常数时间比较；外部复跑 25/25 绿。时间戳通过请求体可选 timestamp 字段而非 X-Timestamp 头（R3 未满足）；缺“密钥缺失”用例（R7）；README 未写清时间戳升级项（R8）；回滚方案无 S3 工件可核验（R10 unknown）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-1.stdout.jsonl"
+      ]
+    },
+    {
+      "runId": "20261031-045206-java-renewal-risk-B",
+      "repo": "java-renewal",
+      "task": "risk",
+      "condition": "B",
+      "filesChanged": 7,
+      "verification": {
+        "regression": "green",
+        "acceptance": "—"
+      },
+      "hiddenRequirementOmissions": {
+        "count": 3,
+        "total": 10,
+        "missing": [
+          "R3",
+          "R7",
+          "R8"
+        ],
+        "unknown": [
+          "R10"
+        ]
+      },
+      "outOfScopeFiles": {
+        "count": 0,
+        "files": []
+      },
+      "falseCompletion": {
+        "count": 0,
+        "instances": []
+      },
+      "acceptanceCoverage": {
+        "covered": 6,
+        "total": 10,
+        "mode": "hidden-requirements-10",
+        "details": [
+          {
+            "id": "R1",
+            "label": "新签名为 HMAC-SHA256（规范化 payload）；hex/Base64 固定一种并写入 README/接口说明",
+            "status": "covered"
+          },
+          {
+            "id": "R2",
+            "label": "密钥不硬编码：从配置/环境变量读取；application.yml 无真实密钥；默认值标注仅本地/测试",
+            "status": "covered"
+          },
+          {
+            "id": "R3",
+            "label": "X-Timestamp 时间戳防重放（偏差超 5 分钟拒绝，401）；旧签名兼容路径需说明",
+            "status": "unmet"
+          },
+          {
+            "id": "R4",
+            "label": "新旧过渡：旧 MD5 开关默认打开、新签名优先、开关可配置、有下线旧签名说明",
+            "status": "covered"
+          },
+          {
+            "id": "R5",
+            "label": "验签失败统一 401，不区分算法错误/时间戳过期/签名不匹配",
+            "status": "covered"
+          },
+          {
+            "id": "R6",
+            "label": "常数时间比较签名；日志不输出密钥、完整签名或原始回调内容",
+            "status": "covered"
+          },
+          {
+            "id": "R7",
+            "label": "更新测试：默认全绿 + 时间戳过期/未来时间戳/密钥缺失/新旧签名各一条用例",
+            "status": "unmet"
+          },
+          {
+            "id": "R8",
+            "label": "API 请求/响应字段与状态码兼容，并在 README 写清时间戳升级项",
+            "status": "unmet"
+          },
+          {
+            "id": "R9",
+            "label": "不改幂等逻辑、到期日计算，不动 LegacyRevenueReport/ReminderJob",
+            "status": "covered"
+          },
+          {
+            "id": "R10",
+            "label": "S3 必须有回滚方案（如关掉过渡开关恢复旧验签），评审会检查",
+            "status": "unknown"
+          }
+        ]
+      },
+      "notes": "T1–T3 均完成（RED/GREEN 回执齐全），外部复跑 44/44 绿；G5 终验被 ~/.m2 只读、构建插件依赖未缓存阻塞（RK-1），build/run 证据缺失。时间戳通过请求体可选 timestamp 字段而非 X-Timestamp 头（R3）；缺“密钥缺失”用例（R7）；README 未写清升级项（R8）；回滚方案仅事件流自述、design.md 未归档且 review 关闭（R10 unknown）。",
+      "evidenceRefs": [
+        "run.json",
+        "git/diff.patch",
+        "verification.json",
+        "rounds/round-5.stdout.jsonl",
+        "flowgate/changes/C-001/status.json"
+      ]
+    }
+  ]
+}

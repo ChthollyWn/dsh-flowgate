@@ -1,8 +1,8 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
-采集时间：2026-10-30 20:06（Asia/Shanghai）。
+采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）。
 环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
-复现方式见 [../impl/host-integration.md](../impl/host-integration.md)。
+复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
 
 | 截图 | 内容 |
 |---|---|
@@ -17,10 +17,30 @@
 | [12-delivery-report.png](12-delivery-report.png) | S0→S6 完整闭环后的交付报告（`ts-todo-api` C-002，归档 HTML，M-1~M-18 指标；不是测试 fixture） |
 | [09-preset-menu.png](09-preset-menu.png) | Agent 预设菜单中出现 **FlowGate 工程模式** 与 **FlowGate 执行者**（`cordis.patch.yml` 的 preset 行在真实宿主生效；reviewer 只供审查子 agent） |
 
+### 2026-10-31 追加（真实 Web 宿主交互走查，详见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)）
+
+| 截图 | 内容 |
+|---|---|
+| [13-preset-menu-in-session.png](13-preset-menu-in-session.png) | 真实会话 composer 的 Agent 预设菜单：7 项中含 **FlowGate 工程模式 / FlowGate 执行者 / FlowGate 只读取证** |
+| [14-preset-switched-session.png](14-preset-switched-session.png) | **会话内真实切换**到「FlowGate 工程模式」（`agentPresets/select` → `{"ok":true,"value":"flowgate"}`），预设标签变化、0 page error、状态条未启用态 |
+| [15-flow-init-statusbar.png](15-flow-init-statusbar.png) | 真实 UI 输入 `/flow init` 执行成功（命令 chip + `commands/execute`），状态条 `◆ FlowGate 空闲 │ 无进行中变更 · /flow new 立项` |
+| [16-flow-new-statusbar-s1.png](16-flow-new-statusbar-s1.png) | 真实 UI 执行 `/flow new 给待办列表增加分享链接 --complexity low` → C-001 进入 S1，状态条 active、75 字符 |
+| [17-panel-8-views.png](17-panel-8-views.png) | 点状态条打开右侧栏 FlowGate 面板：8 个视图 tab（台账/流程/门禁/任务/追溯/风险/拦截/指标）+ 七阶段流程 + 当前阶段卡 |
+| [18-panel-fallback-report.png](18-panel-fallback-report.png) | 台账「报告」按钮 Remote 不可用 → H10 兜底：命令 `/flow report` 填入输入框 + warn 提示 |
+| [19-panel-fallback-continue.png](19-panel-fallback-continue.png) | `/flow pause` 后台账「继续」按钮 → 命令 `/flow resume C-001` 填入输入框 + warn 提示 |
+| [20-confirm-card.png](20-confirm-card.png) | 低复杂度方案确认卡（C-001 S3、低复杂度、G3 awaiting）：目标/范围/验证方式 + 确认并推进/退回补充/提高复杂度（状态由离线构造，见走查文档 §2.4） |
+| [21-confirm-approve-fallback.png](21-confirm-approve-fallback.png) | 确认卡「确认并推进」→ 输入框 `/flow approve G3` |
+| [22-confirm-reject-fallback.png](22-confirm-reject-fallback.png) | 确认卡「退回补充」填理由提交 → 输入框 `/flow reject …` |
+| [23-confirm-raise-fallback.png](23-confirm-raise-fallback.png) | 确认卡「提高复杂度」→ 输入框 `/flow complexity high …` |
+| [24-intercepts-view-harness.png](24-intercepts-view-harness.png) | **组件级**：真实 `InterceptsView` + 真实 `actions.ts` 在 Chrome 渲染 2 条拦截记录（真实宿主零模型下无拦截记录，见走查文档 §2.5） |
+| [25-intercepts-feedback-harness.png](25-intercepts-feedback-harness.png) | 组件级：点「误判反馈」展开理由表单 |
+| [26-intercepts-allow-once-harness.png](26-intercepts-allow-once-harness.png) | 组件级：填理由后「放行一次」→ `performAction` fallback=true，`/flow allow-once R-STAGE-SRC <理由>` 写入输入框 |
+
 ## 说明
 
 - 截图中会话里的 `DeepSeek Messages transport failed` 是**隔离 demo home 的环境限制**（复制的凭据是引用式，只有桌面宿主能解析），不是插件问题；`/flow` 命令、状态条、面板、工具注册都在这个宿主里真实工作。
 - 采集时 `appendPluginRecord` 在隔离 home 里不可用（peer 解析差异），面板数据走 host 内存快照兜底；正常安装时走会话插件记录，行为一致。
 - 自动接续（打开页面即接续 C-001）与覆盖自检修复后的 doctor 截图在本轮采集失败（UI 导航脚本超时），文本证据见 implementation-status §3.3；待补。
 - 低复杂度方案确认卡、拦截视图的误判反馈、批准/退回按钮点击流程等截图待补（需要模型可用的桌面会话；按钮 Remote 不可用时走"填命令"兜底）。
+- 2026-10-31 追加轮的 13–26 号截图来自另一个隔离 home（`DSH_HOME=/tmp/fg-walk/dsh-home`、`HOME=/tmp/fg-walk/home`）与 11:06 构建快照（`lib/host.js` sha256 `9341766c…`），**全程未发模型请求**：确认卡的状态是离线构造的（见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md) §2.4），拦截反馈只有组件级证据（§2.5）。该轮还发现真实问题：宿主重启后投影 revision 回退导致面板/状态条显示旧快照（§5.1）。
 - 本轮走查发现并修复的真实问题见 [../impl/implementation-status.md](../impl/implementation-status.md) §3.1。

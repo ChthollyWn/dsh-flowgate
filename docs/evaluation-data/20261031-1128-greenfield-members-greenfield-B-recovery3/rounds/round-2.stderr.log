@@ -1,0 +1,5 @@
+dsh: warning: 3 entries did not activate
+preset-flowgate (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-flowgate-executor (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-flowgate-reviewer (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+[llm-deepseek-api-key] model listing from https://api.deepseek.com/models loaded 2 model(s), skipped 0 row(s)

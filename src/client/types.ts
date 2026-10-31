@@ -168,6 +168,8 @@ export interface FlowgateProjection {
   learning?: LearningMode
   revision: number
   updatedAt: string
+  /** Host-process epoch (optional; absent on records written by older plugin versions). */
+  epoch?: string
 }
 
 // ---------------------------------------------------------------------------

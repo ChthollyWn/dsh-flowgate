@@ -1,0 +1,7 @@
+ src/main/java/com/acme/member/coupon/Coupon.java   |  74 ++++
+ .../com/acme/member/coupon/CouponRepository.java   |  50 +++
+ .../com/acme/member/renewal/RenewalController.java |  53 ++-
+ .../java/com/acme/member/renewal/RenewalOrder.java |  43 ++
+ .../com/acme/member/renewal/RenewalService.java    | 136 +++++-
+ .../com/acme/member/renewal/CouponRenewalTest.java | 454 +++++++++++++++++++++
+ 6 files changed, 802 insertions(+), 8 deletions(-)

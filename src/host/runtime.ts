@@ -110,6 +110,11 @@ export class HostRuntime {
   private mainAgentValue: DshAgent | null = null
   private mainSessionValue: DshSession | null = null
   private revisionValue = 0
+  /**
+   * 本进程 epoch（写入每条投影记录）。宿主重启后 revision 从 0 重新计数，
+   * 投影 apply 靠 epoch 识别"新进程记录"，避免被旧会话日志里更大的 revision 挡住。
+   */
+  private readonly projectionEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
   private projectionValue: FlowgateProjection = initialProjection(isoNow(systemClock))
   private coverageValue: CoverageReport | null = null
   private lastEmitHash = ''
@@ -630,6 +635,7 @@ export class HostRuntime {
         learning,
         revision: this.revisionValue,
         updatedAt: now,
+        epoch: this.projectionEpoch,
       }
       this.projectionValue = projection
       for (const listener of this.stateListeners) {

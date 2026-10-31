@@ -3,7 +3,7 @@
 本目录保存 FlowGate 对照评测的**原始数据**（M6 / T6.1），由 `scripts/run-evaluation.mjs` 写入。
 结果汇总表在 [`../evaluation.md`](../evaluation.md) 第 6 节，由人工在真跑后填写；脚本只负责原始数据。
 
-> 当前状态：**尚未执行真模型评测**，目录里还没有 run 数据。首次运行方式见 `docs/evaluation.md` 第 5 节。
+> 当前状态（2026-10-31）：**已完成 18/18 组 9 任务 × A/B 对照评测**，原始数据按 run 目录保存；4 项主观指标的人工评分结果在 [`scoring/`](scoring/README.md)（`scores.json` 机器可读）；另有本轮补跑的辅助实验（greenfield 从 0 开发 6 次完整迭代（另 1 次未完成未计入）、`java-renewal` 的 `dispatch=auto` 顺序/并行派发各 1 次），它们**不参与** 9×2 矩阵，结论见 [`../evaluation.md`](../evaluation.md) §6.6/§6.7。
 
 ## 目录约定
 

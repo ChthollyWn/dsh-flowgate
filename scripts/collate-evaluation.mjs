@@ -45,6 +45,9 @@ function readRun(dir) {
       repo: run.repo,
       task: run.task,
       condition: run.condition,
+      // 9×2 对照矩阵的 B 组口径是 dispatch=inline（见 docs/evaluation.md §5）；
+      // 后续补跑的 dispatch=auto 辅助实验不覆盖矩阵行（它们记录在 evaluation.md §6.7）。
+      dispatch: run.flowgate?.configOverrides?.dispatch ?? 'inline',
       rounds: Array.isArray(run.rounds) ? run.rounds.length : 0,
       durationS: Math.round((run.durationMs ?? 0) / 1000),
       approvals: approvals.length,
@@ -63,6 +66,8 @@ if (existsSync(DATA_DIR)) {
     if (!entry.isDirectory()) continue
     const run = readRun(join(DATA_DIR, entry.name))
     if (!run) continue
+    // 辅助实验（dispatch=auto 等）只出现在 §6.7，不参与 9×2 矩阵。
+    if (run.dispatch !== 'inline') continue
     runs.set(`${run.repo}/${run.task}/${run.condition}`, run)
   }
 }

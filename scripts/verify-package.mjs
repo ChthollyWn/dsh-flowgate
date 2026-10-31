@@ -10,17 +10,33 @@
  *  - no @deepseek-ai packages may be nested in the tarball (NFR-3)
  */
 import { execFileSync } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const problems = []
 
+// `npm pack --dry-run` 也要写缓存与日志；在沙箱化环境（如 DSH workspace-write）里
+// `~/.npm` 可能不可写且是本机 root 遗留目录。把 npm 的 cache/logs 固定到系统临时目录，
+// 既不影响包清单（--dry-run 不产生 tarball），也让脚本在没有可写 home 的 CI/沙箱可复现。
+const npmCache = join(tmpdir(), 'flowgate-npm-cache')
+const npmLogs = join(tmpdir(), 'flowgate-npm-logs')
+mkdirSync(npmCache, { recursive: true })
+mkdirSync(npmLogs, { recursive: true })
+const npmEnv = {
+  ...process.env,
+  npm_config_cache: npmCache,
+  npm_config_logs_dir: npmLogs,
+  npm_config_update_notifier: 'false',
+}
+
 let manifest
 try {
   manifest = JSON.parse(
-    execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8' }),
+    execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8', env: npmEnv }),
   )[0]
 } catch (error) {
   console.error('无法生成包清单：', error.message)

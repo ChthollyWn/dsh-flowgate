@@ -2,7 +2,7 @@
 
 FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> **发布状态（2026-10-31）**：npm 上尚无此包（registry 404）、GitHub 尚无 Release；仓库 tag `v0.1.0` 仍指向 `f53d5f1`，比当前 HEAD `e1aef8d` 落后 4 个提交。
+> **发布状态（2026-10-31）**：npm 上尚无此包（registry 404）、GitHub 尚无 Release；仓库 tag `v0.1.0` 指向 `f53d5f1`，落后于本轮开发后的本地 HEAD（未发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；正式发布时请按实际发布日期回填本文的时间与链接。
 
 ## [Unreleased]
@@ -24,20 +24,43 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - 评测结果汇总脚本 `scripts/collate-evaluation.mjs`（`pnpm eval:collate`）：从 `docs/evaluation-data/` 生成 9×2 结果表并写回 evaluation.md。
 - 评测基础设施：`scripts/run-evaluation.mjs`（A/B 条件编排、隔离 `DSH_HOME`、人工门自动批准、产物收集、dry-run 零副作用）、`examples/greenfield-members/` 从 0 开发空仓库、`docs/evaluation-data/` 目录约定。
 
+#### 2026-10-31 第二轮（剩余开发）
+
+- **T6.1 评测收尾**：18 组 A/B run 的 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）完成人工评分 18/18；机器可读结果 `docs/evaluation-data/scoring/scores.json`、口径与证据指针 `docs/evaluation-data/scoring/README.md`、汇总与诚实结论 `docs/evaluation.md` §6.5。结论：B 组隐藏需求遗漏 41 vs A 22、验收覆盖 33/72 vs 51/72，但 9 个 B run 只有 1 个完整走到 G6（其余被环境/审批阻塞，3 个零改动）；B 的真实收益是 0 虚假完成（A 2 次）与可审计过程，数据集不足以证明 B 提升需求覆盖。
+- **评测工具链增强**：`scripts/run-evaluation.mjs` 新增 `--preset-registry`（headless 缺 `agentPresets` 时用 `--patch` 补 `@deepseek-ai/dsh-agent-preset-registry`，让 cordis.patch.yml 的 preset 行激活）、`--auto-pending <kinds>`（脚本扮演负责人批准 blocker/plan/rule 等，默认不含 scope/risk）、owner-helper 的 `pending`/`resume` 动作、租约残留时自动 `resume --takeover`、greenfield 在"无活动变更"时继续轮次；`run.json` 记录 preset 注册表与 auto-pending 策略。
+- **覆盖率缺口补齐**：`src/host/**` 纳入 vitest coverage 口径（排除测试替身）并加 thresholds（statements/functions/lines 80、branches 70）；新增 9 个测试文件 / 158 用例；core 覆盖率 语句 83.03→90.34%、分支 68.36→80.16%、函数 86.47→90.77%（coverage-final.json 计算）；host 语句 74.14% / 分支 61.01%；core+host 合计 86.40 / 75.97 / 85.96 / 89.53。
+- **派发/并行 host 收尾（T4.6 / T4.9）**：新增 `src/host/dispatch/pending.ts`（子 agent 结算后把 open 的 scope/plan/risk/rule/conflict/blocker 待处理项注入主会话、同项只通知一次；`flow_dispatch_next` 的 `data.pending` 暴露）与 `src/host/dispatch/redispatch.ts`（重新派发中断任务前确认旧子 agent 已停止/资源已释放，确认不了保持阻塞并生成 risk 待处理项，负责人批准为一次性授权）；派发前复核 open scope/plan/risk（fail + 可执行命令提示）；`runIntegrationCheckpoint` 返回 `{batchId, ok, detail}` 并写进完成通知；新增 27 例 host 测试与 8 例集成检查点测试分支覆盖。
+- **T-FAILURE-LIMIT 熔断可恢复**：连续失败触发器只拦"推进/修改"动作（写文件、会改工作区的命令、进度类 `flow_*`），只读 `read`/只读 shell/`flow_status`/`flow_diff`/`flow_report_risk` 放行；同一任务熔断只生成 1 个 BL 待处理项；新增负责人命令 `/flow unblock [BL-n|任务 id] [理由]`（失败计数清零、任务恢复 running、同任务残留 BL 一并关闭，账本新增 `task.unblocked` 事件）；`/flow doctor` 渲染锁定原因。18 例回归（含真实 run `BL-1..BL-8` 卡死快照复刻）。
+- **Python 标准库 unittest 输出解析器**（greenfield 演练阻塞根因）：`src/core/evidence/parse.ts` 新增 `parseUnittestConsole`（`Ran N tests`、`OK` / `FAILED (failures/errors/skipped)`、`NO TESTS RAN`、FAIL/ERROR 分段名称与 文件:行、subTest），注册到控制台回退并修正 `detectEvidenceKind`；25 例测试包含真实 Python 3.13 输出与仓库已提交证据回放。
+- **PROJECT（路线图阶段）跨会话接续**（greenfield 演练发现的 from-0 缺陷）：`autoAttach`/`attachSession` 不再排除 PROJECT，新会话可继续路线图阶段并批准 GR；修复 GR 批准不落盘（`approveGate('GR')` 归档 PROJECT 时绕过 `saveChange` 的 archived 跳过逻辑，改为直接写 status.json + 台账并释放租约），新会话不再反复要求批准 GR。新增 4 例回归。
+- **会话投影进程 epoch**（Web 宿主走查发现的 UI 陈旧 bug）：投影记录携带宿主进程 `epoch`，`apply` 在 epoch 不同时接受新进程记录；修复"宿主重启后新进程 revision 从 0 起被旧会话日志更大 revision 挡住、面板停留在重启前快照"（`src/host/projection/index.ts`、`src/host/runtime.ts`、wire 契约新增可选 `epoch`）。新增 6 例回归。
+- **Web 宿主交互真机走查**：新增 `docs/impl/web-walkthrough.md` 与 14 张截图（`13-`～`26-`）：会话内切换 FlowGate 工程模式 preset 成功（`agentPresets/select` 返回 `flowgate`、0 pageerror）、`/flow init`/`/flow new`、8 视图面板、面板按钮 Remote 兜底填命令、低复杂度方案确认卡三按钮、拦截视图误判反馈（组件级）；同时记录 2 个环境坑。
+- **T-DEPENDENCY 按内容判定（误伤修复）**：依赖触发器从"只看路径"改为"路径命中 + 清单内容判定"——新建 `package.json`（无 `dependencies`/`devDependencies` 或全空）、只有 build/plugins 的 `pom.xml`、空/纯注释的 `requirements.txt`、空 `[dependencies]` 的 `Cargo.toml` 等纯脚手架不再转人工；lockfile、delete/rename、未知自定义清单、解析失败仍保守触发。真实 greenfield 演练中"新建无依赖 package.json"被反复 RK 卡死的问题因此消除；35 例回归。
+- **路线图批准后的第一个变更必须从路线图立项**（greenfield 演练第四轮发现的 from-0 死锁）：GR 批准后若还没有任何变更，`flow_new_change` 不带 `fromRoadmap` 会被拒（hint 给出 `flow_new_change({ fromRoadmap: "C0" })`），注入文本 / nextStep 同步给出精确工具调用；GR 批准后清空 `current` 并释放租约，避免新会话继续停在 PROJECT。否则 C0 会失去 skeleton 标记，G2 的 `project.md 命令可执行` 与 `R-PROTECTED` 保护形成死锁。4 例回归。
+
 ### Fixed
 
-- **审查子 agent 启动失败**（真机发现）：`cordis.patch.yml` 的 reviewer preset 中 `reviewer-tool-fs-search` 缺少 rc.5 必填配置 `sampleOverCapGlobResults`，导致审查子 agent 启动报 `invalid config`、审查重试后仍缺失；已补 `sampleOverCapGlobResults: false`。
-- **`flow_dispatch_next` 结构化返回的 worktree 为空**：并行批次回填了派发前的 envelope 快照，实际 worktree 由 `startExecutor` 创建；现在回填 `started.worktree` 并加单测断言。
-- **基准仓库 R2 验收测试期望值错误**（pilot 发现）：`examples/ts-todo-api/test/known-bugs.mjs` 断言最后一页是 `todo-010`，但与 `createdAt` 倒序契约矛盾（正确修复后是 `todo-001`），会让正确修复被判红；已修正断言并保留修复前 4/4 失败、修复后 4/4 通过的两个态验证。
-- **git 自动提交恒失败**（真机发现）：`NodeGit.add` 生成 `git add -- -A`，`-A` 被 git 当作 pathspec，自动提交永远失败（任务门只能降级提示）；已修 `buildAddArgs`（选项在 `--` 之前）并新增 `test/host/node-git.test.ts` 回归测试。
-- **`R-TDD-ORDER` 在 Java 测试路径上死锁**（真机发现）：任务卡 `tests` 写成裸类名（如 `RenewalPageQueryTest`）时，测试文件路径不匹配 `tests` glob，写 `src/test/java/**/XxxTest.java` 也被拒；RED 又必须由测试文件产生，形成死锁。现在 `evaluate.ts` 增加常见测试路径识别（`/test/`、`*.test.ts`、`*Test.java`、`test_*.py` 等）作为后备判定，并补回归测试。
-- **`structured_output` 被误判为未知写工具**（真机发现）：headless/结构化输出场景下该工具被覆盖自检归为未知可写工具并触发 `R-MCP` 待处理项，阻塞任务门；现已列入安全宿主工具（只读语义）并补单测；`tools/admin.js` 增加负责人 `pending` 命令（dev tooling）。
-- **归档后变更编号被复用**（真机发现）：归档把 `.flowgate/changes/<id>/` 移走后，编号分配只扫描当前列表，新建变更会再次分配 C-001，导致账本/归档目录同号；现在编号分配同时读取 `.flowgate/archive/<日期>-<id>/` 的历史编号，并新增 engine 集成回归测试。
-- 文档与注释同步：`appendPluginRecord` 不可用时的降级描述（不写 `session.append`）、归档规格合并注释、M5 现实状态、已知缺口与下一步；`ci.yml` 增加 `verify:client`。
+- **状态文件损坏 fail-open**（T6.2 复验发现，违反 03 §14）：`status.json` 损坏时原先被 `listChanges` 静默跳过，导致 `locked=false`、doctor 显示"运行正常"、源码写操作 allow；现在 `listChangesDetailed` 汇总损坏清单，`engine.load` 进入锁定模式并在 `/flow doctor`/注入文本给出路径与 `/flow repair` 入口，`repair` 在仍有无法重建的文件时保持锁定（防二次 fail-open）。新增 14 例回归（core 11 + host 3）。
+- **T-FAILURE-LIMIT 熔断卡死**（真实 greenfield run 暴露）：熔断后连 `read`/`flow_status`/`flow_report_risk` 都被拒、BL 待处理项没有负责人解锁路径且每个被拦动作新增一个（真实 run 膨胀到 BL-1..BL-8）、`decidePending` 对 blocker 的批准不生效；已按 Added 中"T-FAILURE-LIMIT 熔断可恢复"修复。
+- **GR 批准在重载后丢失**：`approveGate('GR')` 把 PROJECT 标记 archived 后走 `saveChange`，而 `saveChange` 对 archived 直接跳过 status.json 写入（假设目录已被归档移走），导致磁盘仍是 active/awaiting、新会话再次要求批准 GR；现在直接写 status.json + 台账并释放租约（见 Added）。
+- **宿主重启后投影 revision 回退**（见 Added 中的进程 epoch）；**greenfield 演练暴露的 unittest 解析缺口与 PROJECT 接续缺口**（见 Added）。
 
 ### Tests
 
-- 测试规模（本次提交实测）：**69 个测试文件 / 995 个用例**（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例 + 11 个 util 测试用例 + 3 个命令执行器用例）。
+- 测试规模（本轮最终提交实测）：**90 个测试文件 / 1289 个用例**全绿（约 3.5s），较 43d18e5 的 69 files / 995 tests 新增 21 files / 294 tests；新增覆盖：派发并行 27、熔断恢复 18、状态损坏 14、unittest 解析 25、覆盖率补缺 158、投影 epoch 6、PROJECT 接续 4、依赖内容判定 35、路线图首个变更 4 等。
+- 故障注入 **7/7 通过**：新增 3 例（`status.json` 截断 → 宿主启动 + 锁定 + doctor 路径 + repair；`ledger.jsonl` 末行截断 → 锁定 + 行号 + repair 拒绝静默重写；`config.yaml` 语义非法 → ConfigError + 启动不受影响 + fail-closed）。
+- 覆盖率（`pnpm coverage` 通过 thresholds）：core 语句 90.34% / 分支 80.16% / 函数 90.77%；host（新纳入口径）语句 74.14% / 分支 61.01%；core+host 合计 语句 86.40 / 分支 75.97 / 函数 85.96 / 行 89.53。
+- 真机验证：`java-renewal` 新功能 B 组 `dispatch=auto`（`--preset-registry`）真实跑通并行批次——B1 并行 T1/T2 分别创建 `.flowgate/worktrees/C-001/T1|T2`、独立子 agent、产生验证回执，进程退出前批次停在 checkpoint（headless 一次性运行限制）；从 0 开发演练（greenfield Python 标准库）确认真实模型在 S4 的证据/熔断/恢复路径。
+- 兼容/加固复验：`verify:compat` 7/7、启动增量 +12.1ms/+15.5ms（<200ms 验收线）、卸载干净度通过（保留 rc.5 `plugin remove` 不 prune node_modules 的已知残留警告）。
+
+### Documentation
+
+- `docs/evaluation.md`：新增 §6.5 主观指标人工评分（18/18）并修订 §6.4 结论/下一步；`docs/evaluation-data/scoring/**` 新增评分口径与机器可读结果。
+- `docs/compat/0.2.1-rc.5.md`、`docs/compat/startup.md`：保留历史并追加本轮复验（7/7、+12.1/+15.5ms、卸载、未能复验项归因：`--dump-config-schema` 属 rc.5 preset 嵌套限制）。
+- `docs/impl/web-walkthrough.md`（新增）与 `docs/screenshots/`（13–26 号 14 张 + README）：Web 宿主 preset 切换、面板交互、确认卡与兜底动作的真机证据。
+- `README.md` / `README.en.md`：命令表新增 `/flow unblock`，风险触发器补充"熔断只拦推进动作、只读放行"；`docs/03-技术方案.md`：命令表、账本事件（`task.unblocked`）、8.2 触发器说明同步。
+- `docs/impl/host-client-contract.md`：投影 wire 契约新增可选 `epoch`；`docs/impl/implementation-status.md` §3.8 记录本轮。
+- 历史条目（上一轮）：测试规模 69 个测试文件 / 995 个用例（较 `e1aef8d` 的 63 files / 944 tests 新增 27 个 host 用例 + 1 个 TDD 测试路径回归 + 2 个 git 适配器回归 + 4 个故障注入用例 + 1 个并行派发范围回归 + 2 个集成检查点用例 + 11 个 util 测试用例 + 3 个命令执行器用例）。
 
 ## [0.1.0] - 2026-10-30
 

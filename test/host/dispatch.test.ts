@@ -53,6 +53,8 @@ afterEach(async () => {
 
 async function start(options: Parameters<typeof setupPlugin>[0] = {}): Promise<PluginHarness> {
   harness = await setupPlugin(options)
+  // 引擎初始化是异步的（ledger.key + engine.load）：显式等待，避免并行跑测试时的计时抖动。
+  await harness.runtime.waitForEngine()
   return harness
 }
 

@@ -105,6 +105,9 @@ export async function setupPlugin(options: SetupOptions = {}): Promise<PluginHar
   if (options.bindAgent !== false) {
     ctx.emitEvent('agent/created', { agent, source: 'startup' })
     await flush()
+    // 引擎初始化是异步的（ledger.key + engine.load）：显式等就绪，避免并行跑测试时
+    // flush 次数不够导致 guard/pre-execute 拿不到 engine 的计时抖动。
+    await runtime.waitForEngine()
   }
   return {
     ctx,

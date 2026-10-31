@@ -118,6 +118,7 @@ Then initialize the project to be governed and start the first change:
 | `/flow risk approve\|reject <RK-n> [reason]` | Handle risk take-over items |
 | `/flow plan approve\|reject <PC-n> [reason]` | Handle plan-revision requests |
 | `/flow rule approve\|reject <RL-n> [reason]` | Handle rule-sedimentation proposals |
+| `/flow unblock [BL-n\|task id] [reason]` | Clear a consecutive-failure breaker (T-FAILURE-LIMIT): reset the failure count, resume the paused task, and close the task's remaining open `BL-*` blockers (no argument = the current change's single open blocker) |
 | `/flow complexity <level> [reason]` / `/flow risk-level <level> [reason]` | Adjust levels; lowering requires a human reason |
 | `/flow learn <detail\|brief\|off>` | Learning-mode verbosity |
 | `/flow metrics [--csv]` | Show metrics (M-1..M-18) |
@@ -166,7 +167,7 @@ Rules are data (built-in defaults + `.flowgate/config.yaml` overrides), not hard
 
 **Evaluation order:** protected paths → locked mode → risk triggers (human) → stage policy → task scope → new-file control → TDD ordering → overrides/exceptions → allow by default. Once a rule denies, later rules cannot flip the decision; a one-time override only cancels the exact rule it names.
 
-**Built-in risk triggers (tunable under `triggers`):** sensitive paths (auth / payment / migrations / infrastructure / CI / production config), dependency manifest changes, dangerous commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP`/`TRUNCATE`, `curl … | sh`, etc.), suspected secrets, budget overruns, scope inflation, consecutive failures. A hit rejects the current action and creates a pending item; the owner can approve a one-time pass.
+**Built-in risk triggers (tunable under `triggers`):** sensitive paths (auth / payment / migrations / infrastructure / CI / production config), dependency manifest changes, dangerous commands (`rm -rf`, `git push --force`, `git reset --hard`, `DROP`/`TRUNCATE`, `curl … | sh`, etc.), suspected secrets, budget overruns, scope inflation, consecutive failures. A hit rejects the current action and creates a pending item; the owner can approve a one-time pass. **The consecutive-failure breaker only blocks actions that would make progress or mutate state** (file writes, workspace-mutating commands, progress tools such as `flow_verify` / `flow_task_done`); `read`/`glob`/`grep`, read-only commands and `flow_status`/`flow_diff`/`flow_report_risk` stay allowed so the agent can gather evidence and find the root cause before the owner runs `/flow unblock <BL-n>`.
 
 For the full rule definitions, command tokenization, and false-positive regression cases see [docs/03-技术方案.md](docs/03-技术方案.md) §4–§5.
 
@@ -210,13 +211,13 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | Artifact parsers, 46 gate checks (GR/G0–G3/G5/G6), task cards, execution plan/graph | ✅ done (positive + negative per check) |
 | `.flowgate/`, change ledger, hash-chained + HMAC audit ledger, cross-session leases, locked mode and `/flow repair` | ✅ done (tamper located by line; strict rebuild round-trip) |
 | Verification receipts, input-hash freshness, risk engine, rework invalidation, verifiable citations | ✅ done |
-| Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 wired + 27 dedicated unit tests; a real headless host verified worktree creation, executor subagents, task gates and review (RV-1 pass, coverageOk); worktree merge/integration checkpoint needs an interactive session because the one-shot host exits early |
-| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ rendered in a real DSH web host (11 screenshots); remaining: panel button Remote fallback, low-complexity confirmation card |
+| Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 wired + 35 dedicated unit tests; a real headless host verified worktree creation, executor subagents, task gates and review, and **sequential dispatch settled all the way to S5** (3 batches done, G4 passed); parallel batches really start but the one-shot run exits before the integration-checkpoint merge, so an interactive/long-lived host is still needed |
+| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ walked through in a real DSH web host: status bar, 8 views, in-session preset switch, panel-button Remote fallback, low-complexity confirmation card (25 screenshots; `13-`–`26-` added this round); intercept-view misjudgement feedback verified at component level |
 | HTML delivery report, cross-session dashboard | ✅ done (single-file, offline, samples in test/fixtures) |
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
-| With / without plugin evaluation report | 🟡 **18/18 runs done** (9 tasks × A/B, real model + headless): B matched A on regression (7/9) but 2/3 vs 3/3 on acceptance, with much higher time and human-gate cost; includes B-worse counterexamples and sandbox caveats — see [docs/evaluation.md](docs/evaluation.md) §6.4 |
+| With / without plugin evaluation report | ✅ **18/18 runs done + manual scoring of all 4 subjective metrics 18/18** (9 tasks × A/B, real model + headless); this round also adds the from-scratch and dispatch (inline vs auto) comparisons ([§6.5–§6.7](docs/evaluation.md)). Honest conclusion: B did not win on requirement coverage (most B runs were blocked by environment/human gates); its real gains are zero false completions and auditable process — small sample, not generalizable |
 
-**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (69 files / 995 tests); a real DSH 0.2.1-rc.5 process composes and imports this plugin (`--dump-config` / `--dump-config-schema`, [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs (9 tasks × A/B); see [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
+**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (90 files / 1289 tests); `pnpm coverage` passes thresholds (core 90.34% statements / 80.16% branches, host included); a real DSH 0.2.1-rc.5 process composes and imports this plugin via `--dump-config` (`--dump-config-schema` also fails on rc.5 for the host's own preset rows, so it is not used as evidence — see [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs plus subjective scoring, with counterexamples/blockers and sandbox caveats in [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
 ## Screenshots
 
@@ -282,6 +283,10 @@ During development use the isolated profile (see Quick start); do not install in
 - [04-执行方案](docs/04-执行方案.md): milestones, task cards, risks and mitigations
 - [docs/method-sources.md](docs/method-sources.md): per-skill upstream provenance, what we rewrote, review cycle
 - [docs/reference/](docs/reference/): official package references for DSH 0.2.1-rc.5
+- [docs/impl/implementation-status.md](docs/impl/implementation-status.md): per-milestone delivery status and known gaps
+- [docs/evaluation.md](docs/evaluation.md): with/without-plugin evaluation (18/18 + subjective scoring) plus from-scratch and dispatch comparisons
+- [docs/impl/web-walkthrough.md](docs/impl/web-walkthrough.md): real web-host interaction walkthrough (preset switching, panel fallbacks, confirmation card)
+- [docs/screenshots/](docs/screenshots/): real web-host screenshots (25)
 - [docs/interview-notes.md](docs/interview-notes.md): interview / portfolio notes (capability → mechanism → metric → real story)
 
 ## License

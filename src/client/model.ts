@@ -337,6 +337,7 @@ export function normalizeProjection(raw: unknown): FlowgateProjection | null {
     learning,
     revision: numOr(raw.revision, 0),
     updatedAt: str(raw.updatedAt, snapshot.updatedAt),
+    ...(typeof raw.epoch === 'string' && raw.epoch !== '' ? { epoch: raw.epoch } : {}),
   }
 }
 

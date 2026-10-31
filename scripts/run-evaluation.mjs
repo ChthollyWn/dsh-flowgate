@@ -280,7 +280,13 @@ function usage() {
   --run-id <id>         自定义输出目录名（默认 <时间戳>-<仓库>-<任务>-<条件>）
   --dsh <path>          DSH CLI 路径（默认取 env DSH，再退回桌面端自带路径）
   --dispatch <mode>     B 组派发模式：inline（默认，适配精简 headless）| auto
+  --preset-registry     B 组用 --patch overlay 补 @deepseek-ai/dsh-agent-preset-registry，
+                        让 cordis.patch.yml 的 preset-flowgate* 行在 headless 组合里激活
+                        （dispatch=auto 派发执行者 / --review 审查子 agent 需要）
   --owner <mode>        B 组人工门策略：auto（默认，脚本扮演负责人批准并计数）| manual（遇门即停）
+  --auto-pending <k>    B 组自动处理的待处理项 kind 列表，逗号分隔或 none（默认 blocker,plan,rule）。
+                        处理方式与人工门一样由脚本扮演负责人 approve 并逐个记账；默认不含 scope/risk
+                        （这两类会改变范围/放行风险动作，保留给人工，避免掩盖评测信号）。
   --max-rounds <n>      B 组最多 headless 轮数（默认 8；greenfield 默认 12；A 组固定 1 轮）
   --timeout <seconds>   单轮 headless 超时（默认 1800）
   --review              B 组保留 review.enabled=true（需要子 agent provider；默认关闭）
@@ -317,11 +323,13 @@ function parseArgs(argv) {
     '--owner',
     '--max-rounds',
     '--timeout',
+    '--auto-pending',
   ])
   const boolFlags = new Set([
     '--dry-run',
     '--list',
     '--review',
+    '--preset-registry',
     '--no-verify',
     '--no-run',
     '--keep-hidden',
@@ -468,6 +476,29 @@ async function buildPlan(options) {
   if (!['inline', 'auto'].includes(dispatch)) issues.push('--dispatch 只支持 inline 或 auto')
   const owner = String(options.owner ?? 'auto').toLowerCase()
   if (!['auto', 'manual'].includes(owner)) issues.push('--owner 只支持 auto 或 manual')
+  const presetRegistry = Boolean(options.presetregistry)
+
+  const ALL_PENDING_KINDS = ['scope', 'risk', 'plan', 'rule', 'conflict', 'blocker']
+  const autoPendingRaw = String(options.autopending ?? 'blocker,plan,rule').trim().toLowerCase()
+  const autoPending =
+    autoPendingRaw === '' || autoPendingRaw === 'none'
+      ? []
+      : [...new Set(autoPendingRaw.split(',').map((kind) => kind.trim()).filter((kind) => kind !== ''))]
+  for (const kind of autoPending) {
+    if (!ALL_PENDING_KINDS.includes(kind)) {
+      issues.push(`--auto-pending 含未知 kind：${kind}（可选：${ALL_PENDING_KINDS.join('、')} 或 none）`)
+    }
+  }
+  if (autoPending.includes('risk') || autoPending.includes('scope')) {
+    warnings.push(
+      `--auto-pending 含 ${[autoPending.includes('risk') ? 'risk' : '', autoPending.includes('scope') ? 'scope' : '']
+        .filter(Boolean)
+        .join('/')}：脚本会自动批准风险放行/范围变更，会掩盖流程信号，只在明确要"放行跑通"时使用`,
+    )
+  }
+  if (owner === 'manual' && autoPending.length > 0) {
+    warnings.push('--owner manual 时不会自动处理待处理项（--auto-pending 仅对 auto 生效）')
+  }
 
   const maxRounds =
     options['maxrounds'] === undefined
@@ -499,8 +530,13 @@ async function buildPlan(options) {
     }
     if (dispatch === 'auto') {
       warnings.push(
-        'dispatch=auto：headless 组合通常没有 subagent provider，派发会失败或降级；精简 headless 建议 inline',
+        presetRegistry
+          ? 'dispatch=auto：已用 --preset-registry 把 agent 预设注册表补进 headless 组合（preset-flowgate* 行应激活；若宿主仍缺包会记录在 skippedBundles）'
+          : 'dispatch=auto：headless 组合通常没有 agentPresets 服务，预设行 pending 会让执行者启动失败；建议加 --preset-registry（仍失败则降级）',
       )
+    }
+    if (presetRegistry && dispatch !== 'auto' && !options.review) {
+      warnings.push('--preset-registry 只在 dispatch=auto 或 --review 需要子 agent 时才会产生影响')
     }
   }
 
@@ -525,6 +561,8 @@ async function buildPlan(options) {
     runId,
     outDir,
     profileName: condition === 'B' ? 'eval-flowgate' : 'eval-standard',
+    presetRegistry: condition === 'B' && presetRegistry,
+    autoPending: condition === 'B' && owner === 'auto' ? autoPending : [],
     keyPresent,
     issues,
     warnings,
@@ -587,12 +625,20 @@ function printPlan(plan) {
   if (plan.condition === 'B') {
     conditionSteps.push(
       `安装插件：dsh plugin --profile ${plan.profileName} add link:${ROOT}`,
+      ...(plan.presetRegistry
+        ? ['补 agent preset 注册表 overlay：写 <DSH_HOME>/preset-registry.yml，运行时 --patch 应用']
+        : []),
       `校验组合：--dump-config 必须包含 dsh-flowgate`,
       `初始化 FlowGate（等价 /flow init）：生成 .flowgate/，写入 dispatch=${plan.dispatch}、review.enabled=${
         plan.options.review ? 'true' : 'false'
       }`,
       `headless 循环（最多 ${plan.maxRounds} 轮）：dsh --profile ${plan.profileName} --json "<模糊需求>"（cwd=临时仓库）`,
       `人工门策略：${plan.owner === 'auto' ? '自动批准 GR/G1/G3/G6 并记录每次动作' : '遇人工门即停并提示（manual）'}`,
+      `待处理项策略：${
+        plan.autoPending.length > 0
+          ? `自动批准 ${plan.autoPending.join('/')}（其余保留，脚本遇到时停止）`
+          : '不自动处理（脚本遇到阻塞类待处理项时停止）'
+      }`,
     )
   } else {
     conditionSteps.push(
@@ -807,7 +853,28 @@ async function setupHeadlessProfile(plan, dshHome) {
     }
   }
 
-  const dump = await spawnCapture(plan.dshPath, ['--profile', plan.profileName, '--dump-config'], {
+  const dumpArgs = ['--profile', plan.profileName]
+  let patchPath = null
+  if (plan.condition === 'B' && plan.presetRegistry) {
+    // headless 组合缺 agentPresets 服务时 preset 行会 pending；补注册表行让
+    // cordis.patch.yml 里的 flowgate-executor / flowgate-reviewer preset 激活。
+    patchPath = join(dshHome, 'preset-registry.yml')
+    await writeFile(
+      patchPath,
+      "- insert:\n    - id: agent-preset-registry\n      name: '@deepseek-ai/dsh-agent-preset-registry'\n      config:\n        default: flowgate\n",
+    )
+    steps.push({
+      step: 'preset-registry-patch',
+      command: 'write <DSH_HOME>/preset-registry.yml（--patch overlay）',
+      exitCode: 0,
+      timedOut: false,
+      stderrTail: '',
+    })
+    dumpArgs.push('--patch', patchPath)
+  }
+  dumpArgs.push('--dump-config')
+
+  const dump = await spawnCapture(plan.dshPath, dumpArgs, {
     env,
     timeoutMs: 180_000,
   })
@@ -829,7 +896,7 @@ async function setupHeadlessProfile(plan, dshHome) {
   if (plan.condition === 'A' && pluginLoaded) {
     throw new Error('A 组 profile 里意外出现 dsh-flowgate，标准模式不干净')
   }
-  return { steps, pluginLoaded, dumpLines: dump.stdout.split('\n').length }
+  return { steps, pluginLoaded, dumpLines: dump.stdout.split('\n').length, presetRegistry: Boolean(patchPath) }
 }
 
 async function runHeadless(plan, { workspace, dshHome, prompt, round, runDir }) {
@@ -838,7 +905,8 @@ async function runHeadless(plan, { workspace, dshHome, prompt, round, runDir }) 
   const stdoutPath = join(roundsDir, `round-${round}.stdout.jsonl`)
   const stderrPath = join(roundsDir, `round-${round}.stderr.log`)
   const env = childEnv({ DSH_HOME: dshHome })
-  const result = await spawnStream(plan.dshPath, ['--profile', plan.profileName, '--json', prompt], {
+  const patchArgs = plan.presetRegistry ? ['--patch', join(dshHome, 'preset-registry.yml')] : []
+  const result = await spawnStream(plan.dshPath, ['--profile', plan.profileName, ...patchArgs, '--json', prompt], {
     cwd: workspace,
     env,
     timeoutMs: plan.timeoutMs,
@@ -918,7 +986,7 @@ import { systemClock } from '__CORE_FS__'
 
 const [action, root, ...args] = process.argv.slice(2)
 if (!action || !root) {
-  console.error('usage: owner-helper <init|status|approve|reject|doctor> <root> [args...]')
+      console.error('usage: owner-helper <init|status|approve|reject|doctor|pending|resume> <root> [args...]')
   process.exit(2)
 }
 const PLUGIN_VERSION = '__VERSION__'
@@ -1009,8 +1077,38 @@ async function main() {
           activeTaskId: snapshot.activeTaskId ?? null,
           off: snapshot.off ?? false,
           locked: snapshot.locked ?? false,
+          pending: (snapshot.pending ?? []).map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            status: item.status,
+            data: item.data ?? null,
+          })),
+          activeChanges: engine
+            .allChanges()
+            .filter((entry) => entry.lifecycle === 'active')
+            .map((entry) => ({ id: entry.id, stage: entry.stage, title: entry.title })),
         },
       })
+      return
+    }
+    if (action === 'resume') {
+      const changeId = args[0]
+      if (!changeId) throw new Error('resume 需要变更编号，例如 resume C-001')
+      await engine.resumeChange(changeId, { takeover: true })
+      const change = engine.currentChange()
+      print({ ok: true, changeId: change?.id ?? changeId, stage: change?.stage ?? null, message: '已接续 ' + changeId + '（takeover）' })
+      return
+    }
+    if (action === 'pending') {
+      const id = args[0]
+      const decision = args[1]
+      if (!id || (decision !== 'approve' && decision !== 'reject')) {
+        throw new Error('pending 需要待处理项 id 与 approve|reject，例如 pending BL-1 approve')
+      }
+      const reason = args.slice(2).join(' ') || 'evaluation harness auto-approve'
+      const item = await engine.decidePending(id, decision === 'approve' ? 'approved' : 'rejected', reason)
+      print({ ok: true, pending: { id: item.id, kind: item.kind, status: item.status, title: item.title }, message: '待处理项 ' + item.id + ' 已' + (decision === 'approve' ? '批准' : '退回') + '（' + item.kind + '）' })
       return
     }
     if (action === 'approve') {
@@ -1440,6 +1538,7 @@ async function writeRunRecord({
       cli: plan.dshPath,
       profile: plan.profileName,
       isolatedDshHome: true,
+      presetRegistry: Boolean(plan.presetRegistry),
       keySource: plan.keyPresent ? 'DEEPSEEK_API_KEY 环境变量（未落盘）' : '未提供',
     },
     environment: {
@@ -1464,6 +1563,7 @@ async function writeRunRecord({
           ? {
               dispatch: plan.dispatch,
               review: { enabled: Boolean(plan.options.review) },
+              autoPending: plan.autoPending,
               ...(plan.options.norun ? { commands: { run: 'none' } } : {}),
             }
           : null,
@@ -1683,6 +1783,8 @@ async function runEvaluation(plan) {
     const delivered = new Set()
     let archiveCount = 0
     let stalledRounds = 0
+    // 脚本自动批准待处理项的次数：每次批准都让 agent 能继续推进，不能算"没有进展"。
+    let autoResolvedCount = 0
     let previousSignature = ''
     const refreshDelivered = async () => {
       const archiveDirs = await listDir(join(workspace, '.flowgate', 'archive'))
@@ -1717,21 +1819,98 @@ async function runEvaluation(plan) {
         console.log(`  读取 FlowGate 状态失败：${status.payload?.error ?? status.stderrTail}`)
         break
       }
-      const snapshot = status.payload.status
+      let snapshot = status.payload.status
+      const openPending = Array.isArray(snapshot.pending) ? snapshot.pending : []
       console.log(
         `  状态：${snapshot.changeId ?? '无变更'} / ${snapshot.stage ?? '—'} / ${
           snapshot.lifecycle ?? '—'
-        }${snapshot.awaitingGate ? ` / 等待 ${snapshot.awaitingGate}` : ''}`,
+        }${snapshot.awaitingGate ? ` / 等待 ${snapshot.awaitingGate}` : ''}${
+          openPending.length > 0 ? ` / 待处理 ${openPending.map((item) => `${item.id}(${item.kind})`).join(',')}` : ''
+        }`,
       )
       await refreshDelivered()
       if (goalReached()) {
         console.log(`  ${goalText()}，结束轮次`)
         break
       }
-      // 连续两轮状态没有变化（没有新变更、阶段、人工门、归档）时停止，避免空转。
+      // 上一轮 headless 进程结束后可能留下会话租约（并行派发中断时尤其常见）：
+      // owner helper 是独立进程，拿不到 current 不代表没有进行中的变更。
+      // 若恰好有一个 active 变更，就替负责人执行 resume --takeover 后继续。
+      if (!snapshot.changeId && Array.isArray(snapshot.activeChanges) && snapshot.activeChanges.length === 1) {
+        const active = snapshot.activeChanges[0]
+        const resumed = await ownerAction(state.helperPath, 'resume', workspace, [String(active.id)])
+        state.ownerActions.push({
+          afterRound: roundIndex,
+          action: 'resume',
+          gate: null,
+          ok: resumed.ok,
+          message: resumed.payload?.message ?? resumed.payload?.error ?? resumed.stderrTail,
+        })
+        console.log(
+          `  接续 ${active.id}（${active.stage ?? '?'}）：${resumed.ok ? '已 takeover' : `失败：${resumed.payload?.error ?? resumed.stderrTail}`}`,
+        )
+        if (resumed.ok) {
+          const refreshed = await ownerAction(state.helperPath, 'status', workspace)
+          if (refreshed.ok && refreshed.payload?.status) snapshot = refreshed.payload.status
+        }
+      }
+      // 待处理项（阻塞/计划修订/规则提议等）：按 --auto-pending 由脚本扮演负责人处理，
+      // 否则 agent 会停在"等负责人确认"上（2026-10-31 greenfield 演练的 T-FAILURE-LIMIT 即此类）。
+      const autoResolvable = openPending.filter((item) => plan.autoPending.includes(item.kind))
+      if (openPending.length > 0) {
+        if (plan.owner === 'manual') {
+          state.ownerActions.push({
+            afterRound: roundIndex,
+            action: 'awaiting-manual-pending',
+            gate: null,
+            ok: false,
+            message: `manual 模式：等待负责人处理待处理项 ${openPending.map((item) => item.id).join(',')}`,
+          })
+          console.log('  等待负责人处理待处理项（--owner manual，停止）')
+          break
+        }
+        for (const item of autoResolvable) {
+          const resolved = await ownerAction(state.helperPath, 'pending', workspace, [
+            String(item.id),
+            'approve',
+            `evaluation harness auto-approve ${item.kind}`,
+          ])
+          state.ownerActions.push({
+            afterRound: roundIndex,
+            action: 'pending-approve',
+            gate: null,
+            pendingId: item.id,
+            kind: item.kind,
+            ok: resolved.ok,
+            message: resolved.payload?.message ?? resolved.payload?.error ?? resolved.stderrTail,
+          })
+          console.log(
+            `  待处理项 ${item.id}（${item.kind}）${resolved.ok ? '已自动批准' : `自动批准失败：${resolved.payload?.error ?? resolved.stderrTail}`}`,
+          )
+          if (resolved.ok) autoResolvedCount += 1
+          if (!resolved.ok) break
+        }
+        if (autoResolvable.length > 0) {
+          // 处理完后重新读取状态：阻塞解除/门禁状态可能变化。
+          const refreshed = await ownerAction(state.helperPath, 'status', workspace)
+          if (refreshed.ok && refreshed.payload?.status) {
+            snapshot = refreshed.payload.status
+            const remaining = Array.isArray(snapshot.pending) ? snapshot.pending : []
+            if (remaining.length > 0) {
+              console.log(
+                `  仍有未自动处理的待处理项：${remaining
+                  .map((item) => `${item.id}(${item.kind})`)
+                  .join(',')}（--auto-pending=${plan.autoPending.join(',') || 'none'}）`,
+              )
+            }
+          }
+        }
+      }
+      // 连续两轮状态没有变化（没有新变更、阶段、人工门、待处理项、自动解锁、归档）时停止，避免空转。
+      // 自动批准待处理项本身也是进展（agent 下一轮可以继续），计数进 signature。
       const signature = `${snapshot.changeId ?? ''}|${snapshot.stage ?? ''}|${snapshot.awaitingGate ?? ''}|${
-        delivered.size
-      }|${archiveCount}`
+        Array.isArray(snapshot.pending) ? snapshot.pending.map((item) => item.id).join(',') : ''
+      }|${delivered.size}|${archiveCount}|resolved:${autoResolvedCount}`
       if (signature === previousSignature) stalledRounds += 1
       else {
         previousSignature = signature
@@ -1774,9 +1953,10 @@ async function runEvaluation(plan) {
         continue
       }
       if (!snapshot.changeId) {
-        // greenfield 交付完 C0 后没有活动变更，要等 agent 从路线图立下一个变更。
-        if (plan.stopAfter && delivered.size > 0) {
-          console.log('  没有活动变更，继续下一轮等待从路线图立项')
+        // greenfield：GR 批准后 PROJECT 归档、C0 还没立项时没有活动变更，
+        // 要继续给 agent 轮次从已批准路线图立项，而不是提前结束。
+        if (plan.stopAfter) {
+          console.log('  没有活动变更：等待 agent 从已批准路线图立项下一个变更')
           continue
         }
         if (roundIndex > 1) {

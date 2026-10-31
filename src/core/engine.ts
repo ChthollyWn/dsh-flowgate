@@ -201,6 +201,8 @@ export class FlowEngine {
   private coverageReport: CoverageReport | null = null
   private loaded = false
   private loadError: string | null = null
+  /** 加载阶段发现的损坏状态文件（status.json 等）；非空即进入锁定模式（03 §14）。 */
+  private stateCorruption: store.CorruptStateFile[] = []
   private interceptCounts: Record<string, number> = {}
   private lastRuleId: string | null = null
   private guardHeartbeat = { toolCalls: 0, decisions: 0 }
@@ -230,6 +232,7 @@ export class FlowEngine {
 
   async load(): Promise<void> {
     this.loadError = null
+    this.stateCorruption = []
     try {
       const initialized = await store.isInitialized(this.fs, this.root)
       if (!initialized) {
@@ -274,12 +277,14 @@ export class FlowEngine {
         sessionAppend: this.sessionAppend,
       })
       const verification = await this.ledger.verify()
-      this.state = await store.loadProjectState({
+      const loadedState = await store.loadProjectState({
         fs: this.fs,
         root: this.root,
         config: this.config,
         clock: this.clock,
       })
+      this.state = loadedState
+      this.stateCorruption = loadedState.corruptStateFiles ?? []
       if (!verification.ok) {
         this.state.locked = {
           reason: `账本校验失败（${verification.failures.length} 处）：${verification.failures
@@ -290,6 +295,15 @@ export class FlowEngine {
         }
       } else if (this.loadError) {
         this.state.locked = { reason: this.loadError, at: isoNow(this.clock) }
+      }
+      // 03 §14：状态文件损坏 → 锁定模式（拒绝门禁内写入）；原因带上文件路径与修复路径，
+      // 供 /flow doctor、/flow status 与注入文本展示。/flow repair 从账本重建后解除。
+      if (this.stateCorruption.length > 0) {
+        const corruptionReason = this.corruptionLockReason()
+        this.state.locked = {
+          reason: this.state.locked ? `${this.state.locked.reason}；${corruptionReason}` : corruptionReason,
+          at: isoNow(this.clock),
+        }
       }
 
       this.receipts = await this.loadReceipts()
@@ -316,6 +330,14 @@ export class FlowEngine {
     }
   }
 
+  /** 状态文件损坏的锁定原因：列出文件路径与原因，并给出诊断/修复入口（03 §14）。 */
+  private corruptionLockReason(): string {
+    const files = this.stateCorruption
+    const shown = files.slice(0, 3).map((file) => `${file.path}（${file.reason}）`)
+    const rest = files.length > 3 ? `；另有 ${files.length - 3} 个损坏文件` : ''
+    return `状态文件损坏（${files.length} 个）：${shown.join('；')}${rest}。运行 /flow doctor 诊断，/flow repair 从账本重建。`
+  }
+
   private async rebuildCounters(): Promise<void> {
     this.interceptCounts = {}
     if (!this.ledger) return
@@ -333,10 +355,23 @@ export class FlowEngine {
     }
   }
 
+  /** 路线图是否已被负责人批准（GR 归档 PROJECT 时把 gates.GR 置为 passed）。 */
+  private roadmapApprovedByOwner(): boolean {
+    const project = this.state?.changes.find((change) => change.id === 'PROJECT')
+    return project?.gates?.GR?.state === 'passed'
+  }
+
+  /** 除 PROJECT 外已创建过的变更数（路线图第一个变更的判定用）。 */
+  private roadmapChangesCreated(): number {
+    return this.state?.changes.filter((change) => change.id !== 'PROJECT').length ?? 0
+  }
+
   private async autoAttach(): Promise<void> {
     if (!this.state || !this.sessionId) return
+    // PROJECT（路线图阶段）也要能自动接续：模型常在创建立项后结束本轮，
+    // 负责人/下一条会话需要能继续看到它并批准 GR，否则 GR 会被静默搁置。
     const active = this.state.changes.filter(
-      (change) => change.lifecycle === 'active' && change.kind === 'change' && change.id !== 'PROJECT',
+      (change) => change.lifecycle === 'active' && change.kind === 'change',
     )
     if (active.length !== 1) return
     const change = active[0]!
@@ -643,6 +678,17 @@ export class FlowEngine {
     let risk: RiskLevel = input.riskHint ?? suggestion.risk
     let title = input.title
     let roadmapRef: string | undefined
+
+    // 路线图已批准后，第一个变更必须从路线图立项（C0 工程骨架）：否则会绕过 GR 冻结的
+    // 路线图，且新 C0 会失去 skeleton 标记（G2 对 project.md 命令的豁免依赖它，真实
+    // greenfield 演练因此卡在 "project.md 受保护 + G2 要求命令" 的死锁里）。
+    if (!input.project && !input.fromRoadmap && this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
+      const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
+      throw new FlowGateError(
+        `路线图已批准：第一个变更必须从路线图立项（${first}）`,
+        `用 flow_new_change({ fromRoadmap: "${first}" })；路线图外的新增/调整先写路线图增量并重新过 GR`,
+      )
+    }
 
     if (input.project) {
       if (this.roadmapDoc) throw new FlowGateError('路线图已存在', '增删能力请写路线图增量并重新过 GR')
@@ -1026,8 +1072,23 @@ export class FlowEngine {
       Object.assign(change, applyGateApproved(change, 'GR', now))
       await this.appendLedger('gate.approved', { changeId: change.id, gate: 'GR', reason: options.reason })
       change.lifecycle = 'archived'
-      await this.saveChange(change)
-      this.pushNotice('路线图已批准。用 /flow new --from-roadmap C1（或 flow_new_change）立项第一个变更；第一个变更固定是工程骨架 C0。')
+      // 注意：不能走 saveChange()——它把 lifecycle==='archived' 当作"目录已被 archiveChange
+      // 移走"而跳过 status.json 写入；PROJECT 没有 move，跳过会让 GR 批准在重载后丢失
+      // （真机：PRJECT 状态磁盘仍为 active/awaiting，新会话再次要求批准 GR）。
+      await store.writeChangeStatus(this.fs, this.root, change)
+      await store.writeChangesIndex(this.fs, this.root, this.state?.changes ?? [change])
+      if (this.state) {
+        // 路线图变更归档后释放租约，避免新会话继续被一个已结束的变更占住。
+        this.state.leases = this.state.leases.filter((lease) => lease.changeId !== change.id)
+        await this.saveLeases()
+      }
+      // PROJECT 已归档：清空 current，让下一会话/注入落到"从已批准路线图立项第一个变更"。
+      this.current = null
+      this.emitState()
+      const firstRoadmapChange = this.roadmapDoc?.entries[0]?.change ?? 'C0'
+      this.pushNotice(
+        `路线图已批准。用 flow_new_change({ fromRoadmap: "${firstRoadmapChange}" }) 立项第一个变更（工程骨架 ${firstRoadmapChange}）；不要用无 fromRoadmap 的立项绕过路线图。`,
+      )
       return { gate, passed: true, items: record?.items ?? [], failures: [], stage: change.stage, message: '路线图已批准（GR）。' }
     }
 
@@ -1341,6 +1402,41 @@ export class FlowEngine {
     const draft = decision.pendingDraft
     const draftKind = draft?.kind ?? 'risk'
     const fingerprint = draft?.actionFingerprint ?? fingerprintAction(action)
+
+    // 熔断是「任务级」状态而不是「动作级」：一个任务只保留一个 open blocker。
+    // 真实事故里通用人类决策路径会对每个被拦动作各建一个 BL（BL-2…BL-8），
+    // 负责人解锁 BL-1 后其它 BL 仍是 open，事务生命周期无法收敛。
+    if (draftKind === 'blocker') {
+      const existing = this.findOpenBreakerBlocker(change)
+      if (existing) {
+        decision.notes = [
+          ...(decision.notes ?? []),
+          `已存在阻断项 ${existing.id}（${existing.title}），负责人运行 /flow unblock ${existing.id} 后重试即可，不要重复申请`,
+        ]
+        return existing
+      }
+      const failing = this.failingTaskIds(change)
+      const item = this.createPending(change, {
+        kind: 'blocker',
+        title: draft?.title ?? `${decision.rule?.ruleId ?? '规则'} 需要负责人确认`,
+        detail: draft?.detail ?? decision.message,
+        data: {
+          ...(draft?.data ?? {}),
+          ...(failing.length === 1 ? { taskId: failing[0] } : {}),
+        },
+        scope: {
+          changeId: change.id,
+          ruleId: decision.rule?.ruleId,
+          ...(failing.length === 1 ? { taskId: failing[0] } : {}),
+          actionFingerprint: fingerprint,
+        },
+      })
+      item.detail = `${item.detail}\n负责人确认后运行 /flow unblock ${item.id} 解锁（只读取证与 flow_status/flow_report_risk 不受限）。`
+      await this.appendLedger('rule.human', { changeId: change.id, pendingId: item.id, ruleId: decision.rule?.ruleId })
+      this.pushNotice(`需要负责人确认：${item.id}（${item.title}）。负责人运行 /flow unblock ${item.id} 后继续。`)
+      return item
+    }
+
     const existing = change.pending.find(
       (item) => item.status === 'open' && item.scope?.actionFingerprint === fingerprint && item.kind === draftKind,
     )
@@ -1356,6 +1452,67 @@ export class FlowEngine {
     this.pushNotice(`需要负责人确认：${item.id}（${item.title}）。负责人处理后继续。`)
     return item
   }
+
+  /** 当前变更里连续失败达到上限的任务 id（与 T-FAILURE-LIMIT 触发器同一判定）。 */
+  private failingTaskIds(change: ChangeStatus): string[] {
+    const limit = this.config.triggers.consecutive_failure_limit
+    if (limit <= 0) return []
+    return Object.values(change.tasks)
+      .filter(
+        (task) =>
+          task.status !== 'done' &&
+          task.status !== 'skipped' &&
+          (task.failureCount ?? 0) >= limit,
+      )
+      .map((task) => task.id)
+  }
+
+  /**
+   * 查找可复用的 open 阻断项：同任务的 blocker，或历史版本为每个动作创建的
+   * T-FAILURE-LIMIT 残留项（真实 run 里 BL-2…BL-8 没有 data.taskId）。
+   */
+  private findOpenBreakerBlocker(change: ChangeStatus, taskId?: string): PendingItem | undefined {
+    const failing = new Set(this.failingTaskIds(change))
+    return change.pending.find((item) => {
+      if (item.status !== 'open' || item.kind !== 'blocker') return false
+      const itemTaskId = String(item.data?.taskId ?? item.scope?.taskId ?? '')
+      if (taskId !== undefined && itemTaskId === taskId) return true
+      if (itemTaskId !== '' && failing.has(itemTaskId)) return true
+      return item.data?.ruleId === 'T-FAILURE-LIMIT'
+    })
+  }
+
+  /**
+   * 连续失败熔断：把任务置为 blocked，并且**只**创建一个 blocker 待处理项。
+   * 幂等（同一任务已有 open blocker 时复用），避免每次失败/被拦动作都新建 BL-n。
+   */
+  private async blockTaskForConsecutiveFailures(
+    change: ChangeStatus,
+    taskId: string,
+    failureCount: number,
+  ): Promise<PendingItem> {
+    const existing = this.findOpenBreakerBlocker(change, taskId)
+    if (existing) return existing
+    const item = this.createPending(change, {
+      kind: 'blocker',
+      title: `${taskId} 连续 ${failureCount} 次验证失败，已暂停`,
+      detail: '先复现、找根因、再修复；不要继续试错。只读取证与 flow_status/flow_report_risk 不受限。',
+      data: { taskId },
+      scope: { changeId: change.id, taskId },
+    })
+    item.detail = `${item.detail}\n负责人确认后运行 /flow unblock ${item.id} 解锁（可只读诊断、查状态、上报风险）。`
+    await this.appendLedger('task.blocked', {
+      changeId: change.id,
+      taskId,
+      reason: 'consecutive-failures',
+      pendingId: item.id,
+    })
+    this.pushNotice(
+      `任务 ${taskId} 连续 ${failureCount} 次验证失败已熔断（${item.id}）：只读动作仍放行，负责人运行 /flow unblock ${item.id} 后继续。`,
+    )
+    return item
+  }
+
 
   private createPending(
     change: ChangeStatus,
@@ -1962,16 +2119,11 @@ export class FlowEngine {
       }
       if (receipt.exitCode !== 0) {
         taskState.failureCount = (taskState.failureCount ?? 0) + 1
-        if (taskState.failureCount >= this.config.triggers.consecutive_failure_limit) {
+        const limit = this.config.triggers.consecutive_failure_limit
+        if (limit > 0 && taskState.failureCount >= limit) {
           taskState.status = 'blocked'
           taskState.blockReason = `连续 ${taskState.failureCount} 次验证失败`
-          this.createPending(change, {
-            kind: 'blocker',
-            title: `${task.id} 连续 ${taskState.failureCount} 次验证失败，已暂停`,
-            detail: '先复现、找根因、再修复；不要继续试错。负责人确认后继续。',
-            data: { taskId: task.id },
-          })
-          await this.appendLedger('task.blocked', { changeId: change.id, taskId: task.id, reason: 'consecutive-failures' })
+          await this.blockTaskForConsecutiveFailures(change, task.id, taskState.failureCount)
         }
       } else {
         taskState.failureCount = 0
@@ -2141,6 +2293,10 @@ export class FlowEngine {
       } else if (item.kind === 'plan') {
         await this.applyPlanAmendment(change, item)
         await this.appendLedger('plan.amended', { changeId: change.id, pendingId: id })
+      } else if (item.kind === 'blocker') {
+        // 负责人解锁「连续失败熔断」：清失败计数、任务恢复 running，并把同任务的
+        // 其它 open blocker（含历史版本每个动作一条的 T-FAILURE-LIMIT 残留项）一起关闭。
+        await this.approveBlocker(change, item, reason)
       }
       await this.appendLedger('gate.approved', { changeId: change.id, pendingId: id, kind: item.kind })
     } else {
@@ -2152,6 +2308,68 @@ export class FlowEngine {
     await this.saveChange(change)
     return item
   }
+
+  /**
+   * 批准 kind=blocker 的待处理项 = 负责人确认「熔断解除，任务继续」：
+   * - 该任务 failureCount 归零、blocked/failed/interrupted → running（保留 startedAt）、清 blockReason；
+   * - 同任务其它 open BL 与旧版 T-FAILURE-LIMIT 残留 BL 一并 approved（记录 decidedAt/reason）；
+   * - 写 task.unblocked 账本事件，并让后续 flow_* 调用恢复（触发器不再命中）。
+   */
+  private async approveBlocker(change: ChangeStatus, item: PendingItem, reason?: string): Promise<void> {
+    const now = isoNow(this.clock)
+    let taskId = String(item.data?.taskId ?? item.scope?.taskId ?? '')
+    if (taskId === '') taskId = this.resolveBlockedTaskId(change)
+    const taskState = taskId !== '' ? change.tasks[taskId] : undefined
+    if (taskState) {
+      taskState.failureCount = 0
+      if (taskState.status === 'blocked' || taskState.status === 'failed' || taskState.status === 'interrupted') {
+        taskState.status = 'running'
+        taskState.startedAt = taskState.startedAt ?? now
+        taskState.finishedAt = undefined
+        taskState.interruptedAt = undefined
+      }
+      taskState.blockReason = undefined
+    }
+    const closed: string[] = []
+    for (const other of change.pending) {
+      if (other.id === item.id || other.status !== 'open' || other.kind !== 'blocker') continue
+      const otherTaskId = String(other.data?.taskId ?? other.scope?.taskId ?? '')
+      const sameTask = taskId !== '' && otherTaskId === taskId
+      // 旧版熔断项没有 taskId（BL-2…BL-8）：解锁当前任务时一并清理同变更的残留。
+      const legacyBreaker = other.data?.ruleId === 'T-FAILURE-LIMIT' && (otherTaskId === '' || otherTaskId === taskId)
+      if (!sameTask && !legacyBreaker) continue
+      other.status = 'approved'
+      other.decidedAt = now
+      other.decisionReason = reason ? `${reason}（随 ${item.id} 一并解锁）` : `随 ${item.id} 一并解锁`
+      closed.push(other.id)
+    }
+    await this.appendLedger('task.unblocked', {
+      changeId: change.id,
+      taskId: taskId === '' ? undefined : taskId,
+      pendingId: item.id,
+      reason,
+      closedPendings: closed,
+      failureCountReset: Boolean(taskState),
+    })
+    this.pushNotice(
+      `已解锁阻断项 ${item.id}${taskId ? `（任务 ${taskId} 恢复执行，失败计数清零）` : ''}${
+        closed.length > 0 ? `，一并关闭 ${closed.join('、')}` : ''
+      }。只读动作不受限；可以继续 flow_* 调用。`,
+    )
+  }
+
+  /** 旧版阻断项没有 data.taskId：从当前 blocked/failing 任务里反推唯一解锁目标。 */
+  private resolveBlockedTaskId(change: ChangeStatus): string {
+    const limit = this.config.triggers.consecutive_failure_limit
+    const candidates = Object.values(change.tasks).filter(
+      (task) =>
+        task.status !== 'done' &&
+        task.status !== 'skipped' &&
+        (task.status === 'blocked' || (limit > 0 && (task.failureCount ?? 0) >= limit)),
+    )
+    return candidates.length === 1 ? candidates[0]!.id : ''
+  }
+
 
   private async persistRule(item: PendingItem): Promise<void> {
     const layout = store.layout(this.root)
@@ -2332,7 +2550,8 @@ export class FlowEngine {
   }
 
   async attachSession(label?: string): Promise<RuntimeSnapshot> {
-    const active = (this.state?.changes ?? []).filter((change) => change.lifecycle === 'active' && change.id !== 'PROJECT')
+    // 与 autoAttach 一致：PROJECT（路线图阶段）也允许显式接续。
+    const active = (this.state?.changes ?? []).filter((change) => change.lifecycle === 'active')
     if (active.length === 0) throw new FlowGateError('没有进行中的变更', '用 /flow new <描述> 立项')
     if (active.length > 1) throw new FlowGateError('有多个进行中的变更', `用 /flow resume <变更编号> 选择：${active.map((change) => change.id).join('、')}`)
     const change = active[0]!
@@ -2606,6 +2825,16 @@ export class FlowEngine {
     // Rebuild status.json / changes index from the ledger snapshots + artifacts.
     const rebuilt = await store.rebuildState(this.fs, this.root)
     await this.load()
+    // 03 §14 / 需求 v1.0：repair 必须能解锁，但不能把修不好的损坏静默吞掉——
+    // 仍有 status.json 无法从账本/产物重建时保持锁定并明确报告，避免二次 fail-open。
+    if (this.stateCorruption.length > 0) {
+      return {
+        ok: false,
+        message: `账本校验通过，但仍有 ${this.stateCorruption.length} 个状态文件无法从账本重建：${this.stateCorruption
+          .map((file) => `${file.path}（${file.reason}）`)
+          .join('；')}。已保持锁定模式，请备份 .flowgate/ 后按 /flow doctor 提示处理。`,
+      }
+    }
     if (this.state?.locked) {
       this.state.locked = undefined
       for (const change of this.state.changes) {
@@ -2678,6 +2907,17 @@ export class FlowEngine {
     if (!this.isInitialized()) return { text: '', approxTokens: 0 }
     const change = this.current
     if (!change) {
+      // 锁定模式可能由「损坏的 status.json 被跳过」导致（此时没有 current）：注入文本
+      // 仍要给出锁定原因与修复入口，避免 agent 在 fail-open 错觉下继续写源码。
+      if (this.state?.locked) {
+        const text = `[FlowGate] 锁定模式：${this.state.locked.reason}。写操作被拒绝，运行 /flow doctor 诊断、/flow repair 恢复。`
+        return { text, approxTokens: approx(text) }
+      }
+      if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
+        const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
+        const text = `[FlowGate] 路线图已批准，但还没有立项变更。下一步：用 flow_new_change({ fromRoadmap: "${first}" }) 立项第一个变更（工程骨架 ${first}）；不要用无 fromRoadmap 的立项绕过路线图。`
+        return { text, approxTokens: approx(text) }
+      }
       const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更。下一步：用 flow_new_change 立项，或 /flow new <描述>。`
       return { text, approxTokens: approx(text) }
     }
@@ -2716,6 +2956,12 @@ export class FlowEngine {
     }
     const pending = change.pending.filter((item) => item.status === 'open')
     if (pending.length > 0) lines.push(`待负责人处理：${pending.map((item) => `${item.id} ${item.title}`).join('；')}`)
+    const breaker = pending.find((item) => item.kind === 'blocker')
+    if (breaker) {
+      lines.push(
+        `熔断阻断 ${breaker.id}：只读动作（read/grep、只读 shell）、flow_status/flow_diff/flow_report_risk 不受限，可先取证；负责人确认后运行 /flow unblock ${breaker.id}（也可 /flow unblock <任务id>）解锁。`,
+      )
+    }
     const awaiting = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')
     if (awaiting) lines.push(`当前等待负责人批准 ${awaiting[0]}：结束本轮，告诉负责人运行 /flow approve ${awaiting[0]}。`)
     const violations = change.violations.filter((violation) => !violation.clearedAt)
@@ -2783,8 +3029,14 @@ export class FlowEngine {
 
   private nextStepText(change: ChangeStatus | null, level: LevelProfile | null): string {
     if (!this.isInitialized()) return '运行 /flow init 启用 FlowGate'
-    if (!change) return '用 /flow new <描述> 立项'
     if (this.state?.locked) return '运行 /flow doctor 诊断，/flow repair 恢复'
+    if (!change) {
+      if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
+        const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
+        return `用 flow_new_change({ fromRoadmap: "${first}" }) 从已批准路线图立项（第一个变更必须是工程骨架 ${first}）`
+      }
+      return '用 /flow new <描述> 立项'
+    }
     if (change.off) return '门禁已关闭（/flow on 恢复）'
     const awaiting = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')?.[0]
     if (awaiting) return `等待负责人：/flow approve ${awaiting}`
@@ -2802,6 +3054,12 @@ export class FlowEngine {
       case 'S4': {
         const active = this.activeTask()
         if (active) return `完成任务 ${active.id}（flow_verify → flow_task_done）`
+        const blocked = Object.values(change.tasks).find((task) => task.status === 'blocked')
+        const openBreaker = change.pending.find((item) => item.status === 'open' && item.kind === 'blocker')
+        if (blocked || openBreaker) {
+          const target = openBreaker?.id ?? blocked?.id ?? ''
+          return `等待负责人 /flow unblock ${target}（连续失败已熔断；只读动作仍可执行）`
+        }
         if (change.batches.some((batch) => batch.status === 'checkpoint')) return '执行集成检查点（合并 + 全量测试）'
         return '按执行图开始下一个任务'
       }
@@ -2831,6 +3089,8 @@ export class FlowEngine {
         )
       }
       if (snap.pending.length > 0) lines.push(`待处理：${snap.pending.map((item) => `${item.id} ${item.title}`).join('；')}`)
+      const breaker = snap.pending.find((item) => item.kind === 'blocker')
+      if (breaker) lines.push(`熔断阻断 ${breaker.id}：负责人运行 /flow unblock ${breaker.id} 解锁（只读动作不受限）`)
       if (snap.violations.length > 0) lines.push(`越界：${snap.violations.map((item) => item.path).join('、')}`)
       lines.push(`下一步：${snap.nextStep}`)
     }
