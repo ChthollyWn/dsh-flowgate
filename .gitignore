@@ -5,6 +5,8 @@ lib.tmp/
 spike/node_modules/
 spike/*.tgz
 *.log
+# 评测原始证据：每轮 stderr 是运行记录的一部分（不受 *.log 忽略）
+!docs/evaluation-data/**/rounds/*.stderr.log
 .DS_Store
 # Local dogfooding state when FlowGate manages its own repository.
 .flowgate/state/
