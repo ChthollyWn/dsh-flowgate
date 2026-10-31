@@ -9,6 +9,7 @@
 import type {
   BatchState,
   CoverageReport,
+  ExceptionRecord,
   PendingItem,
   RuntimeSnapshot,
   StageId,
@@ -516,6 +517,23 @@ export interface TaskCardModel {
   agent?: string
   failureCount: number
   blockReason?: string
+  /**
+   * Task-detail extras (T5.1). The frozen host/client contract only ships
+   * `TaskState`, so these are mapped defensively when the host sends richer
+   * task cards / plan data; missing members simply hide the detail rows.
+   */
+  batchMode?: 'sequential' | 'parallel'
+  batchStatus?: string
+  evidenceIds?: string[]
+  reviewIds?: string[]
+  covers?: string[]
+  scope?: string[]
+  tests?: string[]
+  newFiles?: string[]
+  verify?: string[]
+  /** Flattened review findings (severity/file/line/message) for the task. */
+  findings?: { severity: string; file: string; line?: number; message: string }[]
+  redObserved?: boolean
 }
 
 export interface ExecutionNodeModel {
@@ -668,30 +686,99 @@ function makeTaskModels(proj: FlowgateProjection | null): TaskCardModel[] {
   const reviewRows = panel.reviews ?? []
   const batches = snapshot.batches ?? []
   const batchOf = new Map<string, string>()
+  const batchMeta = new Map<string, { mode: 'sequential' | 'parallel'; status: string }>()
   for (const batch of batches) {
-    for (const taskId of batch.tasks ?? []) batchOf.set(taskId, batch.id)
+    if (!isRecord(batch)) continue
+    const id = str(batch.id)
+    for (const taskId of Array.isArray(batch.tasks) ? batch.tasks : []) {
+      if (typeof taskId === 'string') batchOf.set(taskId, id)
+    }
+    if (id !== '') {
+      batchMeta.set(id, { mode: batch.mode === 'parallel' ? 'parallel' : 'sequential', status: str(batch.status) })
+    }
   }
   return Object.entries(snapshot.tasks ?? {}).map(([id, state]) => {
+    // `TaskState` is the frozen wire shape; richer task-card fields are read
+    // defensively so a newer host degrades gracefully instead of throwing.
+    // `snapshot.taskCards` (optional, T5.1) carries the parsed card (scope /
+    // verify groups / covers) when the host provides it.
+    const card = snapshot.taskCards?.[id]
+    const cardRecord = isRecord(card) ? (card as unknown as Record<string, unknown>) : {}
+    const rawState = isRecord(state) ? { ...cardRecord, ...(state as unknown as Record<string, unknown>) } : cardRecord
     const rows = evidenceRows.filter((row) => row.taskId === id)
     const evidence: TaskCardModel['evidence'] =
       rows.length === 0 ? 'none' : rows.some((row) => row.fresh === true) ? 'fresh' : 'stale'
-    const findings = reviewRows
-      .filter((row) => row.taskId === id)
-      .reduce((sum, row) => sum + (Array.isArray(row.findings) ? row.findings.length : 0), 0)
+    const taskReviews = reviewRows.filter((row) => row.taskId === id)
+    const findings = taskReviews.flatMap((row) =>
+      Array.isArray(row.findings)
+        ? row.findings.map((finding) => ({
+            severity: str(finding.severity),
+            file: str(finding.file),
+            message: str(finding.message),
+            ...(typeof finding.line === 'number' ? { line: finding.line } : {}),
+          }))
+        : [],
+    )
+    const batch = batchOf.get(id) ?? str(state?.batch)
+    const meta = batchMeta.get(batch)
     return {
       id,
-      title: id,
-      status: str(state.status, 'pending'),
-      batch: batchOf.get(id) ?? str(state.batch),
-      tdd: str(state.tdd, 'none'),
+      title: str(rawState.title, id) || id,
+      status: str(state?.status, 'pending'),
+      batch,
+      tdd: str(state?.tdd, 'none'),
       evidence,
-      reviewFindings: findings,
-      worktree: state.worktree,
-      agent: state.agent,
-      failureCount: numOr(state.failureCount, 0),
-      blockReason: state.blockReason,
+      reviewFindings: findings.length,
+      worktree: state?.worktree,
+      agent: state?.agent,
+      failureCount: numOr(state?.failureCount, 0),
+      blockReason: state?.blockReason,
+      ...(meta !== undefined ? { batchMode: meta.mode, batchStatus: meta.status } : {}),
+      ...(Array.isArray(state?.evidenceIds) && state.evidenceIds.length > 0
+        ? { evidenceIds: state.evidenceIds.filter((entry): entry is string => typeof entry === 'string') }
+        : {}),
+      ...(Array.isArray(state?.reviewIds) && state.reviewIds.length > 0
+        ? { reviewIds: state.reviewIds.filter((entry): entry is string => typeof entry === 'string') }
+        : {}),
+      ...optionalListField(rawState, 'covers'),
+      ...optionalListField(rawState, 'scope'),
+      ...optionalListField(rawState, 'tests'),
+      ...optionalListField(rawState, 'newFiles'),
+      ...optionalVerifyField(rawState.verify),
+      ...(findings.length > 0 ? { findings } : {}),
+      ...(state?.redObserved === true ? { redObserved: true } : {}),
     }
   })
+}
+
+/** Read an optional string[] in a forward-compatible way (unknown wire field). */
+function optionalListField<K extends 'covers' | 'scope' | 'tests' | 'newFiles'>(
+  raw: Record<string, unknown>,
+  key: K,
+): Partial<Pick<TaskCardModel, K>> {
+  const value = raw[key]
+  if (!Array.isArray(value)) return {}
+  const list = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+  return list.length > 0 ? ({ [key]: list } as Partial<Pick<TaskCardModel, K>>) : {}
+}
+
+/** Verify groups may arrive either as strings or `{group, command}` records. */
+function optionalVerifyField(value: unknown): Partial<TaskCardModel> {
+  if (!Array.isArray(value)) return {}
+  const list: string[] = []
+  for (const entry of value) {
+    if (typeof entry === 'string' && entry.trim() !== '') {
+      list.push(entry)
+      continue
+    }
+    if (!isRecord(entry)) continue
+    const group = str(entry.group)
+    const command = str(entry.command)
+    if (group !== '' && command !== '') list.push(`${group} · ${command}`)
+    else if (group !== '') list.push(group)
+    else if (command !== '') list.push(command)
+  }
+  return list.length > 0 ? { verify: list } : {}
 }
 
 export function buildExecutionGraph(snapshot: RuntimeSnapshot | null): ExecutionGraphModel {
@@ -1145,22 +1232,87 @@ export interface RuleTrialInput {
   stage?: string
 }
 
+/** Snapshot facts the local dry-run honours (T5.1). */
+export interface RuleTrialSnapshot {
+  off?: boolean
+  locked?: boolean
+  changeId?: string
+  exceptions?: readonly ExceptionRecord[]
+}
+
+export type RuleTrialDecision = 'allow' | 'deny' | 'human'
+
+/**
+ * Where the local verdict came from. `off` / `locked` mirror the host mode;
+ * `exception` means an active exception cancelled the matched rule; `rule`
+ * means the matched rule's own (effective) decision was used; `default` means
+ * no local heuristic fired.
+ */
+export type RuleTrialBasis = 'off' | 'locked' | 'exception' | 'rule' | 'default'
+
 export interface RuleTrialResult {
-  decision: 'allow' | 'deny' | 'human'
+  decision: RuleTrialDecision
   rule?: RuleRow
   /** Which builtin heuristic fired (for the card). */
   heuristic?: string
+  /** Snapshot-driven reason for the verdict (for the card). */
+  basis: RuleTrialBasis
+  /** Active exception that cancelled the matched rule, when one applied. */
+  exception?: { id: string; ruleId: string }
+  /**
+   * Project rules present in the effective rule list that this local heuristic
+   * cannot evaluate. When non-empty the UI must state that the verdict is only
+   * an approximation and the host `/flow trial` is authoritative.
+   */
+  uncoveredRules: string[]
+  /** Always true: the host `/flow trial` is the authoritative dry-run. */
+  approximate: true
 }
 
 const WRITE_TOOLS = ['write', 'edit', 'create', 'apply_patch', 'bash', 'shell', 'run_code', 'delete', 'rename']
 const PROTECTED_HINTS = ['.flowgate/', 'ledger.key', '.env', 'id_rsa', 'secret']
 
+/** Rule ids whose semantics the local heuristics below approximate. */
+const LOCAL_HEURISTIC_RULE_IDS = new Set(['R-PROTECTED', 'R-DELETE', 'R-PUSH', 'R-STAGE-SRC', 'R-DELEGATE'])
+
 /**
- * Local approximation of the host rule engine, used only when
- * `remote.flowgate` offers no trial method. It intentionally errs on the
- * conservative side (human/deny) and never executes anything.
+ * Built-in / reserved rule ids (mirrors core/rules/builtin.ts + risk-triggers.ts,
+ * where ids are stable by contract). Any other rule id is a project rule whose
+ * `when` conditions cannot be evaluated in the browser half.
  */
-export function trialRuleLocal(input: RuleTrialInput, rules: RuleRow[]): RuleTrialResult {
+const KNOWN_BUILTIN_RULE_IDS = new Set([
+  ...LOCAL_HEURISTIC_RULE_IDS,
+  'R-ANALYSIS-READONLY',
+  'R-SCOPE',
+  'R-MCP',
+  'R-NEWFILE',
+  'R-TDD-ORDER',
+  'R-LOCK',
+  'R-VIOLATION',
+  'T-SENSITIVE-PATH',
+  'T-DEPENDENCY',
+  'T-DANGEROUS',
+  'T-SECRET',
+  'T-SECRET-READ',
+  'T-FAILURE-LIMIT',
+])
+
+/** Rules an exception may cancel: protected paths and lock mode are hard stops (core §13). */
+const NON_CANCELLABLE_RULE_IDS = new Set(['R-PROTECTED', 'R-LOCK'])
+
+function ruleDecision(rule: RuleRow | undefined, fallback: RuleTrialDecision): RuleTrialDecision {
+  const value = rule?.decision
+  return value === 'allow' || value === 'deny' || value === 'human' ? value : fallback
+}
+
+interface HeuristicHit {
+  rule?: RuleRow
+  heuristic: string
+  fallback: 'deny' | 'human'
+}
+
+/** The builtin heuristics the browser can approximate; null = no rule matched. */
+function localHeuristic(input: RuleTrialInput, rules: RuleRow[]): HeuristicHit | null {
   const find = (id: string): RuleRow | undefined => rules.find((rule) => rule.id === id)
   const tool = (input.tool ?? '').toLowerCase()
   const path = (input.path ?? '').replace(/\\/g, '/').toLowerCase()
@@ -1169,28 +1321,152 @@ export function trialRuleLocal(input: RuleTrialInput, rules: RuleRow[]): RuleTri
 
   const protectedHit = PROTECTED_HINTS.some((hint) => path.includes(hint))
   if (protectedHit) {
-    const rule = find('R-PROTECTED')
-    return { decision: rule?.decision === 'allow' ? 'allow' : rule?.decision === 'human' ? 'human' : 'deny', rule, heuristic: 'R-PROTECTED' }
+    return { rule: find('R-PROTECTED'), heuristic: 'R-PROTECTED', fallback: 'deny' }
   }
   if ((tool === 'delete' || tool === 'rename') && (input.path ?? '') !== '') {
     const rule = find('R-DELETE')
-    if (rule !== undefined) return { decision: rule.decision === 'human' ? 'human' : 'deny', rule, heuristic: 'R-DELETE' }
+    if (rule !== undefined) return { rule, heuristic: 'R-DELETE', fallback: 'deny' }
   }
   if (command.includes('git push') || command.includes('push --force')) {
-    const rule = find('R-PUSH')
-    return { decision: rule?.decision === 'human' ? 'human' : 'deny', rule, heuristic: 'R-PUSH' }
+    return { rule: find('R-PUSH'), heuristic: 'R-PUSH', fallback: 'deny' }
   }
   if (WRITE_TOOLS.includes(tool) && path !== '' && (stage === 'S0' || stage === 'S1' || stage === 'S2' || stage === 'S3')) {
     if (path.startsWith('src/') || /\.(java|ts|tsx|js|jsx|py|go|rs)$/.test(path)) {
-      const rule = find('R-STAGE-SRC')
-      return { decision: rule?.decision === 'human' ? 'human' : 'deny', rule, heuristic: 'R-STAGE-SRC' }
+      return { rule: find('R-STAGE-SRC'), heuristic: 'R-STAGE-SRC', fallback: 'deny' }
     }
   }
   if (tool === 'subagent' || tool === 'workflow' || tool === 'send_message') {
-    const rule = find('R-DELEGATE')
-    return { decision: rule?.decision === 'human' ? 'human' : 'deny', rule, heuristic: 'R-DELEGATE' }
+    return { rule: find('R-DELEGATE'), heuristic: 'R-DELEGATE', fallback: 'deny' }
   }
-  return { decision: 'allow' }
+  return null
+}
+
+function normalizeForGlob(value: string): string {
+  return value.replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+/**
+ * Minimal glob matcher for exception `pathPattern` checks. Approximates
+ * `core/util/glob.ts` (`*` = one path segment, `**` = any depth, `?` = one char);
+ * the local dry-run is explicitly approximate.
+ */
+function localGlobMatch(pattern: string, value: string): boolean {
+  const normalizedPattern = normalizeForGlob(pattern)
+  const normalizedValue = normalizeForGlob(value)
+  let regex = '^'
+  for (let index = 0; index < normalizedPattern.length; index += 1) {
+    const char = normalizedPattern[index]
+    if (char === '*') {
+      if (normalizedPattern[index + 1] === '*') {
+        regex += '.*'
+        index += 1
+        if (normalizedPattern[index + 1] === '/') index += 1
+      } else {
+        regex += '[^/]*'
+      }
+      continue
+    }
+    if (char === '?') {
+      regex += '[^/]'
+      continue
+    }
+    regex += (char ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+  regex += '$'
+  try {
+    return new RegExp(regex).test(normalizedValue)
+  } catch {
+    return false
+  }
+}
+
+/** Mirror core §13 exception matching (path / shell command targets), approximately. */
+function exceptionMatchesAction(pathPattern: string | undefined, input: RuleTrialInput): boolean {
+  if (pathPattern === undefined || pathPattern === '') return true
+  const path = normalizeForGlob(input.path ?? '')
+  if (path !== '' && localGlobMatch(pathPattern, path)) return true
+  const command = input.command ?? ''
+  if (command === '') return false
+  if (command.includes(pathPattern)) return true
+  return command.split(/\s+/).some((token) => token !== '' && localGlobMatch(pathPattern, token))
+}
+
+function activeExceptionFor(
+  snapshot: RuleTrialSnapshot | null | undefined,
+  rule: RuleRow,
+  input: RuleTrialInput,
+): ExceptionRecord | undefined {
+  if (snapshot === null || snapshot === undefined) return undefined
+  const exceptions = snapshot.exceptions ?? []
+  return exceptions.find(
+    (exception) =>
+      exception.revokedAt === undefined &&
+      exception.ruleId === rule.id &&
+      (snapshot.changeId === undefined || exception.changeId === undefined || exception.changeId === snapshot.changeId) &&
+      exceptionMatchesAction(exception.pathPattern, input),
+  )
+}
+
+/**
+ * Local approximation of the host rule engine, used only when
+ * `remote.flowgate` offers no trial method. It never executes anything.
+ *
+ * Fidelity (T5.1): honours `snapshot.off` (allow), `snapshot.locked` (deny),
+ * active `snapshot.exceptions` (allow when they cancel the matched rule) and
+ * the effective rule decisions the host projects. Project rules whose `when`
+ * conditions cannot be evaluated locally are reported through
+ * `uncoveredRules`; the UI must tell the owner to confirm with `/flow trial`.
+ */
+export function trialRuleLocal(
+  input: RuleTrialInput,
+  rules: RuleRow[],
+  snapshot: RuleTrialSnapshot | null = null,
+): RuleTrialResult {
+  const uncoveredRules = rules.filter((rule) => !KNOWN_BUILTIN_RULE_IDS.has(rule.id)).map((rule) => rule.id)
+
+  if (snapshot?.off === true) {
+    return { decision: 'allow', basis: 'off', uncoveredRules: [], approximate: true }
+  }
+  if (snapshot?.locked === true) {
+    return {
+      decision: 'deny',
+      heuristic: 'R-LOCK',
+      basis: 'locked',
+      rule: rules.find((rule) => rule.id === 'R-LOCK'),
+      uncoveredRules: [],
+      approximate: true,
+    }
+  }
+
+  const hit = localHeuristic(input, rules)
+  if (hit === null) {
+    return { decision: 'allow', basis: 'default', uncoveredRules, approximate: true }
+  }
+  const decision = ruleDecision(hit.rule, hit.fallback)
+  const ruleForException: RuleRow = hit.rule ?? { id: hit.heuristic, decision, why: '', unlock: '', hits: 0 }
+  const exception =
+    decision !== 'allow' && !NON_CANCELLABLE_RULE_IDS.has(hit.heuristic)
+      ? activeExceptionFor(snapshot, ruleForException, input)
+      : undefined
+  if (exception !== undefined) {
+    return {
+      decision: 'allow',
+      rule: hit.rule,
+      heuristic: hit.heuristic,
+      basis: 'exception',
+      exception: { id: exception.id, ruleId: exception.ruleId },
+      uncoveredRules,
+      approximate: true,
+    }
+  }
+  return {
+    decision,
+    rule: hit.rule,
+    heuristic: hit.heuristic,
+    basis: 'rule',
+    uncoveredRules,
+    approximate: true,
+  }
 }
 
 /** Stage-card selection for the pipeline view (localized). */

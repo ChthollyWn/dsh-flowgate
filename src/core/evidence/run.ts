@@ -56,6 +56,15 @@ const MAX_EVIDENCE_LOG_CHARS = 2 * 1024 * 1024
 export interface RunVerifyOptions {
   fs: FileSystem
   root: string
+  /**
+   * Execution working directory (defaults to `root`).
+   *
+   * Parallel-batch tasks run in their own git worktree; the command must run
+   * there and the declared inputs must be hashed from there, otherwise the
+   * receipt would describe the main workspace while the executor edited the
+   * worktree (T4.9).
+   */
+  cwd?: string
   runner: CommandRunner
   change: ChangeStatus
   task: TaskCard
@@ -275,15 +284,16 @@ async function writeEvidenceLog(fs: FileSystem, root: string, relative: string, 
 
 export async function runVerifyGroup(options: RunVerifyOptions): Promise<EvidenceReceipt> {
   const { fs, root, runner, change, task, group, clock } = options
+  const executionRoot = options.cwd ?? root
   const declared = task.verify.find((entry) => entry.group === group.group) ?? group
   assertVerifiableCommand(declared.command)
 
-  const inputHash = await hashInputs(fs, root, declared.inputs ?? [])
+  const inputHash = await hashInputs(fs, executionRoot, declared.inputs ?? [])
   const startedAt = isoNow(clock)
   const startedAtMs = Date.parse(startedAt)
   let result: CommandResult
   try {
-    result = await runner.run(declared.command, { cwd: root, timeoutMs: DEFAULT_VERIFY_TIMEOUT_MS })
+    result = await runner.run(declared.command, { cwd: executionRoot, timeoutMs: DEFAULT_VERIFY_TIMEOUT_MS })
   } catch (error) {
     result = {
       exitCode: 1,
@@ -294,7 +304,7 @@ export async function runVerifyGroup(options: RunVerifyOptions): Promise<Evidenc
     }
   }
   const finishedAt = isoNow(clock)
-  const reportFiles = await discoverReportFiles(fs, root, Number.isNaN(startedAtMs) ? 0 : startedAtMs, declared.command)
+  const reportFiles = await discoverReportFiles(fs, executionRoot, Number.isNaN(startedAtMs) ? 0 : startedAtMs, declared.command)
   const summary = parseTestOutput({
     command: declared.command,
     stdout: result.stdout,
@@ -361,13 +371,14 @@ export async function runFullSuite(
   },
 ): Promise<EvidenceReceipt> {
   const { fs, root, runner, change, clock } = options
+  const executionRoot = options.cwd ?? root
   assertVerifiableCommand(options.command)
-  const inputHash = await hashInputs(fs, root, options.inputs)
+  const inputHash = await hashInputs(fs, executionRoot, options.inputs)
   const startedAt = isoNow(clock)
   const startedAtMs = Date.parse(startedAt)
   let result: CommandResult
   try {
-    result = await runner.run(options.command, { cwd: root, timeoutMs: DEFAULT_VERIFY_TIMEOUT_MS })
+    result = await runner.run(options.command, { cwd: executionRoot, timeoutMs: DEFAULT_VERIFY_TIMEOUT_MS })
   } catch (error) {
     result = {
       exitCode: 1,
@@ -378,7 +389,7 @@ export async function runFullSuite(
     }
   }
   const finishedAt = isoNow(clock)
-  const reportFiles = await discoverReportFiles(fs, root, Number.isNaN(startedAtMs) ? 0 : startedAtMs, options.command)
+  const reportFiles = await discoverReportFiles(fs, executionRoot, Number.isNaN(startedAtMs) ? 0 : startedAtMs, options.command)
   const summary = parseTestOutput({
     command: options.command,
     stdout: result.stdout,

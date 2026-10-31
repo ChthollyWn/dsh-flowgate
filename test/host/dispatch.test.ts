@@ -516,6 +516,88 @@ describe('dispatchBusy 互斥', () => {
 })
 
 // ---------------------------------------------------------------------------
+// H1 双重结算：执行者已自行 flow_task_done 时不得再 taskDone/taskFailed 覆盖成功态
+// ---------------------------------------------------------------------------
+
+describe('结算幂等（执行者已自行 flow_task_done）', () => {
+  it('任务已 done 时跳过重复 taskDone（有界重试不把成功任务改判失败）', async () => {
+    const engine = makeEngine()
+    const state = engineState(engine)
+    state.current = makeChange({ tasks: { T1: makeTaskState('T1', { status: 'done' }) } })
+    // 真实引擎对已 done 的任务会抛 "已经完成"：旧实现会让外层 catch 转成 taskFailed。
+    let taskDoneCalls = 0
+    engine.taskDone = async (taskId: string) => {
+      taskDoneCalls += 1
+      throw new Error(`${taskId} 已经完成`)
+    }
+    const subagents = createFakeSubagents()
+    stubDispatch(engine, { dispatched: [makeEnvelope('T1')], batchId: 'B1', mode: 'sequential', message: '已派发任务 T1（顺序批次 B1）。' })
+    const h = await start({ engine, services: { subagents } })
+
+    const { value } = await runTool(h, 'flow_dispatch_next', {})
+    expect(value.ok).toBe(true)
+    await flush()
+    expect(dispatchBusy()).toBe(false)
+    // 前置探测到 done 后不再调用 taskDone，也就没有异常触发 taskFailed。
+    expect(taskDoneCalls).toBe(0)
+    expect(state.calls.taskFailed).toEqual([])
+    expect(state.calls.taskDone).toEqual([])
+    const text = lastNotice(h)
+    expect(text).toContain('任务 T1 的子 agent 已结束')
+    expect(text).toContain('已结算为 done')
+    expect(text).toContain('跳过重复结算')
+  })
+
+  it('taskDone 抛错前任务已被结算为 done 时，catch 只记录异常、不 taskFailed', async () => {
+    const engine = makeEngine()
+    const state = engineState(engine)
+    state.current = makeChange({ tasks: { T1: makeTaskState('T1', { status: 'running' }) } })
+    // 模拟并发结算：进入 taskDone 时仍是 running，但另一个结算者先完成，taskDone 抛错。
+    engine.taskDone = async (taskId: string) => {
+      const change = state.current as { tasks: Record<string, TaskState> }
+      change.tasks[taskId]!.status = 'done'
+      throw new Error(`${taskId} 已经完成（并发结算）`)
+    }
+    const subagents = createFakeSubagents()
+    stubDispatch(engine, { dispatched: [makeEnvelope('T1')], batchId: 'B1', mode: 'sequential', message: '已派发任务 T1（顺序批次 B1）。' })
+    const h = await start({ engine, services: { subagents } })
+
+    const { value } = await runTool(h, 'flow_dispatch_next', {})
+    expect(value.ok).toBe(true)
+    await flush()
+    expect(state.calls.taskDone).toEqual([])
+    expect(state.calls.taskFailed).toEqual([])
+    const text = lastNotice(h)
+    expect(text).toContain('任务结算异常（已记录，不覆盖成功态）')
+    expect(text).toContain('并发结算')
+  })
+
+  it('子 agent 非 completed 结束但任务已 done 时不 taskFailed（不覆盖成功态）', async () => {
+    const engine = makeEngine()
+    const state = engineState(engine)
+    state.current = makeChange({ tasks: { T1: makeTaskState('T1', { status: 'done' }) } })
+    const subagents = createFakeSubagents({
+      start: async () => ({
+        childId: 'child-done',
+        result: Promise.resolve({ output: [], structured: { summary: '已完成但被取消' }, stopReason: 'cancelled' }),
+        dispose: async () => {},
+      }),
+    })
+    stubDispatch(engine, { dispatched: [makeEnvelope('T1')], batchId: 'B1', mode: 'sequential', message: '已派发任务 T1（顺序批次 B1）。' })
+    const h = await start({ engine, services: { subagents } })
+
+    const { value } = await runTool(h, 'flow_dispatch_next', {})
+    expect(value.ok).toBe(true)
+    await flush()
+    expect(state.calls.taskFailed).toEqual([])
+    expect(state.calls.taskDone).toEqual([])
+    const text = lastNotice(h)
+    expect(text).toContain('已结算为 done')
+    expect(text).toContain('不改变成功态')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 并行批次集成检查点（合并 worktree 分支 + integration 命令）
 // ---------------------------------------------------------------------------
 

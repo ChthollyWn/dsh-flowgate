@@ -133,7 +133,7 @@ import {
   buildEvidenceView,
   receiptFreshness,
   runVerifyGroup,
-  compareWithBaseline,
+  runFullSuite,
   summarizeEvidenceForContext,
   parseTestOutput,
   detectEvidenceKind,
@@ -812,6 +812,17 @@ export class FlowEngine {
   private activeTask(): TaskState | undefined {
     if (!this.current) return undefined
     return Object.values(this.current.tasks).find((task) => task.status === 'running' || task.status === 'review')
+  }
+
+  /**
+   * Working directory for a task: its parallel worktree when recorded, else the
+   * main repository root. T4.9 requires verification, input hashing and the
+   * auto-commit to happen inside the executor's worktree, not the main one.
+   */
+  private taskExecutionRoot(taskId?: string): string {
+    const worktree = taskId !== undefined ? this.current?.tasks[taskId]?.worktree : undefined
+    if (worktree === undefined || worktree === '') return this.root
+    return posixJoin(this.root, normalizeRelPath(worktree))
   }
 
   // ------------------------------------------------------------------
@@ -1500,7 +1511,10 @@ export class FlowEngine {
         entries: this.roadmapDoc.entries.map((entry) => ({ ...entry })),
       }
     }
-    await this.appendLedger('roadmap.approved', { changeId: change.id })
+    // M-16 数据源：审批时写入总数与已交付数，后续按已交付回写刷新事件。
+    const entries = this.roadmapDoc?.entries ?? []
+    const delivered = entries.filter((entry) => entry.status === '已交付').length
+    await this.appendLedger('roadmap.approved', { changeId: change.id, total: entries.length, delivered })
   }
 
   /**
@@ -1535,6 +1549,10 @@ export class FlowEngine {
         await this.fs.writeFile(layout.roadmap, lines.join('\n'))
         this.roadmapDoc = await this.loadRoadmapDoc()
         await this.appendLedger('change.updated', { changeId: change.id, roadmapRef: ref, roadmapStatus: status })
+        // M-16：每次路线图状态回写后刷新 M-16 数据源（总数 / 已交付数）。
+        const entries = this.roadmapDoc?.entries ?? []
+        const delivered = entries.filter((entry) => entry.status === '已交付').length
+        await this.appendLedger('roadmap.progress', { changeId: change.id, total: entries.length, delivered })
       }
     } catch {
       // 路线图回写失败不影响归档主流程；下一轮 GR 修订仍是权威来源。
@@ -1645,6 +1663,18 @@ export class FlowEngine {
     if (change.baseline) return
     const command = this.config.commands.test
     if (!command || command === 'none') {
+      // T2.3：test: none 的项目改用 build / lint / typecheck 作基线；这些命令必须
+      // 由插件真实执行并落回执，G2 的 g2.baseline 会核对回执而不是只看字段存在。
+      const merged = { ...this.config.commands, ...(this.project?.commands ?? {}) }
+      for (const key of ['build', 'lint', 'typecheck'] as const) {
+        const baselineCommand = merged[key]
+        if (!baselineCommand || baselineCommand === 'none') continue
+        try {
+          await this.runProjectCommand(baselineCommand, key, `baseline-${key}`, this.baselineInputs())
+        } catch (error) {
+          this.pushNotice(`${key} 基线命令执行失败：${(error as Error).message}`)
+        }
+      }
       change.baseline = {
         commit: null,
         summary: { parser: 'none', parsed: false, run: 0, passed: 0, failed: 0, skipped: 0 },
@@ -1745,6 +1775,9 @@ export class FlowEngine {
     await this.fs.writeFile(paths.clarify, appendClarifyQaRow(raw, row))
     await this.appendLedger('clarify.asked', { changeId: change.id, round, question })
     await this.appendLedger('clarify.answered', { changeId: change.id, round, question, answered: answer !== '' })
+    // M-7 数据源：把已记录的最大轮次写回变更状态（此前 clarifyRounds 恒为 0）。
+    change.clarifyRounds = Math.max(change.clarifyRounds ?? 0, round)
+    await this.saveChange(change)
     await this.reloadArtifacts()
     return { recorded: true, duplicate: false, round }
   }
@@ -1802,13 +1835,37 @@ export class FlowEngine {
     const commands = this.config.commands
     const command = commands.integration || commands.test
     if (command && command !== 'none') {
-      const receipt = await this.runProjectCommand(command, 'test', 'full-suite', this.baselineInputs())
-      const comparison = compareWithBaseline(
-        change.baseline ? { commit: change.baseline.commit, summary: change.baseline.summary, receipts: [], failedTests: [] } : null,
-        receipt.summary ?? { parser: 'none', parsed: false, run: 0, passed: 0, failed: 0, skipped: 0 },
-      )
-      if (!comparison.ok) {
-        this.pushNotice(`全量测试出现 ${comparison.regressions.length} 个回归，G5 不能通过。`)
+      if (!this.runner) throw new FlowGateError('宿主没有提供命令执行器', '运行 /flow doctor 查看缺失接口')
+      // T4.2：全量测试必须用 runFullSuite 跑，才能把 regressions 写进回执，
+      // G5 的 g5.fullTests 与 M-12 才有可判定的基线对比结果。
+      this.evidenceCounter += 1
+      const id = `E-${String(this.evidenceCounter).padStart(4, '0')}`
+      const baseline = change.baseline
+        ? { commit: change.baseline.commit, summary: change.baseline.summary, receipts: [], failedTests: [] }
+        : undefined
+      const receipt = await runFullSuite({
+        fs: this.fs,
+        root: this.root,
+        runner: this.runner,
+        change,
+        command,
+        inputs: this.baselineInputs(),
+        baseline,
+        clock: this.clock,
+        nextEvidenceId: () => id,
+      })
+      await this.appendReceipt(receipt)
+      await this.appendLedger('verify.receipt', {
+        changeId: change.id,
+        evidenceId: receipt.id,
+        group: receipt.group,
+        phase: receipt.phase,
+        kind: receipt.kind,
+        summary: receipt.summary,
+        regressions: receipt.summary?.regressions ?? [],
+      })
+      if (receipt.summary?.regressions !== undefined && receipt.summary.regressions.length > 0) {
+        this.pushNotice(`全量测试出现 ${receipt.summary.regressions.length} 个回归，G5 不能通过。`)
       }
     }
     // S5 also collects lint / build / typecheck receipts when configured (T4.2).
@@ -2604,6 +2661,9 @@ export class FlowEngine {
     const failures: CheckOutcome[] = []
     const now = isoNow(this.clock)
     const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
+    // T4.9：并行任务在自己的 worktree 里执行，验证命令与输入哈希必须同样以
+    // worktree 为根，否则回执描述的是主工作区而不是执行者的改动。
+    const executionRoot = this.taskExecutionRoot(taskId)
 
     // 1. Fresh GREEN evidence for every verify group.
     for (const group of task.verify) {
@@ -2611,7 +2671,7 @@ export class FlowEngine {
         .filter((receipt) => receipt.changeId === change.id && receipt.taskId === taskId && receipt.group === group.group)
         .sort(compareReceipts)
       const latest = groupReceipts[groupReceipts.length - 1]
-      const inputs = await hashInputs(this.fs, this.root, group.inputs)
+      const inputs = await hashInputs(this.fs, executionRoot, group.inputs)
       const freshness = receiptFreshness(latest, inputs.hash)
       if (!latest) {
         failures.push({
@@ -2701,7 +2761,7 @@ export class FlowEngine {
             item: 'review',
             label: `${taskId} 需要 ${level.reviewRoundsPerTask} 轮审查`,
             passed: false,
-            hint: '运行 flow_request_review（或由插件按风险自动审查），审查通过后再 flow_task_done。',
+            hint: '审查由插件在任务完成时自动触发；确认审查记录已通过后再 flow_task_done。若审查不可用，请联系负责人用 /flow review waive 明确豁免。',
           })
         }
       }
@@ -2732,8 +2792,8 @@ export class FlowEngine {
     let committed = false
     if (this.config.git.auto_commit && this.git) {
       try {
-        await this.git.add(this.root, ['-A'])
-        await this.git.commit(this.root, `flowgate(${change.id}/${taskId}): ${task.title}`)
+        await this.git.add(executionRoot, ['-A'])
+        await this.git.commit(executionRoot, `flowgate(${change.id}/${taskId}): ${task.title}`)
         committed = true
       } catch (error) {
         this.pushNotice(`自动提交失败：${(error as Error).message}`)
@@ -2991,6 +3051,9 @@ export class FlowEngine {
     const change = this.requireChange()
     const taskState = change.tasks[taskId]
     if (!taskState) throw new FlowGateError(`没有任务 ${taskId}`, '检查执行图')
+    // A2：成功任务不能被迟到的失败结算覆盖（派发宿主可能重复结算：执行者
+    // 已经自行 flow_task_done，host finalize 再次调用 taskDone 抛错后转失败）。
+    if (taskState.status === 'done') return
     taskState.status = 'failed'
     taskState.blockReason = reason
     taskState.finishedAt = isoNow(this.clock)
@@ -3573,6 +3636,7 @@ export class FlowEngine {
     const receipt = await runVerifyGroup({
       fs: this.fs,
       root: this.root,
+      cwd: task ? this.taskExecutionRoot(task.id) : this.root,
       runner: this.runner,
       change,
       task: task ?? {
@@ -4446,6 +4510,12 @@ export class FlowEngine {
     if (!lease) return
     const change = this.state.changes.find((item) => item.id === lease.changeId)
     if (change && change.lifecycle === 'active') {
+      // T3.7/T4.8：关闭会话前生成交接摘要，否则新会话没有 handoff 可注入。
+      try {
+        await this.generateHandoff()
+      } catch {
+        // 交接摘要失败不阻塞释放租约。
+      }
       await this.captureWorktreeSnapshot(change)
       for (const task of Object.values(change.tasks)) {
         if (task.status === 'running' || task.status === 'review') {
@@ -4886,6 +4956,8 @@ export class FlowEngine {
     } else if (change.stage === 'S6') {
       lines.push('S6 交付：更新 CHANGELOG/文档，生成交付报告，准备 G6 清单；然后 flow_submit({ gate: "G6" })。')
     }
+    // T4.8：交接摘要进入每步注入，上下文压缩后的下一步仍能恢复。
+    if (change.handoff?.text) lines.push(`交接摘要：${change.handoff.text}`)
     const pending = change.pending.filter((item) => item.status === 'open')
     if (pending.length > 0) lines.push(`待负责人处理：${pending.map((item) => `${item.id} ${item.title}`).join('；')}`)
     const breaker = pending.find((item) => item.kind === 'blocker')
@@ -4937,6 +5009,10 @@ export class FlowEngine {
       pendingGate: change ? gateForStage(change.stage) ?? undefined : undefined,
       pipeline,
       tasks: change?.tasks ?? {},
+      // T5.1：面板任务详情需要任务卡的 scope / 验证组 / covers；作为可选附加字段下发。
+      ...(change !== null
+        ? { taskCards: Object.fromEntries(this.getTasks().map((card) => [card.id, card])) }
+        : {}),
       batches: change?.batches ?? [],
       activeTaskId: activeTask?.id,
       pending,
@@ -5218,6 +5294,14 @@ export function buildStatusLine(snapshot: RuntimeSnapshot): string {
   if (snapshot.stage === 'roadmap') parts.push('路线图 ▸ 待 GR')
   else if (snapshot.awaitingGate) parts.push(`等待批准 ${snapshot.awaitingGate}`)
   else if (snapshot.stage) parts.push(`${stageCircle(snapshot.stage)} ${STAGE_LABELS[snapshot.stage] ?? snapshot.stage}`)
+  // T3.7：S4 状态条显示当前任务与 TDD 状态（如「已接续 C-003 · S4 · T3 RED」）。
+  if (snapshot.stage === 'S4' && snapshot.activeTaskId !== undefined) {
+    const active = snapshot.tasks[snapshot.activeTaskId]
+    if (active) {
+      const tdd = active.tdd === 'red' ? 'RED' : active.tdd === 'green' ? 'GREEN' : active.status
+      parts.push(`${active.id} ${tdd}`)
+    }
+  }
   const interceptCount = Object.values(snapshot.interceptCounts).reduce((sum, value) => sum + value, 0)
   if (interceptCount > 0 || snapshot.pending.length > 0) {
     parts.push(`拦截 ${interceptCount} · 待处理 ${snapshot.pending.length}`)

@@ -4,10 +4,16 @@
  * batch. Rendered as inline SVG with a deterministic layout computed by
  * `buildExecutionGraph` (pure, tested under SSR), so the browser bundle needs
  * no diagram library.
+ *
+ * Nodes are selectable (T5.1 "点开节点看任务卡和子 agent 状态"): when the
+ * caller passes `onSelectTask`, every node becomes a keyboard-focusable
+ * `role="button"` that reports clicks / Enter / Space, and `selectedTaskId`
+ * draws the highlight ring + `aria-pressed` state.
  */
 import React from 'react'
 import type { TFn } from '../i18n'
 import type { ExecutionGraphModel, ExecutionNodeModel } from '../model'
+import { taskStatusLabel } from '../model'
 import { COLORS, MONO_FONT, UI_FONT, taskColor } from '../theme'
 
 export interface ExecutionGraphProps {
@@ -15,6 +21,10 @@ export interface ExecutionGraphProps {
   t: TFn
   /** Height cap for very tall parallel batches. */
   maxHeight?: number
+  /** Currently selected task id (highlighted ring, `aria-pressed`). */
+  selectedTaskId?: string
+  /** Fired when a task node is activated by mouse or keyboard. */
+  onSelectTask?: (taskId: string) => void
 }
 
 const NODE_RADIUS = 6
@@ -48,7 +58,13 @@ function batchStatusColor(status: string): string {
   }
 }
 
-export function ExecutionGraph({ graph, t, maxHeight = 420 }: ExecutionGraphProps): React.ReactElement {
+export function ExecutionGraph({
+  graph,
+  t,
+  maxHeight = 420,
+  selectedTaskId,
+  onSelectTask,
+}: ExecutionGraphProps): React.ReactElement {
   if (graph.empty) {
     return (
       <div data-flowgate="execution-graph-empty" style={{ fontFamily: UI_FONT, fontSize: 11.5, color: COLORS.dim }}>
@@ -73,7 +89,9 @@ export function ExecutionGraph({ graph, t, maxHeight = 420 }: ExecutionGraphProp
         }}
       >
         <svg
-          role="img"
+          // Interactive nodes must not be presentational, so the img role only
+          // applies to the read-only graph (e.g. the Gates view).
+          role={onSelectTask !== undefined ? 'group' : 'img'}
           aria-label={t('tasks.graphAria', { n: graph.nodes.length, b: graph.batches.length })}
           viewBox={`0 0 ${width} ${height}`}
           width={width}
@@ -138,7 +156,13 @@ export function ExecutionGraph({ graph, t, maxHeight = 420 }: ExecutionGraphProp
 
           {/* Task nodes. */}
           {graph.nodes.map((node) => (
-            <TaskNode key={`node-${node.batch}-${node.id}`} node={node} />
+            <TaskNode
+              key={`node-${node.batch}-${node.id}`}
+              node={node}
+              t={t}
+              selected={selectedTaskId === node.id}
+              onSelectTask={onSelectTask}
+            />
           ))}
 
           {/* Integration checkpoints. */}
@@ -173,10 +197,59 @@ export function ExecutionGraph({ graph, t, maxHeight = 420 }: ExecutionGraphProp
   )
 }
 
-function TaskNode({ node }: { node: ExecutionNodeModel }): React.ReactElement {
+function TaskNode({
+  node,
+  t,
+  selected,
+  onSelectTask,
+}: {
+  node: ExecutionNodeModel
+  t: TFn
+  selected: boolean
+  onSelectTask?: (taskId: string) => void
+}): React.ReactElement {
   const color = taskColor(node.status)
+  const interactive = onSelectTask !== undefined
+  const activate = (): void => {
+    onSelectTask?.(node.id)
+  }
+  const activateFromKeyboard = (event: React.KeyboardEvent<SVGGElement>): void => {
+    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+    // Space would otherwise scroll the panel while activating the node.
+    event.preventDefault()
+    activate()
+  }
   return (
-    <g data-node-id={node.id} data-node-status={node.status} data-node-batch={node.batch}>
+    <g
+      data-node-id={node.id}
+      data-node-status={node.status}
+      data-node-batch={node.batch}
+      {...(selected ? { 'data-node-selected': 'true' } : {})}
+      {...(interactive
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-label': t('tasks.nodeAria', { id: node.id, status: taskStatusLabel(node.status, t) }),
+            'aria-pressed': selected,
+            onClick: activate,
+            onKeyDown: activateFromKeyboard,
+          }
+        : {})}
+      style={{ cursor: interactive ? 'pointer' : 'default' }}
+    >
+      {selected ? (
+        <rect
+          data-node-selection-ring="true"
+          x={node.x - 2}
+          y={node.y - 2}
+          width={node.width + 4}
+          height={node.height + 4}
+          rx={NODE_RADIUS + 2}
+          fill="none"
+          stroke={COLORS.info}
+          strokeWidth={2}
+        />
+      ) : null}
       <rect
         x={node.x}
         y={node.y}

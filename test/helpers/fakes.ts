@@ -79,7 +79,7 @@ export class FakeGit implements GitPort {
   private headSha = 'abc1234'
   private files: string[] = []
   private readonly gitClock: FakeClock
-  readonly commits: { message: string; at: string }[] = []
+  readonly commits: { message: string; at: string; cwd: string }[] = []
   readonly branches: string[] = ['main']
 
   constructor(clock: FakeClock, repo = true) {
@@ -138,8 +138,8 @@ export class FakeGit implements GitPort {
 
   async add(): Promise<void> {}
 
-  async commit(_cwd: string, message: string): Promise<void> {
-    this.commits.push({ message, at: this.gitClock.now().toISOString() })
+  async commit(cwd: string, message: string): Promise<void> {
+    this.commits.push({ message, at: this.gitClock.now().toISOString(), cwd })
     this.headSha = `sha-${this.commits.length}`
     this.files = []
   }

@@ -19,7 +19,7 @@
 import type { DshAgent, DshContext, DshToolRuntime, DshSubagentRuntime } from '../adapters/dsh-types.js'
 import type { EngineLike } from '../types.js'
 import type { HostRuntime } from '../runtime.js'
-import type { DispatchTaskEnvelope } from '../../core/types.js'
+import type { DispatchTaskEnvelope, TaskStatus } from '../../core/types.js'
 import { defineHostTool, fail, ok } from '../tools/schema.js'
 import { HostError, toAgentError } from '../errors.js'
 import { FLOWGATE_PRESETS } from '../guard/delegation.js'
@@ -452,7 +452,32 @@ function parseExecutorSummary(structured: unknown): ExecutorSummary {
   }
 }
 
-/** 子 agent 结算后的收尾：审查 → 任务门 → 记账 → 完成通知；批次完成时做集成检查点。 */
+/**
+ * 已由执行者（或其它路径）成功结算的状态。
+ *
+ * H1：执行者子 agent 的 prompt 要求它自己调用 `flow_task_done`；它也可能真的这么做。
+ * 届时任务已是 `done`，host finalize 再调 `engine.taskDone` 会抛"已经完成"，被外层
+ * catch 转成 `engine.taskFailed`，把成功任务改判失败并建 blocker。成功态只能由
+ * 结算者推进，这里先探测状态，已结算就跳过重复结算。
+ */
+const SETTLED_SUCCESS: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['done', 'skipped'])
+
+/** 读取任务当前状态；引擎异常/任务缺失时返回 undefined（探测失败不中断结算路径）。 */
+function taskStatusOf(engine: EngineLike, taskId: string): TaskStatus | undefined {
+  try {
+    return engine.currentChange()?.tasks?.[taskId]?.status
+  } catch {
+    return undefined
+  }
+}
+
+/** 任务是否已被成功结算（done/skipped）——重复结算不得再调 taskDone/taskFailed。 */
+function taskSettledSuccessfully(engine: EngineLike, taskId: string): boolean {
+  const status = taskStatusOf(engine, taskId)
+  return status !== undefined && SETTLED_SUCCESS.has(status)
+}
+
+/** 子 agent 结算后的收尾：探测已结算 → 审查 → 任务门 → 记账 → 完成通知；批次完成时做集成检查点。 */
 async function finalizeTask(
   runtime: HostRuntime,
   engine: EngineLike,
@@ -476,8 +501,18 @@ async function finalizeTask(
     lines.push('下一步：主会话用 ask_user_question 把上面的问题问负责人，拿到答复后再继续派发/执行。')
   }
   const failed = typeof summary === 'string' || result === null || result.stopReason !== 'completed'
+  const settledStatus = taskStatusOf(engine, envelope.taskId)
+  const settled = settledStatus !== undefined && SETTLED_SUCCESS.has(settledStatus)
   try {
-    if (failed) {
+    if (settled) {
+      // H1：执行者可能已自行 flow_task_done（或任务被 skip）。此时状态机不允许再
+      // taskDone/taskFailed：先记录原因，成功态保持不动。
+      const reason =
+        typeof summary === 'string' ? summary : failed ? `子 agent 停止原因：${result?.stopReason ?? '未知'}` : parsed.summary
+      lines.push(
+        `任务 ${envelope.taskId} 已结算为 ${settledStatus}（执行者已自行调用 flow_task_done 或该任务已跳过），跳过重复结算；本次结果（${reason}）只记录、不改变成功态。`,
+      )
+    } else if (failed) {
       await engine.taskFailed(envelope.taskId, typeof summary === 'string' ? summary : `子 agent 停止原因：${result?.stopReason ?? '未知'}`)
       lines.push('任务已标记失败，等待负责人处理（/flow 查看待处理项）。')
     } else {
@@ -507,11 +542,17 @@ async function finalizeTask(
       if (!outcome.passed) lines.push(`任务门未通过；负责人可运行 /flow 查看，或让执行者继续修复（重新 flow_dispatch_next）。`)
     }
   } catch (error) {
-    lines.push(`任务门执行异常：${toAgentError(error).error}`)
-    try {
-      await engine.taskFailed(envelope.taskId, toAgentError(error).error)
-    } catch {
-      // 忽略。
+    const info = toAgentError(error)
+    if (taskSettledSuccessfully(engine, envelope.taskId)) {
+      // H1：结算异常发生时任务已是成功态（并发/重复结算），绝不把它改判失败。
+      lines.push(`任务结算异常（已记录，不覆盖成功态）：${info.error}`)
+    } else {
+      lines.push(`任务门执行异常：${info.error}`)
+      try {
+        await engine.taskFailed(envelope.taskId, info.error)
+      } catch {
+        // 忽略。
+      }
     }
   }
   // P1-2：并行批次槽位释放后立即按执行图自动补位（不等主会话再调用 dispatch）。

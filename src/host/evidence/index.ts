@@ -114,6 +114,37 @@ const COMPRESS_THRESHOLD_CHARS = 1_200
 /** 替换后内容上限（防止超大摘要）。 */
 const MAX_SUMMARY_CHARS = 8_000
 
+/**
+ * H4：技能本会话已加载时的替换提示。
+ * 宿主 skill 工具每次都会把技能全文注入上下文；重复加载只会浪费 KV 预算，
+ * 这里用短提示替换本次输出，引导沿用第一次加载的内容。
+ */
+export function duplicateSkillNotice(skillName: string): string {
+  return `[FlowGate] 技能 ${skillName} 本会话已加载，不重复注入全文；按第一次加载的内容继续执行。`
+}
+
+/**
+ * H4：把重复加载的 skill 工具输出替换成短提示。
+ *
+ * 只处理 `accept` 决策：`accept{value}` 的形状（结构化 value 而非 content）保持
+ * 原样，避免静默破坏宿主工具结果；block 不属于本插件的输出替换范围。替换失败
+ * 或形状不支持时调用方回退到原决策（绝不丢结果）。
+ */
+export function replaceDuplicateSkillOutput(decision: DshPostToolDecision, skillName: string): DshPostToolDecision {
+  if (decision.kind !== 'accept' || 'value' in decision) return decision
+  return { ...decision, content: [{ type: 'text', text: duplicateSkillNotice(skillName) }] }
+}
+
+/**
+ * H4 补充：派发/审查子 agent 有独立上下文，同一技能在它那里首次加载仍需要全文；
+ * 只有主会话（或身份未知）的重复加载才做输出替换，避免子 agent 因主会话账本
+ * "已加载"而拿不到技能正文。
+ */
+function skillDedupeAppliesTo(runtime: HostRuntime, exec: DshToolExecution): boolean {
+  const role = exec.agent === undefined ? 'unknown' : runtime.roleOf(String(exec.agent.id)).role
+  return role === 'main' || role === 'unknown'
+}
+
 /** 结果内容里的纯文本。 */
 export function textOf(content: readonly DshContentBlock[] | undefined): string {
   if (!content) return ''
@@ -196,17 +227,28 @@ export function installEvidenceCompression(runtime: HostRuntime): void {
       async (exec: DshToolExecution, result: Readonly<DshToolResult>, next: () => Promise<DshPostToolDecision>) => {
         const decision = await next()
         // 技能加载回执（T2.4）：过 G1/G3 前必须已经加载过阶段核心技能。
+        // H4：宿主 skill 工具每次都会重新注入技能全文；recordSkillLoaded 返回
+        // duplicate 时把本次输出换成短提示，避免同一会话重复灌入全文。
+        let effective = decision
         const skillName = skillNameFromTool(exec.name, exec.arguments)
         const engineForSkill = runtime.engine()
         if (skillName !== null && engineForSkill) {
           try {
             const body = 'content' in decision && Array.isArray(decision.content) ? textOf(decision.content) : textOf(result.content)
             const receipt = await engineForSkill.recordSkillLoaded(skillName, sha256Hex(body))
-            runtime.noteFeature(
-              'skills',
-              receipt.duplicate ? `技能 ${skillName} 本会话已加载过（不重复注入全文）` : `已记录技能加载回执：${skillName}`,
-            )
+            if (receipt.duplicate) {
+              if (skillDedupeAppliesTo(runtime, exec)) {
+                effective = replaceDuplicateSkillOutput(decision, skillName)
+                runtime.noteFeature('skills', `技能 ${skillName} 本会话已加载过（不重复注入全文）`)
+              } else {
+                // 子 agent 上下文独立：保留全文，只记录说明。
+                runtime.noteFeature('skills', `技能 ${skillName} 主会话已加载过，但子 agent 上下文独立，保留全文`)
+              }
+            } else {
+              runtime.noteFeature('skills', `已记录技能加载回执：${skillName}`)
+            }
           } catch (error) {
+            // 记录失败一律回退原输出（不能因为记账失败吞掉技能全文）。
             runtime.noteFeature('skills', `技能回执记录失败：${toAgentError(error).error}`)
           }
         }
@@ -221,7 +263,7 @@ export function installEvidenceCompression(runtime: HostRuntime): void {
             runtime.noteFeature('clarify', `澄清问答落账失败：${toAgentError(error).error}`)
           }
         }
-        const compressed = await compressPostExecute(runtime, exec, result, decision)
+        const compressed = await compressPostExecute(runtime, exec, result, effective)
         // 任何工具执行后都可能改变输入文件（源码/测试），刷新证据新鲜度并扫篡改。
         schedulePostToolMaintenance(runtime)
         return compressed

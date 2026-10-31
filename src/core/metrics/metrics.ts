@@ -320,7 +320,7 @@ export function computeMetrics(input: {
       const round = numberFromData(event, 'round')
       if (round !== null) ledgerRounds.add(round)
     }
-    const rounds = change.clarifyRounds ?? clarify?.rounds ?? (ledgerRounds.size > 0 ? ledgerRounds.size : 0)
+    const rounds = Math.max(change.clarifyRounds ?? 0, clarify?.rounds ?? 0, ledgerRounds.size)
     const questions = clarify?.qa.length ?? countWhere(ledger, ['clarify.asked'], () => true)
     const customAnswers = (clarify?.qa ?? []).filter((qa) => {
       const answer = qa.answer.trim()
@@ -457,17 +457,17 @@ export function computeMetrics(input: {
 
   // M-16 路线图进度 -----------------------------------------------------------
   {
-    const roadmapEvent = eventsOf(ledger, ['roadmap.approved'])
+    const roadmapEvent = eventsOf(ledger, ['roadmap.progress', 'roadmap.approved'])
       .filter((event) => numberFromData(event, 'total', 'delivered') !== null)
       .pop()
     const total = roadmapEvent ? numberFromData(roadmapEvent, 'total') : null
     const delivered = roadmapEvent ? numberFromData(roadmapEvent, 'delivered') : null
     if (total !== null && delivered !== null && total > 0) {
       metrics['M-16'] = percent(delivered, total)
-      notes['M-16'] = `已交付 ${delivered} ÷ 路线图 ${total}（来自账本 roadmap.approved 事件）`
+      notes['M-16'] = `已交付 ${delivered} ÷ 路线图 ${total}（来自账本 roadmap.progress/roadmap.approved 事件）`
     } else {
       metrics['M-16'] = '未知'
-      notes['M-16'] = '路线图数据不在 ArtifactBundle 中；需要 roadmap.md/路线图模块把已交付与总数写进账本 roadmap.approved 事件'
+      notes['M-16'] = '路线图数据不在 ArtifactBundle 中；需要 roadmap.md/路线图模块把已交付与总数写进账本'
     }
   }
 

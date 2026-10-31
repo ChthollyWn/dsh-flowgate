@@ -6,13 +6,15 @@ import { setupPlugin, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
 import {
   buildCompressedSummary,
+  duplicateSkillNotice,
   extractRunFacts,
   installEvidenceCompression,
+  replaceDuplicateSkillOutput,
   shouldCompress,
   textOf,
 } from '../../src/host/evidence/index.js'
 import type { EvidenceReceipt } from '../../src/core/types.js'
-import { createFakeEngine } from '../../src/host/testing/fake-ctx.js'
+import { createFakeAgent, createFakeEngine } from '../../src/host/testing/fake-ctx.js'
 import { createFakeContext, createFakeDeps, createFakePorts, createFakeToolRuntime } from '../../src/host/testing/fake-ctx.js'
 import { startHostPlugin } from '../../src/host/index.js'
 
@@ -159,5 +161,101 @@ describe('tools/post-execute 压缩', () => {
       async () => ({ kind: 'accept' }),
     )
     expect(result).toEqual({ kind: 'accept' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// H4：技能重复加载（本会话已加载时不重复注入全文）
+// ---------------------------------------------------------------------------
+
+describe('技能重复加载（H4）', () => {
+  // 真实 skill 工具的 render 会把整份技能正文作为 text block 返回。
+  const skillBody = `# skill flow-plan\n${'步骤：读需求、写计划、跑验证。\n'.repeat(60)}`
+
+  async function runSkillTool(
+    h: PluginHarness,
+    nextDecision: () => Promise<{ kind: 'accept'; content?: { type: string; text?: string }[] }> = async () => ({ kind: 'accept' }),
+  ) {
+    return await h.ctx.runWaterfall(
+      'tools/post-execute',
+      [
+        { name: 'skill', arguments: { name: 'flow-plan' }, callId: 'skill-1', agent: h.agent },
+        { content: [{ type: 'text', text: skillBody }], isError: false },
+      ],
+      nextDecision,
+    )
+  }
+
+  it('recordSkillLoaded 返回 duplicate 时把全文替换为"已加载"短提示', async () => {
+    harness = await setupPlugin()
+    const calls: { name: string; hash: string }[] = []
+    harness.engine.recordSkillLoaded = async (name: string, hash = '') => {
+      calls.push({ name, hash })
+      return { duplicate: true }
+    }
+    const result = (await runSkillTool(harness)) as { kind: string; content?: { type: string; text?: string }[] }
+    expect(result.kind).toBe('accept')
+    const text = textOf(result.content as never)
+    expect(text).toContain('技能 flow-plan 本会话已加载，不重复注入全文')
+    expect(text).not.toContain('步骤：读需求、写计划、跑验证。')
+    expect(calls.map((call) => call.name)).toEqual(['flow-plan'])
+    expect(calls[0]?.hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(harness.runtime.featureNotes.skills?.join('；')).toContain('技能 flow-plan 本会话已加载过（不重复注入全文）')
+  })
+
+  it('首次加载（duplicate=false）保持原输出（不覆盖 content）', async () => {
+    harness = await setupPlugin()
+    harness.engine.recordSkillLoaded = async () => ({ duplicate: false })
+    const result = (await runSkillTool(harness)) as { kind: string; content?: { type: string; text?: string }[] }
+    expect(result.kind).toBe('accept')
+    // 不替换 = 不新增 content（宿主继续用原始工具结果全文）。
+    expect(result.content).toBeUndefined()
+    expect(harness.runtime.featureNotes.skills?.join('；')).toContain('已记录技能加载回执：flow-plan')
+  })
+
+  it('recordSkillLoaded 抛错时回退不改（不覆盖 content）并记录降级原因', async () => {
+    harness = await setupPlugin()
+    harness.engine.recordSkillLoaded = async () => {
+      throw new Error('账本写入失败')
+    }
+    const result = (await runSkillTool(harness)) as { kind: string; content?: { type: string; text?: string }[] }
+    expect(result.kind).toBe('accept')
+    expect(result.content).toBeUndefined()
+    expect(harness.runtime.featureNotes.skills?.join('；')).toContain('技能回执记录失败：账本写入失败')
+  })
+
+  it('派发子 agent 的重复加载仍保留全文（它有独立上下文）', async () => {
+    harness = await setupPlugin()
+    harness.engine.recordSkillLoaded = async () => ({ duplicate: true })
+    const executor = createFakeAgent({ id: 'child-exec', cwd: '/fake/project', ctx: harness.ctx })
+    harness.runtime.registerAgentRole('child-exec', 'executor')
+    const result = (await harness.ctx.runWaterfall(
+      'tools/post-execute',
+      [
+        { name: 'skill', arguments: { name: 'flow-plan' }, callId: 'skill-child', agent: executor },
+        { content: [{ type: 'text', text: skillBody }], isError: false },
+      ],
+      async () => ({ kind: 'accept' }),
+    )) as { kind: string; content?: unknown }
+    expect(result.kind).toBe('accept')
+    // 不替换 = 不新增 content（子 agent 继续拿到技能全文）。
+    expect(result.content).toBeUndefined()
+    expect(harness.runtime.featureNotes.skills?.join('；')).toContain('子 agent 上下文独立，保留全文')
+  })
+
+  it('replaceDuplicateSkillOutput 只替换 accept 决策；accept{value} / block 原样返回', () => {
+    expect(duplicateSkillNotice('flow-plan')).toContain('技能 flow-plan 本会话已加载，不重复注入全文')
+    const block = { kind: 'block', feedback: [{ type: 'text', text: 'no' }] } as never
+    expect(replaceDuplicateSkillOutput(block, 'x')).toBe(block)
+    const acceptValue = { kind: 'accept', value: { ok: true } } as never
+    expect(replaceDuplicateSkillOutput(acceptValue, 'x')).toBe(acceptValue)
+    const acceptContent = { kind: 'accept', content: [{ type: 'text', text: 'full' }], additionalContexts: [] } as never
+    const replaced = replaceDuplicateSkillOutput(acceptContent, 'x') as { content: { type: string; text?: string }[] }
+    expect(textOf(replaced.content)).toContain('技能 x 本会话已加载，不重复注入全文')
+    // 无 content 的 accept（保留 next 结果）也可替换成短提示。
+    const bareAccept = { kind: 'accept' } as never
+    expect(textOf((replaceDuplicateSkillOutput(bareAccept, 'y') as { content?: { type: string; text?: string }[] }).content)).toContain(
+      '技能 y 本会话已加载',
+    )
   })
 })

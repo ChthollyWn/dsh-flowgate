@@ -1053,6 +1053,7 @@ export type LedgerEventType =
   | 'spec.merged'
   | 'flow.init'
   | 'roadmap.approved'
+  | 'roadmap.progress'
   | 'report.generated'
   | 'dispatch.started'
   | 'dispatch.completed'
@@ -1121,6 +1122,13 @@ export interface RuntimeSnapshot {
   pendingGate?: GateId
   pipeline: StageProgress[]
   tasks: Record<string, TaskState>
+  /**
+   * Parsed task cards for the current change (T5.1): the panel needs
+   * scope / verify groups / covers to render the task detail when a graph node
+   * or board card is selected. `tasks` stays the runtime state (frozen wire
+   * shape); this richer map is additive and optional for older hosts.
+   */
+  taskCards?: Record<string, TaskCard>
   batches: BatchState[]
   activeTaskId?: string
   pending: PendingItem[]

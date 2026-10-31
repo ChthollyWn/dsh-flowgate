@@ -98,6 +98,15 @@ function maxTasksOf(ctx: GateCheckContext): number {
   return limitsOf(ctx).change_max_tasks > 0 ? limitsOf(ctx).change_max_tasks : 12
 }
 
+/**
+ * T2.8：低复杂度走快车道，S3 只允许 1 张任务卡；其它等级用配置上限
+ * （`0` 表示未配置，回退默认 12）。
+ */
+function changeTaskLimit(ctx: GateCheckContext): number {
+  if (ctx.change.complexity === 'low') return 1
+  return maxTasksOf(ctx)
+}
+
 function mergedCommands(ctx: GateCheckContext): CommandSettings {
   const merged: CommandSettings = {}
   const apply = (source: CommandSettings | undefined): void => {
@@ -512,11 +521,20 @@ export function checkClarifyQaChanged(ctx: GateCheckContext): CheckOutcome {
   const label = '问答记录写清「这个回答改变了什么」'
   const clarify = ctx.artifacts.clarify
   if (!clarify || clarify.qa.length === 0) return pass(item, label, 'P1', ['没有问答记录（由六要素/假设覆盖）'])
-  const missing = clarify.qa.filter((row) => row.changed.trim() === '')
+  // 宿主自动落账未带说明时写占位符；占位符不算「写清」，否则 T2.2 验收 #3 形同虚设。
+  const PLACEHOLDERS = new Set(['（待补充）', '（未记录）', '-', '—', '无'])
+  const missing = clarify.qa.filter((row) => {
+    const changed = row.changed.trim()
+    return changed === '' || PLACEHOLDERS.has(changed)
+  })
   if (missing.length > 0) {
-    return fail(item, label, '问答表每一行都要写「这个回答改变了什么」：补上后重新提交 G1。', 'P1', {
-      details: missing.map((row) => `问题「${row.question}」缺少改变说明`),
-    })
+    return fail(
+      item,
+      label,
+      '问答表每一行都要写「这个回答改变了什么」：编辑 clarify.md 补上每一行的说明后重新提交 G1（占位符「（待补充）」「（未记录）」不算）。',
+      'P1',
+      { details: missing.map((row) => `问题「${row.question}」缺少改变说明`) },
+    )
   }
   return pass(item, label, 'P1', [`${clarify.qa.length} 条问答都有改变说明`])
 }
@@ -867,6 +885,17 @@ export function checkBaseline(ctx: GateCheckContext): CheckOutcome {
       const baselineEvidence = ctx.evidence.filter(
         (receipt) => (receipt.kind === 'build' || receipt.kind === 'lint' || receipt.kind === 'typecheck') && receipt.exitCode === 0,
       )
+      // T2.3：test: none 时必须以真实跑通的 build/lint/typecheck 回执作基线，
+      // 不能只凭 `change.baseline` 字段存在就通过。
+      if (baselineEvidence.length === 0) {
+        return fail(
+          item,
+          label,
+          'test: none 时要用构建、类型检查或 lint 的通过结果作基线：G2 前先运行对应验证组（插件会尝试自动跑 build/lint/typecheck）。',
+          'P0',
+          { details: [commands.test === 'none' ? 'test: none' : '未声明测试命令'] },
+        )
+      }
       return pass(item, label, 'P0', [
         '基线已记录（项目未声明测试命令）',
         ...baselineEvidence.map((receipt) => `${receipt.kind}: ${receipt.command}`),
@@ -1207,7 +1236,7 @@ export function checkVerifyCommands(ctx: GateCheckContext): CheckOutcome {
 /** G3: total task count within the configured limit. */
 export function checkTaskCount(ctx: GateCheckContext): CheckOutcome {
   const item = 'g3.taskCount'
-  const limit = maxTasksOf(ctx)
+  const limit = changeTaskLimit(ctx)
   const label = `任务数不超过 ${limit}`
   const tasksDoc = ctx.artifacts.tasks
   if (!tasksDoc) return fail(item, label, '缺少 tasks.md。', 'P0')

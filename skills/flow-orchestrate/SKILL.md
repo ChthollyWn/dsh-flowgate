@@ -8,7 +8,7 @@ whenToUse: G3 已被批准、进入 S4 执行阶段，需要在派发模式下�
 
 ## 何时用
 
-- G3 批准后进入 S4，`dispatch` 为 `subagent` 或 `auto` 时（并行批次与规模 M 的任务派子 agent）。
+- G3 批准后进入 S4，`dispatch` 为 `subagent` 或 `auto` 时：`run: main` 由主会话执行；`run: auto / subagent` 由派发宿主起子 agent（当前版本 `auto` 未按 size 自动路由；需要主会话做的小任务请显式写 `run: main`）。
 - 某个任务失败、合并冲突、子 agent 回传需要负责人决定的问题时。
 
 不适用：`dispatch: inline` 时由主会话按顺序自己领取任务（用 `flow_task_start`）。

@@ -61,6 +61,7 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
             stage: model.stage,
           },
           model.rules,
+          model.snapshot,
         )
       : null
 
@@ -344,8 +345,25 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
               <Notice text={t('intercepts.trialUnavailable')} tone="warn" t={t} />
             ) : null}
             {trial !== null ? (
-              <div data-flowgate="trial-result" data-decision={trial.decision} style={{ fontSize: 11.5 }}>
-                {trial.rule !== undefined ? (
+              <div
+                data-flowgate="trial-result"
+                data-decision={trial.decision}
+                data-basis={trial.basis}
+                data-approximate="true"
+                style={{ fontSize: 11.5 }}
+              >
+                {trial.basis === 'off' ? (
+                  <span style={{ color: COLORS.pass }}>{t('intercepts.trialResultOff')}</span>
+                ) : trial.basis === 'locked' ? (
+                  <span style={{ color: COLORS.fail }}>{t('intercepts.trialResultLocked')}</span>
+                ) : trial.basis === 'exception' && trial.exception !== undefined ? (
+                  <span style={{ color: COLORS.pass }}>
+                    {t('intercepts.trialResultException', {
+                      id: trial.exception.id,
+                      rule: trial.exception.ruleId,
+                    })}
+                  </span>
+                ) : trial.rule !== undefined ? (
                   <span style={{ color: trial.decision === 'allow' ? COLORS.pass : COLORS.fail }}>
                     {t('intercepts.trialResultRule', {
                       rule: trial.rule.id,
@@ -357,7 +375,14 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
                 ) : (
                   <span style={{ color: COLORS.pass }}>{t('intercepts.trialResultAllow')}</span>
                 )}
-                <div style={{ color: COLORS.faint, fontSize: 10, marginTop: 2 }}>{t('intercepts.trialLocal')}</div>
+                <div style={{ color: COLORS.faint, fontSize: 10, marginTop: 2 }} data-flowgate="trial-approximate">
+                  {t('intercepts.trialLocal')}
+                </div>
+                {trial.uncoveredRules.length > 0 ? (
+                  <div style={{ color: COLORS.warn, fontSize: 10, marginTop: 2 }} data-flowgate="trial-uncovered">
+                    {t('intercepts.trialUncovered', { rules: trial.uncoveredRules.join('、') })}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

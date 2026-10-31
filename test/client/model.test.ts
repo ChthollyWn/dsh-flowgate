@@ -17,6 +17,7 @@ import {
 } from '../../src/client/model'
 import { createTranslator } from '../../src/client/i18n'
 import type { RuleRow } from '../../src/client/types'
+import type { ExceptionRecord, TaskState } from '../../src/core/types'
 import { makeEmptyProjection, makeProjection, makeSnapshot } from './mock'
 
 const zh = createTranslator('zh')
@@ -194,6 +195,44 @@ describe('panel model', () => {
     const proj = { ...makeProjection(), learning: undefined }
     expect(buildPanelModel(proj, zh).learning).toBe('detail')
   })
+
+  it('maps task-card plan extras used by the task detail (T5.1)', () => {
+    const base = makeSnapshot()
+    const tasks: Record<string, TaskState> = {
+      ...base.tasks,
+      T2: {
+        ...base.tasks.T2!,
+        title: '回调幂等',
+        scope: ['src/main/java/RenewalService.java'],
+        newFiles: ['src/main/java/RenewalIdempotency.java'],
+        verify: [{ group: 'unit', command: 'mvn -q test' }],
+        covers: ['R1.S1'],
+        tests: ['RenewalServiceTest'],
+        redObserved: true,
+      } as unknown as TaskState,
+    }
+    const model = buildPanelModel(makeProjection({ snapshot: { tasks } }), zh)
+    const t2 = model.tasks.find((task) => task.id === 'T2')
+    expect(t2?.title).toBe('回调幂等')
+    expect(t2?.batchMode).toBe('parallel')
+    expect(t2?.batchStatus).toBe('running')
+    expect(t2?.scope).toEqual(['src/main/java/RenewalService.java'])
+    expect(t2?.newFiles).toEqual(['src/main/java/RenewalIdempotency.java'])
+    expect(t2?.verify).toEqual(['unit · mvn -q test'])
+    expect(t2?.covers).toEqual(['R1.S1'])
+    expect(t2?.tests).toEqual(['RenewalServiceTest'])
+    expect(t2?.redObserved).toBe(true)
+    expect(t2?.evidenceIds).toEqual(['E-2'])
+    expect(t2?.reviewIds).toBeUndefined()
+    expect(t2?.findings).toBeUndefined()
+    // Review findings are flattened from the panel review rows for the task.
+    const t1 = model.tasks.find((task) => task.id === 'T1')
+    expect(t1?.findings).toEqual([
+      { severity: 'major', file: 'RenewalService.java', line: 88, message: '缺少幂等键' },
+      { severity: 'minor', file: 'RenewalService.java', message: '命名不一致' },
+    ])
+    expect(t1?.reviewIds).toEqual(['R-1'])
+  })
 })
 
 describe('trialRuleLocal (FR-9.4 fallback)', () => {
@@ -202,9 +241,22 @@ describe('trialRuleLocal (FR-9.4 fallback)', () => {
     { id: 'R-PROTECTED', decision: 'deny', why: '', unlock: '', hits: 0 },
     { id: 'R-PUSH', decision: 'human', why: '', unlock: '', hits: 0 },
   ]
+  const sourceWrite = { tool: 'edit', path: 'src/main/java/A.java', stage: 'S3' }
+
+  function exception(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
+    return {
+      id: 'EX-1',
+      ruleId: 'R-STAGE-SRC',
+      changeId: 'C-003',
+      pathPattern: 'src/**',
+      reason: '迁移期放行',
+      createdAt: '2026-10-31T09:00:00+08:00',
+      ...overrides,
+    }
+  }
 
   it('blocks writing source code during S0–S3', () => {
-    const result = trialRuleLocal({ tool: 'edit', path: 'src/main/java/A.java', stage: 'S3' }, rules)
+    const result = trialRuleLocal(sourceWrite, rules)
     expect(result.decision).toBe('deny')
     expect(result.rule?.id).toBe('R-STAGE-SRC')
   })
@@ -222,5 +274,92 @@ describe('trialRuleLocal (FR-9.4 fallback)', () => {
 
   it('allows ordinary docs writes in S3', () => {
     expect(trialRuleLocal({ tool: 'edit', path: 'docs/notes.md', stage: 'S3' }, rules).decision).toBe('allow')
+  })
+
+  it('keeps the two-argument call backward compatible', () => {
+    const result = trialRuleLocal(sourceWrite, rules)
+    expect(result.decision).toBe('deny')
+    expect(result.basis).toBe('rule')
+    expect(result.uncoveredRules).toEqual([])
+    // The result is always marked as an approximation of the host engine.
+    expect(result.approximate).toBe(true)
+  })
+
+  describe('snapshot-aware fidelity (T5.1)', () => {
+    it('allows everything when FlowGate is off', () => {
+      const result = trialRuleLocal(sourceWrite, rules, { off: true, exceptions: [exception()] })
+      expect(result.decision).toBe('allow')
+      expect(result.basis).toBe('off')
+      expect(result.uncoveredRules).toEqual([])
+    })
+
+    it('denies in locked mode, even with a matching exception', () => {
+      const result = trialRuleLocal(sourceWrite, rules, { locked: true, exceptions: [exception()] })
+      expect(result.decision).toBe('deny')
+      expect(result.basis).toBe('locked')
+      expect(result.heuristic).toBe('R-LOCK')
+      expect(result.exception).toBeUndefined()
+    })
+
+    it('uses the effective rule decisions projected by the host', () => {
+      const overridden: RuleRow[] = [
+        { id: 'R-STAGE-SRC', decision: 'human', why: '', unlock: '', hits: 0 },
+        { id: 'R-PROTECTED', decision: 'allow', why: '', unlock: '', hits: 0 },
+        { id: 'R-PUSH', decision: 'human', why: '', unlock: '', hits: 0 },
+        { id: 'R-DELETE', decision: 'allow', why: '', unlock: '', hits: 0 },
+      ]
+      expect(trialRuleLocal(sourceWrite, overridden).decision).toBe('human')
+      expect(trialRuleLocal({ tool: 'bash', path: '.flowgate/config.yaml' }, overridden).decision).toBe('allow')
+      expect(
+        trialRuleLocal({ tool: 'delete', path: 'src/main/java/A.java', stage: 'S4' }, overridden).decision,
+      ).toBe('allow')
+    })
+
+    it('allows when an active exception cancels the matched rule', () => {
+      const result = trialRuleLocal(sourceWrite, rules, { changeId: 'C-003', exceptions: [exception()] })
+      expect(result.decision).toBe('allow')
+      expect(result.basis).toBe('exception')
+      expect(result.rule?.id).toBe('R-STAGE-SRC')
+      expect(result.exception).toEqual({ id: 'EX-1', ruleId: 'R-STAGE-SRC' })
+    })
+
+    it('ignores exceptions for another rule, path, change or a revoked one', () => {
+      const cases: ExceptionRecord[][] = [
+        [exception({ ruleId: 'R-PUSH' })],
+        [exception({ pathPattern: 'docs/**' })],
+        [exception({ changeId: 'C-999' })],
+        [exception({ revokedAt: '2026-10-31T10:00:00+08:00' })],
+      ]
+      for (const exceptions of cases) {
+        const result = trialRuleLocal(sourceWrite, rules, { changeId: 'C-003', exceptions })
+        expect(result.decision, JSON.stringify(exceptions)).toBe('deny')
+        expect(result.basis).toBe('rule')
+        expect(result.exception).toBeUndefined()
+      }
+    })
+
+    it('does not let exceptions cancel protected paths (core §13 hard stop)', () => {
+      const result = trialRuleLocal({ tool: 'bash', path: '.flowgate/config.yaml' }, rules, {
+        changeId: 'C-003',
+        exceptions: [exception({ ruleId: 'R-PROTECTED', pathPattern: '.flowgate/**' })],
+      })
+      expect(result.decision).toBe('deny')
+      expect(result.basis).toBe('rule')
+    })
+
+    it('reports project-defined rules the browser cannot evaluate', () => {
+      const extended: RuleRow[] = [
+        ...rules,
+        { id: 'R-CUSTOM', decision: 'deny', why: '项目规则', unlock: '找负责人', hits: 0, source: '项目' },
+      ]
+      const result = trialRuleLocal(sourceWrite, extended)
+      expect(result.uncoveredRules).toEqual(['R-CUSTOM'])
+      expect(result.basis).toBe('rule')
+      expect(result.approximate).toBe(true)
+      // Built-in ids are not reported as uncovered.
+      expect(trialRuleLocal({ tool: 'edit', path: 'docs/notes.md', stage: 'S3' }, extended).uncoveredRules).toEqual([
+        'R-CUSTOM',
+      ])
+    })
   })
 })

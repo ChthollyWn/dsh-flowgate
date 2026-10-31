@@ -1,10 +1,13 @@
 /**
  * Tasks view (FR-8.2 / T3.6 / T5.1): live execution-plan diagram plus the task
- * board (todo / running / review / done / blocked). Cards show scope, TDD
- * badges (RED/GREEN), evidence freshness, review findings, sub-agent status and
- * worktree. Every owner-decidable pending item (scope / risk / plan / rule /
- * conflict / blocker) gets its approve/reject (or unblock) entry here; the
- * actual host call + `/flow` command fallback lives in `../../actions`.
+ * board (todo / running / review / done / blocked). Cards show TDD badges
+ * (RED/GREEN), evidence freshness, review findings, sub-agent status and
+ * worktree. Selecting a graph node or task card highlights it and expands the
+ * task-detail block (status / batch / TDD / evidence / findings / scope /
+ * new_files / verify groups / worktree / agent). Every owner-decidable pending
+ * item (scope / risk / plan / rule / conflict / blocker) gets its approve/reject
+ * (or unblock) entry here; the actual host call + `/flow` command fallback lives
+ * in `../../actions`.
  */
 import React from 'react'
 import type { ViewProps } from '../view-types'
@@ -87,19 +90,50 @@ function EvidenceBadge({
   return <Badge label={t('tasks.evidence.none')} color={COLORS.dim} dataBadge="evidence-none" />
 }
 
-function TaskCard({ task, t }: { task: TaskCardModel; t: ViewProps['t'] }): React.ReactElement {
+/** Enter / Space activation shared by the task cards and graph nodes (T5.1). */
+function activateFromKeyboard(event: React.KeyboardEvent, activate: () => void): void {
+  if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+  // Space would otherwise scroll the panel while activating the card.
+  event.preventDefault()
+  activate()
+}
+
+function TaskCard({
+  task,
+  t,
+  selected,
+  onSelect,
+}: {
+  task: TaskCardModel
+  t: ViewProps['t']
+  selected: boolean
+  onSelect?: () => void
+}): React.ReactElement {
+  const interactive = onSelect !== undefined
   return (
     <div
       data-flowgate="task-card"
       data-task-id={task.id}
       data-task-status={task.status}
+      {...(selected ? { 'data-task-selected': 'true' } : {})}
+      {...(interactive
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-pressed': selected,
+            'aria-label': t('tasks.cardAria', { id: task.id, status: taskStatusLabel(task.status, t) }),
+            onClick: onSelect,
+            onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => activateFromKeyboard(event, onSelect),
+          }
+        : {})}
       style={{
         fontFamily: UI_FONT,
-        border: `1px solid ${COLORS.border}`,
+        border: `1px solid ${selected ? COLORS.info : COLORS.border}`,
         borderInlineStart: `3px solid ${taskColor(task.status)}`,
         borderRadius: 7,
         padding: '5px 7px',
-        background: COLORS.surface,
+        background: selected ? COLORS.infoBg : COLORS.surface,
+        cursor: interactive ? 'pointer' : 'default',
         display: 'grid',
         gap: 3,
         fontSize: 11,
@@ -143,9 +177,183 @@ function TaskCard({ task, t }: { task: TaskCardModel; t: ViewProps['t'] }): Reac
   )
 }
 
+// ---------------------------------------------------------------------------
+// Task detail (T5.1 "点开节点看任务卡和子 agent 状态")
+// ---------------------------------------------------------------------------
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr)', gap: 8, alignItems: 'baseline' }}>
+      <span style={{ color: COLORS.dim }}>{label}</span>
+      <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{children}</span>
+    </div>
+  )
+}
+
+function MonoList({ items, none }: { items: string[] | undefined; none: string }): React.ReactElement {
+  if (items === undefined || items.length === 0) return <span style={{ color: COLORS.faint }}>{none}</span>
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+      {items.map((item) => (
+        <Mono key={item}>{item}</Mono>
+      ))}
+    </span>
+  )
+}
+
+/**
+ * Expanded detail for the selected task. Reuses the task card model first
+ * (status / batch / TDD / evidence freshness / review findings / worktree /
+ * agent) and falls back to the mapped plan extras (scope / new_files / verify
+ * groups) when the projection carries them.
+ */
+export function TaskDetail({
+  task,
+  t,
+  onClose,
+}: {
+  task: TaskCardModel
+  t: ViewProps['t']
+  onClose?: () => void
+}): React.ReactElement {
+  return (
+    <div
+      data-flowgate="task-detail"
+      data-task-id={task.id}
+      data-task-status={task.status}
+      style={{
+        fontFamily: UI_FONT,
+        fontSize: 11,
+        border: `1px solid ${COLORS.info}`,
+        borderRadius: 8,
+        padding: '8px 10px',
+        background: COLORS.surface,
+        display: 'grid',
+        gap: 6,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Mono>{task.id}</Mono>
+        {task.title !== task.id ? <strong style={{ fontSize: 12 }}>{task.title}</strong> : null}
+        <Badge
+          label={taskStatusLabel(task.status, t)}
+          color={taskColor(task.status)}
+          dataBadge={`detail-status-${task.status}`}
+        />
+        {task.batch !== '' ? <Badge label={`${t('tasks.batch')} ${task.batch}`} dataBadge="detail-batch" /> : null}
+        <span style={{ flex: 1 }} />
+        {onClose !== undefined ? (
+          <ActionButton label={t('common.close')} dataAction="task-detail-close" onClick={onClose} />
+        ) : null}
+      </div>
+
+      <div data-flowgate="task-detail-rows" style={{ display: 'grid', gap: 4 }}>
+        <DetailRow label={t('tasks.statusLabel')}>
+          {taskStatusLabel(task.status, t)}
+          {task.batchStatus !== undefined && task.batchStatus !== '' ? (
+            <span style={{ color: COLORS.dim, marginInlineStart: 6 }}>({task.batchStatus})</span>
+          ) : null}
+        </DetailRow>
+        <DetailRow label={t('tasks.batch')}>
+          {task.batch !== '' ? <Mono>{task.batch}</Mono> : <span style={{ color: COLORS.faint }}>{t('common.none')}</span>}
+          {task.batchMode !== undefined ? (
+            <span style={{ color: COLORS.dim, marginInlineStart: 6 }}>
+              {task.batchMode === 'parallel' ? t('tasks.parallel') : t('tasks.sequential')}
+            </span>
+          ) : null}
+        </DetailRow>
+        <DetailRow label={t('tasks.tdd')}>
+          {task.tdd === 'green' || task.tdd === 'red' ? (
+            <TddBadge tdd={task.tdd} t={t} />
+          ) : (
+            <span style={{ color: COLORS.faint }}>{t('tasks.tdd.none')}</span>
+          )}
+          {task.redObserved === true ? (
+            <span style={{ color: COLORS.pass, marginInlineStart: 6 }}>{t('tasks.redObserved')}</span>
+          ) : null}
+        </DetailRow>
+        <DetailRow label={t('tasks.evidence')}>
+          <EvidenceBadge evidence={task.evidence} t={t} />
+          {task.evidenceIds !== undefined && task.evidenceIds.length > 0 ? (
+            <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, marginInlineStart: 6 }}>
+              {task.evidenceIds.map((id) => (
+                <Mono key={id}>{id}</Mono>
+              ))}
+            </span>
+          ) : null}
+        </DetailRow>
+        <DetailRow label={t('tasks.review')}>
+          <span style={{ color: task.reviewFindings > 0 ? COLORS.warn : COLORS.dim }}>
+            {t('tasks.reviewFindings', { n: task.reviewFindings })}
+          </span>
+          {task.findings !== undefined && task.findings.length > 0 ? (
+            <ul style={{ listStyle: 'none', margin: '4px 0 0', padding: 0, display: 'grid', gap: 2 }}>
+              {task.findings.map((finding, index) => (
+                <li key={`${finding.file}-${index}`} style={{ fontSize: 10.5, color: COLORS.dim }}>
+                  <span style={{ color: COLORS.warn }}>[{finding.severity}]</span>{' '}
+                  <Mono>
+                    {finding.file}
+                    {finding.line !== undefined ? `:${finding.line}` : ''}
+                  </Mono>{' '}
+                  {finding.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </DetailRow>
+        <DetailRow label={t('tasks.worktree')}>
+          {task.worktree !== undefined && task.worktree !== '' ? (
+            <Mono>{task.worktree}</Mono>
+          ) : (
+            <span style={{ color: COLORS.faint }}>{t('common.none')}</span>
+          )}
+        </DetailRow>
+        <DetailRow label={t('tasks.agent')}>
+          {task.agent !== undefined && task.agent !== '' ? (
+            <Mono>{task.agent}</Mono>
+          ) : (
+            <span style={{ color: COLORS.faint }}>{t('common.none')}</span>
+          )}
+        </DetailRow>
+        {task.failureCount > 0 ? (
+          <DetailRow label={t('tasks.failureCount')}>
+            <span style={{ color: COLORS.fail }}>×{task.failureCount}</span>
+          </DetailRow>
+        ) : null}
+        {task.blockReason !== undefined && task.blockReason !== '' ? (
+          <DetailRow label={t('tasks.blockReason')}>
+            <span style={{ color: COLORS.fail }}>{task.blockReason}</span>
+          </DetailRow>
+        ) : null}
+        <DetailRow label={t('tasks.scope')}>
+          <MonoList items={task.scope} none={t('common.none')} />
+        </DetailRow>
+        <DetailRow label={t('tasks.newFiles')}>
+          <MonoList items={task.newFiles} none={t('common.none')} />
+        </DetailRow>
+        <DetailRow label={t('tasks.verify')}>
+          <MonoList items={task.verify} none={t('common.none')} />
+        </DetailRow>
+        {task.tests !== undefined && task.tests.length > 0 ? (
+          <DetailRow label={t('tasks.tests')}>
+            <MonoList items={task.tests} none={t('common.none')} />
+          </DetailRow>
+        ) : null}
+        {task.covers !== undefined && task.covers.length > 0 ? (
+          <DetailRow label={t('tasks.covers')}>
+            <MonoList items={task.covers} none={t('common.none')} />
+          </DetailRow>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function TasksView({ model, t, onAction }: ViewProps): React.ReactElement {
   const [reason, setReason] = React.useState('')
   const [pendingId, setPendingId] = React.useState<string | undefined>(undefined)
+  // T5.1: selecting a node in the execution graph expands its task card below.
+  const [selectedTaskId, setSelectedTaskId] = React.useState<string | undefined>(undefined)
   // Every open item an owner can decide right now (not just scope/conflict:
   // plan/rule/risk/blocker used to be reachable only through `/flow`).
   const pendingDecisions = (model.snapshot?.pending ?? []).filter(isOwnerPendingItem)
@@ -159,13 +367,35 @@ export function TasksView({ model, t, onAction }: ViewProps): React.ReactElement
     setReason('')
   }
 
+  // Clicking the selected node/card again collapses the detail.
+  const selectTask = (taskId: string): void => {
+    setSelectedTaskId((current) => (current === taskId ? undefined : taskId))
+  }
+  const selectedTask =
+    selectedTaskId !== undefined ? model.tasks.find((task) => task.id === selectedTaskId) : undefined
+
   const empty = model.tasks.length === 0
 
   return (
-    <div data-flowgate="view-tasks" style={{ display: 'grid', gap: 10 }}>
+    <div
+      data-flowgate="view-tasks"
+      {...(selectedTaskId !== undefined ? { 'data-selected-task': selectedTaskId } : {})}
+      style={{ display: 'grid', gap: 10 }}
+    >
       <Section title={t('tasks.graph')} count={model.execution.nodes.length}>
-        <ExecutionGraph graph={model.execution} t={t} />
+        <ExecutionGraph
+          graph={model.execution}
+          t={t}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={selectTask}
+        />
       </Section>
+
+      {selectedTask !== undefined ? (
+        <Section title={t('tasks.detailTitle')}>
+          <TaskDetail task={selectedTask} t={t} onClose={() => setSelectedTaskId(undefined)} />
+        </Section>
+      ) : null}
 
       <Section title={t('tasks.title')} count={model.tasks.length}>
         {empty ? (
@@ -181,7 +411,13 @@ export function TasksView({ model, t, onAction }: ViewProps): React.ReactElement
                   </div>
                   <div style={{ display: 'grid', gap: 5 }}>
                     {cards.map((task) => (
-                      <TaskCard key={task.id} task={task} t={t} />
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        t={t}
+                        selected={task.id === selectedTaskId}
+                        onSelect={() => selectTask(task.id)}
+                      />
                     ))}
                     {cards.length === 0 ? (
                       <div style={{ fontSize: 10.5, color: COLORS.faint }}>{t('common.none')}</div>
