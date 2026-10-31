@@ -68,9 +68,9 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 pnpm build && pnpm verify:package
 ```
 
-## 遗留未验证项（不影响 v0.5 开工，列入 M6）
+## 遗留未验证项（2026-10-31 更新；不影响 v0.5 开工）
 
-- 浏览器内真实加载 client bundle 并点击 dock/右侧栏（需隔离 web profile + 端口；当前用离线 mock 对照真实第三方产物验证形态）。
-- PTC 模式下守卫覆盖（工程模式已强制 native，风险低）。
-- `ask_user_question` 问答的结构化字段、`dsh-token-meter` 读取路径（当前按产物与"未知"降级）。
-- worktree 路径的沙箱允许范围（并行批次不成立时降级为顺序执行）。
+- ~~浏览器内真实加载 client bundle 并点击 dock/右侧栏~~ **已覆盖（2026-10-31 第二轮真实 Web 走查）**：隔离 web profile 中真实加载 `dsh-flowgate/client.js`（combo HTTP 200），dock 状态条与右侧栏 8 视图真实渲染，见 [impl/web-walkthrough.md](impl/web-walkthrough.md)、[impl/implementation-status.md](impl/implementation-status.md) §3.1/§3.8；§9.4 的离线 mock 仍作为形态对照保留。
+- PTC 模式下守卫覆盖**仍未验证**（工程模式已强制 `presentAs('native')` 规避，风险低）。
+- `ask_user_question` 问答的结构化字段、`dsh-token-meter` 读取路径**仍未验证**（当前按产物与"未知"降级）；MCP 工具写入经守卫同样未实测（H4，推断成立）。
+- ~~worktree 路径的沙箱允许范围~~ **真机派发已完成（2026-10-31）**：真实 worktree + 子 agent + 回执/审查在 headless 宿主跑通（[impl/implementation-status.md](impl/implementation-status.md) §3.7 C-004/C-006/C-007）；但 headless 一次性进程在集成检查点合并前退出，完整合并结算仍需交互式/常驻宿主（§4 #4）。

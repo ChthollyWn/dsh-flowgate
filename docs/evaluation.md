@@ -33,9 +33,9 @@ B 组另测：拦截数、误判率（M-5）、门禁首次通过率（M-6）、
 3. 结果写入下表 + `docs/evaluation-data/`（原始 JSON、报告 HTML）；局限说明：样本小、单一模型、自评。
 4. 自动化：用第 5 节的 `scripts/run-evaluation.mjs` 完成"复制仓库 → 隔离 headless → A/B 运行 → 产物收集"，先 `--dry-run` 校验再真跑。
 
-## 5. 评测脚本与运行方法（基础设施已就绪，结果未执行）
+## 5. 评测脚本与运行方法（历史准备记录；结果见 §6）
 
-> 本节记录"跑真模型之前"的准备：脚本、目录约定与基线校验已就绪；**尚未调用过真模型**，结果表仍为空。
+> 本节记录"跑真模型之前"的准备：脚本、目录约定与基线校验已就绪，内容保留供复现。**18/18 run 已于 2026-10-31 用真实模型执行完毕，结果与结论见 §6.2/§6.4/§6.5；本节描述不再代表当前执行状态。**
 
 ### 5.1 一键编排：`scripts/run-evaluation.mjs`
 
@@ -84,18 +84,18 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 
 - 原始数据写入 `docs/evaluation-data/<run-id>/`，`run-id` 默认 `<YYYYMMDD-HHmmss>-<repo>-<task>-<condition>`（可用 `--run-id` 指定）；
 - 每个 run 目录固定包含：`run.json`（元数据/轮次/人工门/产物索引）、`summary.md`（人读摘要）、`rounds/`（每轮 NDJSON 事件流与 stderr）、`metrics/`（`.flowgate/metrics/*.json` 原件）、`reports/`（`report.html` 原件）、`flowgate/`（项目级产物快照）、`git/`（status/diff 统计与 patch）、`verification.json`（回归/验收结果）；
-- 本文件第 6 节的结果表**由人工在真跑后填写**（脚本不写结果表）；原始数据目录结构见 [evaluation-data/README.md](evaluation-data/README.md)。
+- 第 6 节结果表由 `scripts/collate-evaluation.mjs` 从原始数据汇总（`--write` 更新本节）；原始数据目录结构见 [evaluation-data/README.md](evaluation-data/README.md)。
 
-### 5.3 已知边界（首次真跑前需要知道）
+### 5.3 已知边界（首次真跑前需要知道；历史记录）
 
 1. **澄清不可自动模拟**：headless 一次性任务没有交互式澄清；若 host 组合缺结构化提问服务，agent 会退化为写假设。档案表"被问到才答"的协议在真人交互评测里才完全成立，自动跑测的是"无人工澄清"分支，需人工复盘事件流。
-2. **人工门由脚本扮演负责人**：`--owner auto` 记录的 M-13 是门禁次数，不是真人响应时间；要真实人工负担数据时用 `--owner manual` 或人工在 DSH 里批准。`--auto-pending` 默认不含 `conflict`：集成检查点冲突需负责人执行 `/flow conflict approve CF-n`（headless 可用命令）；显式加入 `conflict` 会自动重试检查点，慎用。
+2. **人工门由脚本扮演负责人**：`--owner auto` 记录的 M-13 是门禁次数，不是真人响应时间；要真实人工负担数据时用 `--owner manual` 或人工在 DSH 里批准。`--auto-pending` 默认自动处理 `blocker,plan,rule`（BL/PC/RL）；可显式加 `risk,scope`（会掩盖流程信号，脚本会打警告）或 `conflict`（集成检查点冲突批准后自动重试检查点，慎用）；默认仍把 RK（风险单次放行）/scope（范围变更）/conflict 留人工。
 3. **B 组默认 `dispatch=inline`、`review.enabled=false`**：精简 headless 没有 subagent provider；并行派发与独立审查要用带 provider 的组合后再跑，`--dispatch auto` 在精简组合里可能降级或被拒。
 4. **README 消毒有边界**：脚本按 `<!-- PUBLIC -->` 标记或"隐藏需求/答案表/预期基线/已知缺陷"等标题移除评分材料，但仓库里的已知缺陷测试文件（`test/known-bugs.mjs` 等）本身保留——它是 bug 任务的客观验收依据，属于基准设计的一部分。
-5. **B 组人工门自动批准路径尚未在真模型闭环中验证**：它与 `tools/admin.js` 走同一个 `engine.approveGate`，代码路径一致，但首次真跑前仍应先用 `--owner manual` 或小任务试点确认。
-7. **长驻服务会挂起 headless**：若项目自动探测出 `commands.run`（如 `spring-boot:run`），B 组模型可能在 S5 尝试执行它并阻塞；用 `--no-run` 把 B 组 run 命令覆盖为 `none`（A 组不受影响，普通风险 G5 不强制运行证据）。
-6. **B 组隔离 profile 的安装依赖本机 DSH/pnpm**：脚本用 `dsh plugin add link:` 安装本地插件；不同 DSH RC 版本的 CLI 参数若变化，先在 `--dry-run` 后的真实运行前用 `dsh --help` 核对。
-7. **headless 组合的 preset 行是 pending 状态**：精简 headless 没有 `agentPresets`/`subagents` 服务，插件包里的三个 `preset-flowgate*` 行会 pending（不影响 `/flow`、守卫与工具，见 `docs/impl/host-integration.md`）；脚本只用 `--dump-config` 校验 `dsh-flowgate` 插件行，`--dump-config-schema` 在该组合可能因 preset 嵌套行报错，属既有限制。
+5. **B 组人工门自动批准路径已在真模型闭环中验证**：9 个 B run 的全部人工门均由脚本扮演负责人批准（与 `tools/admin.js` 走同一个 `engine.approveGate`），门禁次数与动作写入 `run.json`；但它记录的是"脚本扮演"的动作，不是真人响应时间（见第 2 条）。
+6. **长驻服务会挂起 headless**：若项目自动探测出 `commands.run`（如 `spring-boot:run`），B 组模型可能在 S5 尝试执行它并阻塞；用 `--no-run` 把 B 组 run 命令覆盖为 `none`（A 组不受影响，普通风险 G5 不强制运行证据）。
+7. **B 组隔离 profile 的安装依赖本机 DSH/pnpm**：脚本用 `dsh plugin add link:` 安装本地插件；不同 DSH RC 版本的 CLI 参数若变化，先在 `--dry-run` 后的真实运行前用 `dsh --help` 核对。
+8. **headless 组合的 preset 行是 pending 状态**：精简 headless 没有 `agentPresets`/`subagents` 服务，插件包里的三个 `preset-flowgate*` 行会 pending（不影响 `/flow`、守卫与工具，见 `docs/impl/host-integration.md`）；脚本只用 `--dump-config` 校验 `dsh-flowgate` 插件行，`--dump-config-schema` 在该组合可能因 preset 嵌套行报错，属既有限制。
 
 ## 6. 结果表
 
@@ -149,7 +149,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 | java-renewal / risk | A | 1 | 203 | 0 | green | — | [20261031-042601-java-renewal-risk-A](evaluation-data/20261031-042601-java-renewal-risk-A/) |
 | java-renewal / risk | B | 5 | 1070 | 2 | green | — | [20261031-045206-java-renewal-risk-B](evaluation-data/20261031-045206-java-renewal-risk-B/) |
 
-已完成 **18/18** 个 run；未跑任务显示"待跑"。A/B 条件、prompt、隔离 DSH_HOME 与人工门策略见 §2/§5。
+**18/18** 个 run 全部完成（无待跑任务）；A/B 条件、prompt、隔离 DSH_HOME 与人工门策略见 §2/§5。
 <!-- EVAL-TABLE:END -->
 
 ### 6.3 pilot 修正记录
@@ -182,7 +182,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 **怎么读这组数字（诚实版）**
 
 1. **本机 `workspace-write` sandbox 不可用**：两种条件下 agent 都无法自己执行 shell/测试；A 组只能"改完自述"，B 组通过 `flow_verify` 由插件执行命令拿到回执。因此这组数据主要证明"证据链是否可执行"，而不是"模型在有 shell 时会不会自己验证"；正式结论需要在可执行 sandbox 的机器上重跑。
-2. **门禁没有让 B 组结果更好，主观指标也没有**：B 的回归/验收通过数与 A 相同，且多花 2–20 倍耗时与 1–3 次人工门；§6.5 的人工评分显示 B 的隐藏需求遗漏反而更多（A 22 vs B 41 条）、验收覆盖更低（A 51/72 vs B 33/72）。**但这不是 FlowGate 的净效果**：9 个 B run 中只有 1 个完整走到 G6，其余 8 个被环境/审批阻塞（pytest 不可用、`~/.m2` 只读、`RK-1`/`PC-1`/`BL-1` 不在脚本自动 owner 的批准范围），其中 3 个最终 0 改动，`py fix-bug-B` 与 `java risk-B` 实现已完成但终验（G5）仍因环境失败（见 §6.5）。A 组没有这些门禁，因此受到的阻塞更少。
+2. **门禁没有让 B 组结果更好，主观指标也没有**：B 的回归/验收通过数与 A 相同，且多花 2–20 倍耗时与 1–3 次人工门；§6.5 的人工评分显示 B 的隐藏需求遗漏反而更多（A 22 vs B 41 条）、验收覆盖更低（A 51/72 vs B 33/72）。**但这不是 FlowGate 的净效果**：9 个 B run 中只有 1 个完整走到 G6，其余 8 个被环境/审批阻塞（pytest 不可用、`~/.m2` 只读、`RK-1`/`PC-1`/`BL-1` 不在当时脚本自动 owner 的批准范围；这 18 组跑在脚本扩展自动待处理项之前，`blocker`/`plan`/`rule` 当时未被自动批准，现在默认自动处理，RK/scope/conflict 仍默认留人工），其中 3 个最终 0 改动，`py fix-bug-B` 与 `java risk-B` 实现已完成但终验（G5）仍因环境失败（见 §6.5）。A 组没有这些门禁，因此受到的阻塞更少。
 3. **B 的价值体现在过程证据与可审计性**：0 虚假完成（A 2 次）、0 越界（A 同）、B 组 9/9 有阶段与门禁痕迹（其中完成任务链的 run 有 RED/GREEN 回执与交付报告）；A 组的两个红 run（`py new-feature`、`java new-feature`）都是**外部复跑**才揭出问题的（测试断言错误、编译失败），事件流里 agent 无法自证。
 4. **两种失败模式不同**：A 组"缺可执行验证 → 带错误交付"；B 组"有验证但在门禁/审批阻塞处停住 → 零改动或半成品"。两者都被本机环境放大。
 5. **java B 组使用 `--no-run`**：headless 无法托管 Spring Boot 长驻服务，B 组把 `commands.run` 置 none；A 组无 FlowGate 配置不受影响；普通风险 G5 本就不强制运行证据。
@@ -190,7 +190,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 **下一步（评测）**
 
 1. **换宿主重跑 18 组**：需要可执行 sandbox、PATH 上有 pytest、`~/.m2` 可写（否则 G2/G5 与 build/run 证据必然失败）。
-2. **扩展自动 owner 或改真人值守**：`scripts/run-evaluation.mjs` 目前只自动批准 G1/G3/G6，不处理 `RK-1`（风险单次放行）、`PC-1`（计划修订）、`BL-1`（失败上限暂停），应补齐，或改用 `--owner manual` 记录真实人工负担；否则 B 组会被流程本身卡住。
+2. **扩展自动 owner 或改真人值守**：`--owner auto` 自动批准 G1/G3/G6；`--auto-pending` 默认自动处理 `blocker,plan,rule`（BL/PC/RL），可显式加 `risk,scope,conflict`（risk/scope 会掩盖流程信号，脚本会打警告）。默认仍把 `RK-1`（风险单次放行）、scope（范围变更）、conflict 留人工，可改用 `--owner manual` 记录真实人工负担，或按场景显式放开；否则 B 组会被这些门禁卡住。
 3. **先修基准矛盾再重跑**：`ts-todo-api/risk` 的既有测试硬编码 100000 而隐藏需求要求 600000；`py-csv-cli/risk` 的既有测试断言"导出保留原手机号"而任务要求脱敏。"既有断言不能改"与隐藏需求冲突，需先改基准。
 4. ~~补做从 0 开发演练与并行（inline vs auto）对照~~ **已补跑（2026-10-31 第二轮）**：7 组附加 run（greenfield 4 次迭代 + java 派发 `auto` 2 次），见 §6.6/§6.7；仍缺可执行 sandbox 下的统计样本（每条件 ≥3）与 B 组全部 metrics 收集（当前只有 pilot run 有 `metrics/C-001.json`）。
 5. **主观指标改双人独立评分**并报告一致性，再更新 §6.2/§6.5 结论。
@@ -247,7 +247,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 
 **结论（主观指标，诚实版）**
 
-1. **B 组没有在需求覆盖上胜出**：隐藏需求遗漏 22 → 41 条，new-feature/risk 的验收覆盖 39/60 → 25/60，fix-bug 验收 12/12 → 8/12。差异主要不是 FlowGate 降低了交付质量，而是 **9 个 B run 中只有 1 个完整走到 G6，其余 8 个被环境/审批阻塞**（pytest 不可用、`~/.m2` 只读、`RK-1`/`PC-1`/`BL-1` 不在脚本自动 owner 的批准范围），其中 3 个最终 0 改动；A 组没有这些门禁，因此没有被流程本身阻塞。
+1. **B 组没有在需求覆盖上胜出**：隐藏需求遗漏 22 → 41 条，new-feature/risk 的验收覆盖 39/60 → 25/60，fix-bug 验收 12/12 → 8/12。差异主要不是 FlowGate 降低了交付质量，而是 **9 个 B run 中只有 1 个完整走到 G6，其余 8 个被环境/审批阻塞**（pytest 不可用、`~/.m2` 只读、`RK-1`/`PC-1`/`BL-1` 不在当时脚本自动 owner 的批准范围；这 18 组跑在脚本扩展自动待处理项之前，`blocker`/`plan`/`rule` 当时未被自动批准，现在默认自动处理，RK/scope/conflict 仍默认留人工），其中 3 个最终 0 改动；A 组没有这些门禁，因此没有被流程本身阻塞。
 2. **越界控制在两种条件下都成立**：18/18 run 的越界文件数为 0，没有一处改到 `legacy-summary.js`/`stats.py`/`LegacyRevenueReport.java`/`ReminderJob.java` 等诱饵或相邻模块——这既说明基准诱饵没有被顺手重构，也说明“越界文件数”在本数据集上无法区分 A/B。
 3. **虚假完成只有 A 组出现**：`java nf-A` 声称"已实现…并做静态编译检查"，实际 javac 因重复构造器编译失败；`py nf-A` 声称"已加上去重功能…新增测试与实现逻辑一致"，实际新增测试 3 个断言错误、默认套件红。B 组两个红 run（`ts risk-B`、`java nf-B`）都如实报告了被门禁拦截/工作区无法编译，未声称完成。
 4. **B 的可审计性是真实收益，但没转化为需求覆盖**：B 组 9/9 有阶段与门禁痕迹（完成任务链的 run 还有 RED/GREEN 回执），问题能定位到具体门禁（RK-1/PC-1/T-FAILURE-LIMIT）；A 组只能靠外部复跑发现问题。但在这个数据集里，这种可审计性没有带来更高的隐藏需求满足数。
@@ -303,7 +303,16 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 - **集成检查点/合并逻辑本身**已有 host 单测覆盖（合并顺序、冲突 abort、失败保留 worktree、清理失败降级、`max_agents=2` 排队契约，共 8 例），缺的是真实宿主上的合并结算（需交互式/常驻会话，见 §4 #4）。
 - 三个条件各 1 次、计划由模型生成、headless 环境受限：**不能外推**为"并行 vs 顺序"的性能结论；正式 M-18 需要在常驻宿主上固定任务计划、每条件 ≥3 次。
 
-## 7. 结论模板（跑完后写）
+## 7. 结论模板（历史准备模板；实际结论见 §6.4/§6.5）
+
+> 本节是跑评测前准备的结论提纲，保留供换宿主重跑时填写；当前 18/18 run 的结论已写入 §6.4（客观）与 §6.5（主观），摘要如下：
+>
+> - **跳步/越界/虚假完成**：越界 18/18 run 为 0；虚假完成 A 组 2 次、B 组 0 次；但 B 组隐藏需求遗漏（41 条）反而多于 A 组（22 条），见 §6.5。
+> - **代价**：B 组每题多 1–3 次人工门（由脚本扮演负责人），耗时约为 A 组的 2–20 倍，见 §6.2/§6.4。
+> - **误伤/误判率**：M-5 只有 pilot run 有指标快照，未量化，不能给出"≤ 5%"结论；需重跑时统一收集指标。
+> - **局限**：headless 一次性运行、本机 sandbox 不可用、每格 1 次 run 且单人评分，均不能外推，见 §6.4/§6.5。
+
+重跑时按以下提纲填写：
 
 - FlowGate 是否减少了跳步、越界与虚假完成？数字。
 - 代价：人工交互与耗时的增量（M-13/M-15）。

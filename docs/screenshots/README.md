@@ -1,6 +1,7 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
 采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）。
+当前共 **25 张 PNG**（编号 01–10、12–26；11 号不存在）。
 环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
 复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
 
@@ -14,8 +15,9 @@
 | [06-doctor-capabilities.png](06-doctor-capabilities.png) | `/flow doctor` 的宿主能力清单：工具 14/14、守卫心跳、投影 ✓、`appendPluginRecord` ✓（对照剩余的 ✗ 项） |
 | [07-allow-once.png](07-allow-once.png) | `/flow allow-once R-STAGE-SRC …` 单次放行记录（OV-1），说明人工放行只经命令、记账留痕 |
 | [08-statusbar-s1.png](08-statusbar-s1.png) | 立项后状态条：`◆ FlowGate C-001 中 · 普通风险 │ ① 需求澄清 │ 下一步：写澄清/需求产物后 flow_submit({gate:"G1"})` |
-| [12-delivery-report.png](12-delivery-report.png) | S0→S6 完整闭环后的交付报告（`ts-todo-api` C-002，归档 HTML，M-1~M-18 指标；不是测试 fixture） |
 | [09-preset-menu.png](09-preset-menu.png) | Agent 预设菜单中出现 **FlowGate 工程模式** 与 **FlowGate 执行者**（`cordis.patch.yml` 的 preset 行在真实宿主生效；reviewer 只供审查子 agent） |
+| [10-doctor-final.png](10-doctor-final.png) | 修复后的 `/flow doctor` 自检最终态（命令结果以可折叠行渲染：插件版本 0.1.0 / 项目根；展开后的完整能力清单见 06） |
+| [12-delivery-report.png](12-delivery-report.png) | S0→S6 完整闭环后的交付报告（`ts-todo-api` C-002，归档 HTML，M-1~M-18 指标；不是测试 fixture） |
 
 ### 2026-10-31 追加（真实 Web 宿主交互走查，详见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)）
 
@@ -40,7 +42,7 @@
 
 - 截图中会话里的 `DeepSeek Messages transport failed` 是**隔离 demo home 的环境限制**（复制的凭据是引用式，只有桌面宿主能解析），不是插件问题；`/flow` 命令、状态条、面板、工具注册都在这个宿主里真实工作。
 - 采集时 `appendPluginRecord` 在隔离 home 里不可用（peer 解析差异），面板数据走 host 内存快照兜底；正常安装时走会话插件记录，行为一致。
-- 自动接续（打开页面即接续 C-001）与覆盖自检修复后的 doctor 截图在本轮采集失败（UI 导航脚本超时），文本证据见 implementation-status §3.3；待补。
-- 低复杂度方案确认卡、拦截视图的误判反馈、批准/退回按钮点击流程等截图待补（需要模型可用的桌面会话；按钮 Remote 不可用时走"填命令"兜底）。
+- 自动接续（打开页面即接续 C-001）与**覆盖自检修复后的 doctor 扩展明细**截图仍待补：前者本轮 UI 导航脚本超时采集失败，后者现有 10 号只是可折叠的命令行、无法作为覆盖自检明细证据；文本证据见 implementation-status §3.3。
+- 低复杂度方案确认卡（20–23）与拦截视图误判反馈（24–26）已在 2026-10-31 追加轮补拍；其中拦截反馈只有**组件级**证据。**仍缺**：真实 guard 拦截 → 面板拦截行 → 误判反馈的端到端链路（组件级不算），需要真模型或让宿主执行一次真实被拦截的工具调用。
 - 2026-10-31 追加轮的 13–26 号截图来自另一个隔离 home（`DSH_HOME=/tmp/fg-walk/dsh-home`、`HOME=/tmp/fg-walk/home`）与 11:06 构建快照（`lib/host.js` sha256 `9341766c…`），**全程未发模型请求**：确认卡的状态是离线构造的（见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md) §2.4），拦截反馈只有组件级证据（§2.5）。该轮还发现真实问题：宿主重启后投影 revision 回退导致面板/状态条显示旧快照（§5.1）。
 - 本轮走查发现并修复的真实问题见 [../impl/implementation-status.md](../impl/implementation-status.md) §3.1。

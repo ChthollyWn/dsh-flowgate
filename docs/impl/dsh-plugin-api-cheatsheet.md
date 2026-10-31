@@ -659,7 +659,7 @@ pnpm add link:/path/to/dsh-flowgate      # plugin-manager/CLI 推荐 spec
 | 右侧栏/输入框 | §6.2/6.3 | ✅ |
 | 面板调宿主 | §6.4 | ⚠️ 需 Typert 生成；兜底填命令 |
 | 崩溃不丢状态 | checkpoint-policy + 投影 stateSchema | ✅（纯 JSON 状态会被持久化缓存） |
-| token 用量 | `dsh-token-meter`（`@deepseek-ai/dsh-token-meter/lib/types/usage-projection.d.ts`） | 未实测 |
+| token 用量 | `dsh-token-meter`（`@deepseek-ai/dsh-token-meter/lib/types/usage-projection.d.ts`） | ✅ 已实现（2026-10-31）：host 读 `contextPressure` 投影，`(projectedTokens ?? pressureTokens) / contextWindow` → `RuntimeSnapshot.contextPct`；缺数据不填（不编造），client ≥60% 显示 |
 
 ---
 
@@ -745,7 +745,7 @@ DSH_HOME=/tmp/fg-home "$DSH" --profile spike --dump-config-schema
   ```
 - `--dump-config-schema` 退出码 0、stdout 10.5KB JSON，内容含 `flowgate` 5 处（该命令会**导入**每个组合模块读 Config schema → 证明真实 DSH 进程能 import 我们的 host 入口）。
 
-> 未验证（成本/风险高，明确标注）：用 DSH 启动 web 服务加载 client bundle 到浏览器（需要可用的完整 web profile + 端口，且桌面 profile 不可动）。client bundle 的合法性目前用 §9.4 的离线 mock 验证 + 与真实第三方产物逐字节对照形态。
+> **已补验（2026-10-31 第二轮真实 Web 走查）**：用 DSH 启动 web 服务、在隔离 web profile 中真实加载 `dsh-flowgate/client.js`（combo HTTP 200），并真实渲染 dock 状态条与右侧栏 8 视图、执行 `/flow` 命令；见 [web-walkthrough.md](web-walkthrough.md) 与 [implementation-status.md](implementation-status.md) §3.1/§3.8。§9.4 的离线 mock 结论保留作形态对照；本节的 "host 入口可 import" 验证方式仍有效。
 
 ### 9.4 client 半侧验证（**成功**，离线 mock）
 
@@ -788,9 +788,9 @@ OK: client bundle 形态合法，dock 与右侧栏 tab 注册路径正确
 | # | 结论 | 证据 / 说明 |
 |---|---|---|
 | H1 | ✅ **确认** | `ToolGuard = (exec: Readonly<ToolExecution>) => string \| undefined`（dsh-tools index.d.ts:522）；`ToolExecution` 含 `name`、`arguments: unknown`（解析后的 JSON 参数）、`agent?`、`callId`、`rootCallId`、`signal`（同文件 216-300）。内置工具参数名：`bash.command`、`write/read/edit.file_path`（asar 内 `dsh-tool-bash`/`dsh-tool-fs` 的 `defineTool({name, parameters})` 源码；`npm pack` 版无 JS，用 asar 版）。spike 实跑 guard 收到 `{name:'bash', arguments:{command:'git status --short'}, agent:{id}}`（§9.2） |
-| H2 | 🟡 **代码层确认，未跑 PTC** | PTC 子派发走同一 pipeline：`ToolExecutionInput.parent` 注释（index.d.ts:231-247）说明嵌套调用经 `ToolRuntime.execute`；guard 在派发前统一评估。工程模式另有 `presentAs('native')` 兜底，风险低 |
+| H2 | 🟡 **代码层确认，PTC 未实测**（2026-10-31 复核：仍未跑 PTC） | PTC 子派发走同一 pipeline：`ToolExecutionInput.parent` 注释（index.d.ts:231-247）说明嵌套调用经 `ToolRuntime.execute`；guard 在派发前统一评估。工程模式另有 `presentAs('native')` 兜底，风险低 |
 | H3 | ✅ **确认** | plain-context 注册的 guard "applies globally"；`agent.ctx` 注册的 "applies only to that agent"（index.d.ts:616-630）。全局 guard 必然覆盖子 agent 的工具调用；`exec.agent` 可区分来源（H18） |
-| H4 | ⚠️ **未验证** | MCP 工具也走 `ctx.tools` 注册/分发（`dsh-mcp-client` 组合），推断成立；未读 MCP 包源码确认 |
+| H4 | ⚠️ **未验证（2026-10-31 复核：MCP 写入经守卫仍未实测）** | MCP 工具也走 `ctx.tools` 注册/分发（`dsh-mcp-client` 组合），推断成立；未读 MCP 包源码确认 |
 | H5 | ✅ **确认（有细节）** | `tools/post-execute` 收到 `ToolExecutionResult`：`{isError, value, content, error?}`（index.d.ts:395-435），bash 的 stdout/stderr/`[exit code: N]` 在 `content`/`value` 里；退出码也能从 content 文本解析或由工具 value 提供 |
 | H6 | ✅ **确认（替代路径）** | `appendPluginRecord(session,'plugin:gate',data)`（dsh-session index.d.ts:96-117）+ 投影 `apply` 折叠任意 committed event；`session.append` 不能写未声明类型（§10-3） |
 | H7 | ✅ **确认** | `ctx.systemPrompt.section/context` 是追加式（system-prompt index.d.ts:56-120）；`agent/pre-step` 可返回 `enter{messages}`（agent runtime-types.d.ts:304-320） |
@@ -799,15 +799,15 @@ OK: client bundle 形态合法，dock 与右侧栏 tab 注册路径正确
 | H10 | 🟡 **可行但需生成器**；建议兜底 | §6.4；Typert loader 自动发现 `./typert`（dsh-typert-loader README） |
 | H11 | ✅ **确认** | `conversation.input.dock`（conversation contract/slots.d.ts:301）与 `sidebar.right.pane.tab`（sidebar-right contract/slots.d.ts:53）声明均在；spike 两处注册离线验证通过 |
 | H12 | ✅ **确认** | `startActivation.request.outputSchema`（ObjectJsonSchema）+ `agentPreset`（本包 types.d.ts:127-174）；只读 preset 用 tool-fs config 关写、或 `restrict` |
-| H13 | 🟡 **工具存在，载荷未验** | `ask_user_question` 工具存在（asar `dsh-tool-ask-user` 的 tool name 常量）；问答应进 `tools/result` 的 content/value，但具体结构化字段没验证 → 门禁建议同时校验 `clarify.md` 产物（03 的备选） |
-| H14 | ⚠️ **未验证** | `@deepseek-ai/dsh-token-meter` 存在，`usage-projection.d.ts` 提供 usage 投影；读取路径未实测 |
+| H13 | 🟡 **工具存在，结构化载荷未验（2026-10-31 复核：仍未验证）** | `ask_user_question` 工具存在（asar `dsh-tool-ask-user` 的 tool name 常量）；问答应进 `tools/result` 的 content/value，但具体结构化字段没验证 → 门禁建议同时校验 `clarify.md` 产物（03 的备选） |
+| H14 | ✅ **已实现（2026-10-31 复核）** | `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影（wire：`projectedTokens?/pressureTokens?/contextWindow?`）；host 用 `ctx.sessionProjections.snapshot(session, ['contextPressure'])` 读取，host-only 时 `stateOf` 兜底 → `RuntimeSnapshot.contextPct`（0–100，1 位小数；缺数据字段不存在）。见 `src/host/projection/context.ts`、`test/host/context-pct.test.ts`、host-client-contract §1.1 |
 | H15 | ❌ **依赖它拦截不成立** | 官方明确 `engines.dsh` 声明式、loader 不强制（dsh-package-manifest README 已知限制）；组合包预检只在 bundle 层（§10-2） |
 | H16 | 🟡 **大概率成立，未实测** | 宿主插件是普通 Node 进程代码，直接用 `node:fs`；沙箱只作用于工具执行器（`dsh-sandbox*`）。建议：密钥/状态写 `$DSH_HOME` 或项目 `.flowgate/`，不要把密钥写进工作区 |
 | H17 | ✅ **确认（代码层）** | `tools/execute` waterfall：`(exec, next) => Promise<ToolExecutionResult>`，注释明确 "wrappers may change only exec.signal"（index.d.ts:40-50），即在 `await next()` 前后可做任意异步工作（快照） |
 | H18 | ✅ **确认** | guard 收到 `exec.agent`（含 id）；scoped guard/vs global 的语义见 index.d.ts:616-630；`callId/rootCallId` 可在并行时归属 |
 | H19 | ❌ **后半句不成立** | post-execute `accept{content}` 替换后，durable 记录的是替换后的结果（`tool/result` 是规范化后结果）；原始输出需插件自己落文件（03 的备选） |
 | H20 | ✅ **确认** | `startActivation` 返回 `activation.result`（`Promise<SubagentResult>`）、本地 child 可 `sendMessage` 续聊/冷恢复（README L61-65）；`delivery:'caller'` 可 await 结构化结果 |
-| H21 | 🟡 **接口确认，沙箱未验** | `SubagentStartRequest.cwd`（types.d.ts:127-135）；沙箱允许范围由 `dsh-sandbox-policy` 配置决定，需在目标 profile 配置允许 worktree 路径 |
+| H21 | ✅ **接口确认 + 真机 worktree 派发已跑通（2026-10-31）** | `SubagentStartRequest.cwd`（types.d.ts:127-135）存在；真实 headless 宿主已创建 `.flowgate/worktrees/C-00x/T*`、子 agent 在 worktree 内写入并产出回执/审查（implementation-status §3.7）。剩余：headless 一次性进程在集成检查点合并前退出，完整合并结算仍需交互式/常驻宿主 |
 | H22 | ✅ **确认** | 每次调用带 `agent`/`callId`；tools 事件按 scope 过滤；并行调度由 agent-loop（`DEFAULT_MAX_PARALLEL_TOOL_CALLS`）控制，事件层可归因 |
 | H23 | ✅ **确认** | 会话开始即触发 `agent/created`/`session/created`/`system-prompt/assemble`；首步之前 `agent/pre-step` 已可注入；关闭释放用 `session/disposed`/`agent/disposed` |
 | H24 | ✅ **确认** | `ctx.sessionQuery.readSession/listEvents/observeSession`（session-query index.d.ts:24-110）；`activation.childId` 即会话 id |

@@ -55,7 +55,20 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - **任务门审查轮次补齐（复核发现的 pre-existing Major）**：host `flow_task_done`/派发结算不再"有一条 pass 就短路"，按 `requiredReviewRounds()`（高风险 2 轮）从已有 pass 数补跑审查；修复高风险任务门永久缺一轮、默认配置下无法完成任务的问题。
 - **P0-6 `sessions.json` 损坏 fail-closed**：租约文件损坏/截断不再让 `engine.load` 抛错（此前 → 宿主 markInert → 守卫放行）；改为汇总损坏状态文件、进入锁定模式、doctor 显示路径、`/flow repair` 重建空租约并解锁；损坏态不自动改写租约。
 - **测试稳定性**：`test/host/plugin-load.test.ts` 引擎初始化等待改用 `waitForEngine()`（原固定 `flush()` 在 coverage 插桩下偶发 `engine()===null`），修掉本轮复现的 flake。
-- **测试**：第三轮 P0 修复后实测 **93 个测试文件 / 1322 个用例**全绿（新增 3 个集成测试文件 + host/故障注入用例共 33 例）；`pnpm coverage` thresholds（80/80/80/70）通过；`pnpm build`、`verify:package`（39 文件 / 915.7KB）、`verify:client` 通过。
+- **测试**：第四轮收尾后实测 **96 个测试文件 / 1363 个用例**全绿（第三轮 1322 → 第四轮 1363，新增 41 例：M-5/槽位补位/面板审批/contextPct/coverage 去抖/MCP 守卫等）；`pnpm coverage` thresholds（80/80/80/70）通过（合计 87.07/76.57/87.09/90.16）；`pnpm lint`（127 源文件）、`pnpm build`、`verify:package`（39 文件 / 928.0KB）、`verify:client` 通过；HEAD 复跑 compat 7/7、startup +15.1ms、uninstall 通过。
+
+#### 2026-10-31 第四轮（P1/P2/P3 收尾）
+
+- **P1-1 M-5 规则自动降级**：按账本重建每规则误判反馈；累计拦截 ≥ 20 且误判率 > 5% 时，deny/human 判定降为提示（本次放行、写账本 `rule.hinted`、计入 M-5 备注与复盘），样本不足不降级。README 承诺与实现对齐。
+- **P1-2/P1-6 并行调度**：执行者结算后宿主机**槽位级自动补位**同批次 queued 任务（不再等主 agent 再 dispatch）；超出 `max_agents` 的任务显式标 `queued`。
+- **P1-3 面板审批**：右侧栏面板覆盖 scope/risk/plan/rule/conflict 批准/拒绝与 blocker 解除熔断，保留 Remote 不可用时的命令兜底；修正 BL-* 的命令映射。
+- **P1-5 pending 生命周期**：变更/分析归档时未处理 pending → `expired`，写账本 `pending.expired`。
+- **P1-7 上下文占用**：host 读取 rc.5 `dsh-token-meter` 的 `contextPressure` 会话投影 → `RuntimeSnapshot.contextPct`（缺数据不填、不编造；client ≥60% 提示）；契约见 host-client-contract §1.1。
+- **P1-8 CI/覆盖自检**：CI 增加 `pnpm coverage`；覆盖自检 tools/change 100ms trailing debounce + doctor/status 读取兜底，消除"4–7 波动"。
+- **P1-9 基准仓库**：ts-todo-api PBKDF2 断言改为格式契约（迭代次数下限）、py-csv-cli 导出断言改为契约断言；R3 正确实现不再与既有断言冲突（两仓库基线 + R3 模拟均绿）。
+- **P1-10/P1-11**：删除 `/flow config` 未实现桩；删除 grep 证明零引用的死代码（私有 helper/废弃 walker 等，`rules/evaluate.ts` 保留）。
+- **P2 可执行证据**：HEAD 复跑 `verify:compat` 7/7、`measure:startup` +15.1ms、`verify:uninstall` 通过；补充 MCP/未知工具守卫冒烟（R-MCP human → 负责人批准 → 单次放行）。真机/真模型/桌面/sandbox 类项在 [todo-audit](docs/impl/todo-audit-2026-10-31.md) §3.1 如实记录阻塞与复现。
+- **P3 文档**：evaluation/interview/screenshots/compat/00–04/spike/cheatsheet/web-walkthrough/method-sources 口径与历史标注清理。
 
 ### Tests
 
@@ -142,15 +155,15 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Known gaps
 
-完整清单、影响与后续动作见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md) §4（以下为截至 HEAD `e1aef8d` 的摘要，**不虚构成已完成**）：
+> **历史摘要（`[0.1.0]` 时点，截至 HEAD `e1aef8d`）**，不是当前状态；**当前缺口以 [docs/impl/implementation-status.md](docs/impl/implementation-status.md) §4 为准**。以下条目多已在 2026-10-31 后续轮次关闭，保留原文 + 关闭说明：
 
-- 有/无插件对照评测（M6 / T6.1）未执行，暂无 M-15 / M-18 实测数字；[docs/evaluation.md](docs/evaluation.md) 状态仍为「未执行」。
-- 三个 agent preset 在真实会话中的切换验证未完成；精简组合可能缺少 `@deepseek-ai/dsh-agent-preset` 而跳过 preset 行（不影响 `/flow`、工具与守卫）。
-- 浏览器内人工交互流程（面板按钮的 Remote 兜底、低复杂度确认卡）未走查；状态条与面板渲染已在真实 Web 宿主验证。
-- 审查 / 派发 / 并行 worktree 的完整真机验证依赖提供 subagents 的宿主组合；当前精简 web 组合缺 subagents / sessionQuery / userQuestions / Remote，按降级处理。
-- `appendPluginRecord` 属实验性 API，DSH 升级可能失效；已保留降级路径，每个 RC 需跑 `verify:compat`。
-- 核心逻辑覆盖率（2026-10-31 重测）：语句 83.0% / 分支 68.4% / 函数 86.5% / 行 87.6%，分支覆盖率低于 80% 目标。
-- npm 首发与 GitHub Release 尚未执行；tag `v0.1.0` 落后 HEAD 4 个提交（发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
+- ~~有/无插件对照评测（M6 / T6.1）未执行~~ → 已执行 18/18 run + 4 项主观指标人工评分 18/18（单次/单人、不可外推；见 evaluation §6）。
+- ~~三个 agent preset 在真实会话中的切换验证未完成~~ → 会话内切换已真机验证；persona/工具集运行时差异仍需真模型会话观察（见 implementation-status §4）。
+- ~~浏览器内人工交互流程（Remote 兜底、低复杂度确认卡）未走查~~ → 已在真实 Web 宿主走查（14 张新增截图，25 张总计）；真实拦截→面板→误判反馈仍是组件级。
+- 审查 / 派发 / 并行 worktree 的完整真机验证依赖提供 subagents 的宿主组合：顺序派发已真机结算到 S5；并行批次真实启动但 headless 一次性运行未完成合并结算（仍开放）。
+- `appendPluginRecord` 属实验性 API，DSH 升级可能失效：每个 RC 需跑 `verify:compat`（仍开放）。
+- ~~核心逻辑覆盖率低于 80% 目标~~ → thresholds 已入 `vitest.config.ts` 并在本地/CI 通过（数值口径见 implementation-status §2）。
+- npm 首发与 GitHub Release 尚未执行：发布决策仍待负责人（发布项，非功能缺口）。
 
 [Unreleased]: https://github.com/ChthollyWn/dsh-flowgate/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/ChthollyWn/dsh-flowgate/releases/tag/v0.1.0

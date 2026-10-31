@@ -32,6 +32,17 @@ interface FlowgateProjection {
 }
 ```
 
+### 1.1 上下文占用（contextPct，可选）
+
+host 从 DSH `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影读取：
+`sessionProjections.snapshot(session, ['contextPressure'])` 的 wire 值
+`{ projectedTokens?, pressureTokens?, contextWindow? }`（单元为 host-only 无 wire 时退回 `stateOf`）。
+
+- 计算：`contextPct = clamp(round((projectedTokens ?? pressureTokens) / contextWindow × 100, 1), 0, 100)`；
+- 任一数字缺失/非法/`contextWindow <= 0` → **字段不存在**（不是 0），client 降级不显示（`>= 60` 才提示）；
+- 刷新：token-meter 每次用量样本后 `onChanged` → 延后一帧 `emit()`；普通 emit 也会重读；
+- 实现：`src/host/projection/context.ts`、`src/host/runtime.ts`（`setContextPctSource`/`snapshotWithContext`），测试 `test/host/context-pct.test.ts`。
+
 ### PanelExtras
 
 ```ts
