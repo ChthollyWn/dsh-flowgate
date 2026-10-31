@@ -3,8 +3,8 @@
  * Mirrors docs/impl/host-client-contract.md, including the "degrade" variants
  * (not initialized / paused change / low-complexity confirm card).
  */
-import type { FlowgateProjection, LearningMode, PanelExtras } from '../../src/client/types'
-import type { RuntimeSnapshot } from '../../src/core/types'
+import type { FlowgateProjection, JobRowWire, LearningMode, PanelExtras } from '../../src/client/types'
+import type { RuntimeSnapshot, TaskCard } from '../../src/core/types'
 
 export interface ProjectionOverrides {
   learning?: LearningMode
@@ -445,4 +445,104 @@ export function makeBlockedProjection(): FlowgateProjection {
     },
     panel: { gate: undefined },
   })
+}
+
+// ---------------------------------------------------------------------------
+// v0.3 runtime visualization fixtures (subagent catalog + background jobs)
+// ---------------------------------------------------------------------------
+
+/** Fixed clock for deterministic job durations in SSR tests/previews. */
+export const RUNTIME_NOW = Date.UTC(2026, 10, 1, 1, 0, 0)
+
+/** Native `subagentCatalog` projection rows for one parent session. */
+export function makeSubagentCatalog(): unknown[] {
+  return [
+    { id: 'child-T1', createdAt: RUNTIME_NOW - 180_000, mode: 'one-shot', label: 'flowgate-exec-T1' },
+    { id: 'child-T2', createdAt: RUNTIME_NOW - 120_000, mode: 'continuable', label: 'flowgate-exec-T2' },
+    { id: 'child-R2', createdAt: RUNTIME_NOW - 90_000, mode: 'one-shot', label: 'flowgate-review-T2-1' },
+    { id: 'child-F1', createdAt: RUNTIME_NOW - 60_000, mode: 'one-shot', label: 'flowgate-final-review-1' },
+    { id: 'child-I1', createdAt: RUNTIME_NOW - 30_000, mode: 'one-shot', label: 'flowgate-investigate-1720000000' },
+  ]
+}
+
+/** FlowGate projection whose task cards link the executor subagents above. */
+export function makeAgentsProjection(): FlowgateProjection {
+  const base = makeProjection()
+  const tasks = {
+    T1: {
+      id: 'T1',
+      batch: 'B1',
+      status: 'done',
+      tdd: 'green',
+      evidenceIds: ['E-1'],
+      reviewIds: ['R-1'],
+      agent: 'child-T1',
+      worktree: '.flowgate/worktrees/C-003-T1',
+      startedAt: '2026-10-30T08:30:00Z',
+      finishedAt: '2026-10-30T08:40:00Z',
+    },
+    T2: {
+      id: 'T2',
+      batch: 'B2',
+      status: 'running',
+      tdd: 'red',
+      evidenceIds: [],
+      reviewIds: [],
+      agent: 'child-T2',
+      worktree: '.flowgate/worktrees/C-003-T2',
+      startedAt: '2026-10-30T09:00:00Z',
+    },
+  } as unknown as RuntimeSnapshot['tasks']
+  const taskCards = {
+    T2: { id: 'T2', title: '回调幂等' } as unknown as TaskCard,
+  }
+  return {
+    ...base,
+    snapshot: { ...base.snapshot, tasks, taskCards },
+  }
+}
+
+/** Per-catalog running selector result: child-T2 (executor) is running. */
+export const AGENTS_RUNNING_KEY = '01000'
+
+/** Native background-job rows covering live / completed / failed / killed. */
+export function makeJobRows(now: number = RUNTIME_NOW): JobRowWire[] {
+  return [
+    {
+      id: 'J-2',
+      kind: 'bash',
+      label: 'pnpm build',
+      status: 'completed',
+      detail: 'exit code: 0',
+      startedAt: now - 300_000,
+      finishedAt: now - 240_000,
+      output: { total: 42 },
+    },
+    {
+      id: 'J-1',
+      kind: 'bash',
+      label: 'pnpm test --watch',
+      status: 'running',
+      progress: 'running tests…',
+      startedAt: now - 65_000,
+    },
+    {
+      id: 'J-3',
+      kind: 'bash',
+      label: 'node scripts/check.mjs',
+      status: 'failed',
+      detail: 'exit code: 2',
+      startedAt: now - 120_000,
+      finishedAt: now - 100_000,
+    },
+    {
+      id: 'J-4',
+      kind: 'task',
+      label: 'parallel smoke',
+      status: 'killed',
+      detail: 'stopped by owner',
+      startedAt: now - 90_000,
+      finishedAt: now - 80_000,
+    },
+  ]
 }

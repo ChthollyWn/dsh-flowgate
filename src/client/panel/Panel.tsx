@@ -33,19 +33,54 @@ import { TraceView } from './views/Trace'
 import { RiskView } from './views/Risk'
 import { InterceptsView } from './views/Intercepts'
 import { MetricsView } from './views/Metrics'
+import { SubagentsView } from './views/Subagents'
+import type { SubagentsRuntimeData } from './views/Subagents'
+import { JobsView } from './views/Jobs'
+import { catalogIds, parseCatalog } from '../runtime-model'
 
-export type PanelTab = 'ledger' | 'pipeline' | 'gates' | 'tasks' | 'trace' | 'risk' | 'intercepts' | 'metrics'
+export type PanelTab =
+  | 'ledger'
+  | 'pipeline'
+  | 'gates'
+  | 'tasks'
+  | 'agents'
+  | 'jobs'
+  | 'trace'
+  | 'risk'
+  | 'intercepts'
+  | 'metrics'
 
-export const PANEL_TABS: { id: PanelTab; labelKey: 'tab.ledger' | 'tab.pipeline' | 'tab.gates' | 'tab.tasks' | 'tab.trace' | 'tab.risk' | 'tab.intercepts' | 'tab.metrics' }[] = [
+export const PANEL_TABS: {
+  id: PanelTab
+  labelKey:
+    | 'tab.ledger'
+    | 'tab.pipeline'
+    | 'tab.gates'
+    | 'tab.tasks'
+    | 'tab.agents'
+    | 'tab.jobs'
+    | 'tab.trace'
+    | 'tab.risk'
+    | 'tab.intercepts'
+    | 'tab.metrics'
+}[] = [
   { id: 'ledger', labelKey: 'tab.ledger' },
   { id: 'pipeline', labelKey: 'tab.pipeline' },
   { id: 'gates', labelKey: 'tab.gates' },
   { id: 'tasks', labelKey: 'tab.tasks' },
+  { id: 'agents', labelKey: 'tab.agents' },
+  { id: 'jobs', labelKey: 'tab.jobs' },
   { id: 'trace', labelKey: 'tab.trace' },
   { id: 'risk', labelKey: 'tab.risk' },
   { id: 'intercepts', labelKey: 'tab.intercepts' },
   { id: 'metrics', labelKey: 'tab.metrics' },
 ]
+
+/** Native runtime data passed into the two v0.3 views (agents / jobs). */
+export interface PanelRuntimeData extends SubagentsRuntimeData {
+  bridge?: HostBridge
+  sessionId?: string
+}
 
 export interface PanelSurfaceProps {
   model: PanelModel
@@ -56,6 +91,8 @@ export interface PanelSurfaceProps {
   onLearningChange?: (mode: LearningMode) => void
   notice?: { text: string; tone: 'ok' | 'warn' | 'error' }
   onDismissNotice?: () => void
+  /** v0.3: native runtime data for the agents / jobs tabs. */
+  runtime?: PanelRuntimeData
 }
 
 const LEARNING_MODES: { id: LearningMode; labelKey: 'learning.detail' | 'learning.brief' | 'learning.off' }[] = [
@@ -65,7 +102,7 @@ const LEARNING_MODES: { id: LearningMode; labelKey: 'learning.detail' | 'learnin
 ]
 
 export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
-  const { model, t, activeTab, onTabChange, onAction, onLearningChange, notice, onDismissNotice } = props
+  const { model, t, activeTab, onTabChange, onAction, onLearningChange, notice, onDismissNotice, runtime } = props
   return (
     <div
       data-flowgate="panel"
@@ -198,6 +235,25 @@ export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
         {activeTab === 'pipeline' ? <PipelineView model={model} t={t} onAction={onAction} /> : null}
         {activeTab === 'gates' ? <GatesView model={model} t={t} onAction={onAction} /> : null}
         {activeTab === 'tasks' ? <TasksView model={model} t={t} onAction={onAction} /> : null}
+        {activeTab === 'agents' ? (
+          <SubagentsView
+            model={model}
+            t={t}
+            onAction={onAction}
+            {...(runtime !== undefined ? { runtime } : {})}
+            {...(runtime?.bridge !== undefined ? { bridge: runtime.bridge } : {})}
+            {...(runtime?.sessionId !== undefined ? { sessionId: runtime.sessionId } : {})}
+          />
+        ) : null}
+        {activeTab === 'jobs' ? (
+          <JobsView
+            model={model}
+            t={t}
+            onAction={onAction}
+            {...(runtime?.bridge !== undefined ? { bridge: runtime.bridge } : {})}
+            {...(runtime?.sessionId !== undefined ? { sessionId: runtime.sessionId } : {})}
+          />
+        ) : null}
         {activeTab === 'trace' ? <TraceView model={model} t={t} onAction={onAction} /> : null}
         {activeTab === 'risk' ? <RiskView model={model} t={t} onAction={onAction} /> : null}
         {activeTab === 'intercepts' ? <InterceptsView model={model} t={t} onAction={onAction} /> : null}
@@ -213,9 +269,46 @@ export interface PanelProps {
   bridge?: HostBridge
 }
 
+/** Structural access to the standard session-status hook beyond the base record. */
+interface RuntimeSlotProps {
+  useSessionStatus?: (selector: (statuses: ReadonlyMap<string, { running?: boolean } | undefined>) => string) => string
+}
+
+/** Read one additional session projection value (never throws during SSR). */
+function readSlotProjection(props: SlotPropRecord, key: string): unknown {
+  if (typeof props.useProjection !== 'function') return undefined
+  try {
+    return props.useProjection(key)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Ask the standard `useSessionStatus` hook for a stable running-key string in
+ * catalog order (`'1'/'0'` per child). Missing hook → '' (views fall back to
+ * task states / idle dots).
+ */
+function readRunningKey(props: SlotPropRecord, catalogRaw: unknown): string {
+  const useSessionStatus = (props as RuntimeSlotProps).useSessionStatus
+  if (typeof useSessionStatus !== 'function') return ''
+  const ids = catalogIds(parseCatalog(catalogRaw))
+  try {
+    return useSessionStatus((statuses) =>
+      ids.map((id) => (statuses.get(id)?.running === true ? '1' : '0')).join(''),
+    )
+  } catch {
+    return ''
+  }
+}
+
 /** Slot container. */
 export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
   const projection = readProjection(props)
+  // Standard session projections for the v0.3 runtime views; both hook calls
+  // stay unconditional so the hook order never changes across renders.
+  const runtimeCatalog = readSlotProjection(props, 'subagentCatalog')
+  const runtimeRunningKey = readRunningKey(props, runtimeCatalog)
   const [remoteProjection, setRemoteProjection] = React.useState<FlowgateProjection | null>(null)
   const [activeTab, setActiveTab] = React.useState<PanelTab>('pipeline')
   const [learningOverride, setLearningOverride] = React.useState<LearningMode | undefined>(undefined)
@@ -289,6 +382,13 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
       onLearningChange={handleLearning}
       {...(notice !== undefined ? { notice } : {})}
       onDismissNotice={() => setNotice(undefined)}
+      runtime={{
+        catalog: runtimeCatalog,
+        projection: effective,
+        runningKey: runtimeRunningKey,
+        ...(bridge !== undefined ? { bridge } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      }}
     />
   )
 }

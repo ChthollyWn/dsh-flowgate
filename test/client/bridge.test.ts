@@ -1,7 +1,10 @@
 /**
- * Host bridge tests: click-to-execute through the host command remote (the
- * authorization-card path — the composer is never touched), the legacy H10
- * composer-draft degradation, panel navigation and the re-proved remote face.
+ * Host bridge tests:
+ *  - click-to-execute through the host command remote (authorization-card path —
+ *    the composer is never touched) and the legacy H10 composer-draft fallback;
+ *  - panel navigation and the re-proved remote face;
+ *  - v0.3 native runtime services: `ctx.jobs` (snapshot/subscribe/watch/observe/
+ *    kill) and `ctx.uiWorkspace.openSession` for subagent-session navigation.
  */
 import { describe, expect, it } from 'vitest'
 import { createHostBridge, sessionIdOf } from '../../src/client/bridge'
@@ -19,6 +22,40 @@ interface WiringOptions {
   commands?: boolean
   /** Simulate a host without `sessions.binding(id).session.command`. Defaults to true. */
   sessionCommand?: boolean
+  /** Simulate a host that does not offer the native `ctx.jobs` service. Defaults to true. */
+  jobs?: boolean
+  /** Simulate a host without `ctx.uiWorkspace`. Defaults to true (offered). */
+  uiWorkspace?: boolean
+}
+
+/** Native jobs snapshot fixture, shaped exactly like `ctx.jobs.state.getSnapshot()`. */
+function makeJobsSnapshot() {
+  return {
+    rows: {
+      'web-1': [
+        {
+          id: 'J-1',
+          kind: 'bash',
+          label: 'pnpm test',
+          status: 'running',
+          progress: 'running 12s',
+          startedAt: 1_700_000_000_000,
+          output: { total: 0, earliest: 0 },
+        },
+        {
+          id: 'J-2',
+          kind: 'bash',
+          label: 'pnpm build',
+          status: 'completed',
+          detail: 'exit code: 0',
+          startedAt: 1_700_000_000_000,
+          finishedAt: 1_700_000_010_000,
+          output: { total: 12, earliest: 3 },
+        },
+      ],
+    },
+    observed: { 'J-1': { text: 'line 1\nline 2\n' } },
+  }
 }
 
 function makeWiring(options: WiringOptions = {}) {
@@ -33,6 +70,60 @@ function makeWiring(options: WiringOptions = {}) {
   let stateCalls = 0
   let disposeCalls = 0
   const bindingCtx = { id: 'binding-1' }
+
+  // -- native runtime services (v0.3) ---------------------------------------
+  const jobSnapshotObject = makeJobsSnapshot()
+  const jobListeners: Array<() => void> = []
+  const jobWatches: string[] = []
+  const jobObserves: Array<[string, string]> = []
+  const killCalls: Array<[string, string]> = []
+  const openSessionCalls: unknown[] = []
+  let jobSnapshotCalls = 0
+  let jobUnsubscribeCalls = 0
+  let jobWatchReleaseCalls = 0
+  let jobObserveReleaseCalls = 0
+  let killResult: { ok?: boolean } | undefined = { ok: true }
+  let killThrows = false
+  let openThrows = false
+  let openResult: unknown = undefined
+  const jobsService = {
+    state: {
+      getSnapshot: () => {
+        jobSnapshotCalls += 1
+        return jobSnapshotObject
+      },
+      subscribe: (listener: () => void) => {
+        jobListeners.push(listener)
+        return () => {
+          jobUnsubscribeCalls += 1
+        }
+      },
+    },
+    watchRows: (sessionId: string) => {
+      jobWatches.push(sessionId)
+      return () => {
+        jobWatchReleaseCalls += 1
+      }
+    },
+    observe: (sessionId: string, jobId: string) => {
+      jobObserves.push([sessionId, jobId])
+      return () => {
+        jobObserveReleaseCalls += 1
+      }
+    },
+    kill: async (sessionId: string, jobId: string) => {
+      killCalls.push([sessionId, jobId])
+      if (killThrows) throw new Error('kill failed')
+      return killResult
+    },
+  }
+  const workspaceService = {
+    openSession: (target: unknown) => {
+      openSessionCalls.push(target)
+      if (openThrows) throw new Error('open failed')
+      return openResult
+    },
+  }
   const sessionFace =
     options.sessionCommand === false
       ? undefined
@@ -61,6 +152,14 @@ function makeWiring(options: WiringOptions = {}) {
             },
           } as unknown as ClientContext['remote'],
         })
+        return typeof result === 'function' ? result : undefined
+      }
+      if (deps.includes('jobs')) {
+        const result = callback({ jobs: options.jobs === false ? undefined : jobsService })
+        return typeof result === 'function' ? result : undefined
+      }
+      if (deps.includes('uiWorkspace')) {
+        const result = callback({ uiWorkspace: options.uiWorkspace === false ? undefined : workspaceService })
         return typeof result === 'function' ? result : undefined
       }
       if (deps.includes('sessions')) {
@@ -136,6 +235,32 @@ function makeWiring(options: WiringOptions = {}) {
     },
     getStateCalls: () => stateCalls,
     getDisposeCalls: () => disposeCalls,
+    // -- native runtime services (v0.3) -------------------------------------
+    jobSnapshotObject,
+    jobListeners,
+    jobWatches,
+    jobObserves,
+    killCalls,
+    openSessionCalls,
+    jobSnapshotCalls: () => jobSnapshotCalls,
+    jobUnsubscribeCalls: () => jobUnsubscribeCalls,
+    jobWatchReleaseCalls: () => jobWatchReleaseCalls,
+    jobObserveReleaseCalls: () => jobObserveReleaseCalls,
+    notifyJobs: () => {
+      for (const listener of [...jobListeners]) listener()
+    },
+    setKillResult: (result: { ok?: boolean } | undefined) => {
+      killResult = result
+    },
+    setKillThrows: (throws: boolean) => {
+      killThrows = throws
+    },
+    setOpenThrows: (throws: boolean) => {
+      openThrows = throws
+    },
+    setOpenResult: (result: unknown) => {
+      openResult = result
+    },
   }
 }
 
@@ -327,6 +452,203 @@ describe('runCommand (click-to-execute authorization path)', () => {
     dispose()
     expect(await bridge.runCommand('/flow approve G3', 'web-1')).toBe(false)
     expect(wiring.executed).toHaveLength(1)
+  })
+})
+
+describe('native background jobs (ctx.jobs)', () => {
+  it('reports availability and returns the host snapshot by identity', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    expect(bridge.jobsAvailable()).toBe(true)
+    // Stable reference: the native model caches one object per change, which is
+    // what React's useSyncExternalStore needs.
+    expect(bridge.jobsSnapshot()).toBe(wiring.jobSnapshotObject)
+    expect(bridge.jobsSnapshot()).toBe(bridge.jobsSnapshot())
+    expect(wiring.jobSnapshotCalls()).toBeGreaterThanOrEqual(3)
+    expect(bridge.jobsSnapshot().rows['web-1']?.map((row) => row.id)).toEqual(['J-1', 'J-2'])
+    expect(bridge.jobsSnapshot().observed['J-1']?.text).toContain('line 1')
+  })
+
+  it('degrades to one stable empty snapshot and false availability without the service', () => {
+    const wiring = makeWiring({ jobs: false })
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    expect(bridge.jobsAvailable()).toBe(false)
+    const empty = bridge.jobsSnapshot()
+    expect(empty).toEqual({ rows: {}, observed: {} })
+    expect(bridge.jobsSnapshot()).toBe(empty)
+    expect(() => bridge.subscribeJobs(() => {})()).not.toThrow()
+    expect(() => bridge.watchJobs('web-1')()).not.toThrow()
+    expect(() => bridge.observeJob('web-1', 'J-1')()).not.toThrow()
+    expect(wiring.jobWatches).toEqual([])
+    expect(wiring.jobObserves).toEqual([])
+  })
+
+  it('forwards snapshot subscriptions and their release to the native model', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    let calls = 0
+    const release = bridge.subscribeJobs(() => {
+      calls += 1
+    })
+    expect(wiring.jobListeners).toHaveLength(1)
+    wiring.notifyJobs()
+    expect(calls).toBe(1)
+    release()
+    // The bridge forwards the native release verbatim (the native unsubscribe
+    // and reference-counted stream releases are their own guards).
+    expect(wiring.jobUnsubscribeCalls()).toBe(1)
+  })
+
+  it('acquires and releases the roster watch for the session id', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    const release = bridge.watchJobs('web-1')
+    expect(wiring.jobWatches).toEqual(['web-1'])
+    release()
+    expect(wiring.jobWatchReleaseCalls()).toBe(1)
+    // Empty ids never reach the host: they yield a noop release.
+    const noop = bridge.watchJobs('')
+    expect(wiring.jobWatches).toEqual(['web-1'])
+    expect(() => noop()).not.toThrow()
+  })
+
+  it('acquires and releases live output observation for one job', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    const release = bridge.observeJob('web-1', 'J-2')
+    expect(wiring.jobObserves).toEqual([['web-1', 'J-2']])
+    release()
+    expect(wiring.jobObserveReleaseCalls()).toBe(1)
+    expect(() => bridge.observeJob('web-1', '')()).not.toThrow()
+    expect(wiring.jobObserves).toEqual([['web-1', 'J-2']])
+  })
+
+  it('kills a job through the host and resolves true only on the ok envelope', async () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(true)
+    expect(wiring.killCalls).toEqual([['web-1', 'J-1']])
+
+    wiring.setKillResult({ ok: false })
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(false)
+
+    wiring.setKillResult(undefined)
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(false)
+
+    wiring.setKillResult({ ok: true })
+    wiring.setKillThrows(true)
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(false)
+
+    // Empty ids are refused before reaching the host.
+    expect(await bridge.killJob('', 'J-1')).toBe(false)
+    expect(await bridge.killJob('web-1', '')).toBe(false)
+    expect(wiring.killCalls).toHaveLength(4)
+  })
+
+  it('cannot kill when the jobs service is missing', async () => {
+    const wiring = makeWiring({ jobs: false })
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(false)
+    expect(wiring.killCalls).toEqual([])
+  })
+
+  it('clears the native service references after dispose', async () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    const dispose = bridge.wire()
+    expect(bridge.jobsAvailable()).toBe(true)
+    expect(bridge.jobsSnapshot()).toBe(wiring.jobSnapshotObject)
+    dispose()
+    expect(bridge.jobsAvailable()).toBe(false)
+    expect(bridge.jobsSnapshot()).toEqual({ rows: {}, observed: {} })
+    expect(await bridge.killJob('web-1', 'J-1')).toBe(false)
+    // Watches acquired after dispose never reach the host.
+    expect(() => bridge.watchJobs('web-1')()).not.toThrow()
+    expect(wiring.jobWatches).toEqual([])
+  })
+
+  it('tolerates a hostile jobs service without throwing', () => {
+    const ctx: ClientContext = {
+      inject: (deps: string[], callback: (c: ClientContext) => unknown) => {
+        if (deps.includes('jobs')) {
+          callback({
+            jobs: {
+              get state(): {
+                getSnapshot: () => unknown
+                subscribe: (listener: () => void) => () => void
+              } {
+                throw new Error('hostile jobs state')
+              },
+            },
+          })
+        }
+        return () => {}
+      },
+    }
+    const bridge = createHostBridge(ctx)
+    bridge.wire()
+    expect(bridge.jobsAvailable()).toBe(false)
+    expect(bridge.jobsSnapshot()).toEqual({ rows: {}, observed: {} })
+    expect(() => bridge.subscribeJobs(() => {})()).not.toThrow()
+  })
+})
+
+describe('native subagent session navigation (ctx.uiWorkspace)', () => {
+  it('opens the child session with the Agent Team continuable target', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    expect(bridge.openSubagentSession('web-lead', 'web-child')).toBe(true)
+    expect(wiring.openSessionCalls).toEqual([
+      { parentSessionId: 'web-lead', childSessionId: 'web-child', mode: 'continuable' },
+    ])
+  })
+
+  it('reports dispatch for an async navigation face without leaking a rejection', async () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    wiring.setOpenResult(Promise.reject(new Error('navigation failed')))
+    expect(bridge.openSubagentSession('web-lead', 'web-child')).toBe(true)
+    // Let the swallowed rejection settle; an unhandled rejection would fail this test run.
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  it('degrades when the workspace service is missing, throws or gets empty ids', () => {
+    const missing = makeWiring({ uiWorkspace: false })
+    const missingBridge = createHostBridge(missing.ctx)
+    missingBridge.wire()
+    expect(missingBridge.openSubagentSession('web-lead', 'web-child')).toBe(false)
+
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    bridge.wire()
+    expect(bridge.openSubagentSession('', 'web-child')).toBe(false)
+    expect(bridge.openSubagentSession('web-lead', '')).toBe(false)
+    expect(wiring.openSessionCalls).toEqual([])
+
+    wiring.setOpenThrows(true)
+    expect(bridge.openSubagentSession('web-lead', 'web-child')).toBe(false)
+    expect(wiring.openSessionCalls).toHaveLength(1)
+  })
+
+  it('clears the workspace reference after dispose', () => {
+    const wiring = makeWiring()
+    const bridge = createHostBridge(wiring.ctx)
+    const dispose = bridge.wire()
+    expect(bridge.openSubagentSession('web-lead', 'web-child')).toBe(true)
+    dispose()
+    expect(bridge.openSubagentSession('web-lead', 'web-child')).toBe(false)
+    expect(wiring.openSessionCalls).toHaveLength(1)
   })
 })
 

@@ -209,6 +209,43 @@ export interface FlowgateRemote {
 }
 
 // ---------------------------------------------------------------------------
+// Native runtime services (v0.3 runtime visualization: background jobs)
+// ---------------------------------------------------------------------------
+
+/**
+ * One background-job row from the native `ctx.jobs` snapshot
+ * (`@deepseek-ai/dsh-api-job-controller` client model). Wire shape only —
+ * FlowGate never invents rows, it re-renders what the host publishes.
+ */
+export interface JobRowWire {
+  id: string
+  kind: string
+  label: string
+  status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
+  /** Live one-line qualifier while running. */
+  progress?: string
+  /** Terminal detail (often carries `exit code: N` / a signal). */
+  detail?: string
+  /** Epoch milliseconds. */
+  startedAt: number
+  /** Epoch milliseconds; present once the job settled. */
+  finishedAt?: number
+  /** Retained-output metadata; `total > 0` means an output panel can open. */
+  output?: { total?: number; earliest?: number }
+}
+
+/** Per-job observed output view (bounded render tail maintained by the host). */
+export interface JobsObservedView {
+  text?: string
+}
+
+/** `ctx.jobs.state.getSnapshot()` shape: rosters per session + observed views per job. */
+export interface JobsUiSnapshot {
+  rows: Record<string, JobRowWire[]>
+  observed: Record<string, JobsObservedView>
+}
+
+// ---------------------------------------------------------------------------
 // Cordis client context (structural; never imported from @deepseek-ai/*)
 // ---------------------------------------------------------------------------
 
@@ -257,6 +294,18 @@ export interface ClientContext {
   sidebarRight?: SidebarRightService
   sessions?: unknown
   conversation?: unknown
+  /**
+   * Native background-jobs client service (`ctx.jobs`, registered by
+   * `@deepseek-ai/dsh-api-job-controller`); re-proved structurally in
+   * `bridge.ts` (`state.getSnapshot/subscribe`, `watchRows`, `observe`, `kill`).
+   */
+  jobs?: unknown
+  /**
+   * Native workspace navigation service (`ctx.uiWorkspace`), used to open a
+   * child subagent session with `openSession({parentSessionId, childSessionId,
+   * mode:'continuable'})` — the same call the official Agent Team UI makes.
+   */
+  uiWorkspace?: unknown
   remote?: Record<string, unknown>
   logger?: ClientLogger
   [key: string]: unknown

@@ -223,6 +223,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 专项单测（并行槽位补位、检查点修复任务与重试、`run: main` 路由、行级读取覆盖、同 diff 去重、终审三份结论、检查点任务验证+全量测试）；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
 | 图形化流程可视化（输入区 dock / 面板流程页 / 会话内工具轨道） | ✅ 2026-11-01 v0.2：输入区 dock 改为七阶段动画轨道 + 下一步 chip + 图形化状态卡（demo/locked/off/idle/active/awaiting/pending/blocked 8 态）；右侧栏新增 `panel-rail` 与图形流程页（hero 进度环、纵向时间线、人工/自动门徽标、「你在这里」、下一步 callout、默认折叠的学习卡）；会话内每个 `flow_*` 工具调用渲染迷你七阶段轨道；动画只动 transform/opacity/stroke，遵守 `prefers-reduced-motion`；**卡片与面板统一使用 DSH 原生 `--dsw-*` 设计 token，授权卡与原生 plan 审批卡同构（warn strip + 白卡 + 黑白主按钮/outline），宽度严格对齐 `--dsh-chat-content-width`（真实宿主实测 dock/授权卡 844.8px，±0px）**；真实宿主截图见 [docs/screenshots](docs/screenshots/README.md) |
 | 卡片优先交互（点击即授权 + 原生提问卡片） | ✅ 2026-11-01 v0.2：人工门 / 待处理项（SC·RK·PC·RL·TM·CF·BL）/ 非 agent 改动确认 / 启用 / 修复全部为可点击授权卡；点击经 `ctx.remote.commands.execute` 直接执行等价命令（`sessions.binding().session.command` 兜底），**输入框不再被填入命令**；FlowGate preset 组合原生 `ask_user_question`，澄清与选择走提问卡片；host/core 中面向用户的 `/flow` 提示已清理为卡片导向（仅保留 help / 用法错误 / doctor 诊断）；真实宿主点击流程见 [docs/screenshots](docs/screenshots/README.md) |
+| 运行可视化：子代理拓扑（工作流图 / 树）+ 后台任务清单 | ✅ 2026-11-01 v0.3：面板新增「子代理」「后台」两个视图。子代理视图读取 DSH 原生 `subagentCatalog` 会话投影 + 实时 running 状态，并与 FlowGate 任务/批次/worktree 关联，提供**工作流图（自上而下，560/719px 侧栏实测 0 横向溢出）/ 树**双模式；后台任务视图复用 DSH 原生 `ctx.jobs` 服务，展示状态、**退出码**、耗时、**实时输出**（展开流式观察）与**两段式强制终止**；样式全部 `--dsw-*` 原生 token/中性色。限制：真机 populated 需模型运行，本轮真实宿主只验证空态/组合（22/22），populated 截图为组件级假数据（34–36）。 |
 | 右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：8 视图、会话内切换工程模式 preset、面板审批、待处理项处理、例外列表/撤销、非 agent 改动确认；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；GREEN 过期按输入哈希显示；执行图节点可点击并展开任务详情（scope/验证组/covers）；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），并标注精确判定以宿主实际拦截为准；拦截视图误判反馈仍为组件级验证 |
 | HTML 交付报告、跨会话看板 | ✅ 已实现（单文件离线可用，样例见 test/fixtures） |
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
@@ -231,6 +232,8 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 **验证边界**（2026-10-31 第六轮本地实测）：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（**112 文件 / 1522 用例**；第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70；合计 86.40 / 76.25 / 86.92 / 89.46，core/host 明细见 implementation-status §2）；npm 包约 **39 文件 / 约 1.03MB**（精确值见 implementation-status §2 与发布说明）；真实 DSH 0.2.1-rc.5 下 `--dump-config` 已加载本插件，隔离 profile 复跑 `verify:compat` **13/13**（第六轮在 `/tmp/fg-audit-env` 用新构建复跑，dump-config 1314 行；`--dump-config-schema` 在 rc.5 上会因宿主自带 preset 行同样报错，不作为判据，见 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；启动增量 **+16.2ms**、卸载干净度通过；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run 并补齐主观评分，结论含反例/阻塞原因与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。**第六轮由独立复验驱动修复了 7 项 P1 接线缺口**（并行 worktree 执行根、派发双结算、S5 回归判定、上下文压缩/跨会话重注入、澄清占位符、低复杂度任务数上限；见 implementation-status §3.12），本地门禁全绿；**第六轮提交已推送**（`cea85dd` + `25fffac`），CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint → test → coverage → build → verify:package → verify:client）。第五轮验收与第六轮复验记录见 [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
 **v0.2（2026-11-01，图形化流程 + 卡片授权）本地门禁：** `pnpm lint` / `npx vitest run`（**116 文件 / 1642 用例**）/ `pnpm coverage`（86.39 / 76.24 / 86.93 / 89.47，阈值通过）/ `pnpm build`（host 1.21MB / client 346.6KB）/ `verify:package`（39 文件 / 1065.3KB）/ `verify:client` 全绿；真实 DSH Web 宿主的点击即授权与图形化流程页走查见 [docs/screenshots](docs/screenshots/README.md) 与 [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md)。
+
+**v0.3（2026-11-01，运行可视化：子代理拓扑 + 后台任务）：** `pnpm lint` / `npx vitest run`（**118 文件 / 1683 用例**）/ `pnpm coverage`（86.39 / 76.25 / 86.93 / 89.47，阈值通过）/ `pnpm build`（host 1.21MB / client 411.6KB）/ `verify:package` / `verify:client` 全绿；真实 DSH Web 宿主零模型 smoke **22/22**（10 tab、新视图空态、旧视图/授权卡无回归、0 pageerror/console.error/模型请求）；子代理工作流图在 560px / 719px 侧栏 **0 横向溢出**（508/508、667/667）。真机 populated 需模型，34–36 为组件级证据（已如实标注）。
 
 ## 界面
 
@@ -243,6 +246,12 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 点击批准后（G3 通过、进入 S4） | 右侧栏图形流程页（进度环 / 时间线 / 门状态） |
 |---|---|
 | ![批准后](docs/screenshots/32-flow-approved.png) | ![图形流程页](docs/screenshots/33-panel-flow-map.png) |
+
+| 子代理拓扑（工作流图 / 树双模式） | 后台任务清单（退出码 / 实时输出 / 强制终止） |
+|---|---|
+| ![子代理拓扑](docs/screenshots/34-panel-subagents-graph.png) | ![后台任务](docs/screenshots/36-panel-jobs.png) |
+
+> 34–36 为**组件级 populated 证据**（真实组件 + 真实 `--dsw-*` token CSS + 假数据；零模型请求下真机无法产生子代理/后台 job），真实宿主空态与组合另有 22/22 断言证据；树模式见 [35-panel-subagents-tree.png](docs/screenshots/35-panel-subagents-tree.png)。说明与限制见 [docs/screenshots/README.md](docs/screenshots/README.md) 与 [docs/impl/runtime-visualization.md](docs/impl/runtime-visualization.md)。
 
 旧版文字状态条与 8 视图面板的历史截图保留在 [docs/screenshots](docs/screenshots/README.md)（01–26 号）。
 

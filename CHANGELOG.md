@@ -6,6 +6,26 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.3 运行可视化：子代理拓扑 + 后台任务，2026-11-01）
+
+> 未发版：负责人需求——子代理拓扑实时预览（工作流图 / 树双模式）+ 后台任务清单（退出码、实时输出、强制终止）也要可视化，风格与 DSH 原生一致。设计契约见 [docs/impl/runtime-visualization.md](docs/impl/runtime-visualization.md)。
+
+### Added
+
+- **面板新视图「子代理」**：读取 DSH 原生会话投影 `subagentCatalog` + 全局标准 props `useSessionStatus` 的实时 running 状态，并与 FlowGate 投影的任务/批次/taskCards/worktree 关联；角色按激活 label 解析（执行者/任务审查者/终审/调查者/其它）；
+  - **工作流图**（默认）：自上而下 主会话 → 竖向主干 → 批次组（组头含顺序/并行 tag、状态、数量）→ 组内子代理卡（flex-wrap，窄栏自动单列）→「服务」组最后；560px / 719px 侧栏实测 **0 横向溢出**（508/508、667/667）。
+  - **树**：主会话根 → 可折叠批次 → 缩进子代理行；状态点（running 呼吸 / done / failed / idle）仅小面积语义色；「打开会话」经 `uiWorkspace.openSession` 跳转子代理会话。
+- **面板新视图「后台」**：复用 DSH 原生 `ctx.jobs` 服务（与官方 Jobs 面板同源）渲染后台任务清单——状态点、kind、mono 命令标签、**退出码 chip**（解析 `detail` 的 `exit code: N`）、耗时（live 每秒刷新）、展开后经 `observe` 流式显示**实时输出**（`<pre>`，最近 8KB、自动滚底）、**两段式强制终止**（`kill`，armed 3 秒自动解除）；缺 `ctx.jobs` 时优雅空态。
+- 客户端数据层：`HostBridge` 增加 `jobsAvailable/jobsSnapshot/subscribeJobs/watchJobs/observeJob/killJob/openSubagentSession`，经 `ctx.inject(['jobs'])`、`ctx.inject(['uiWorkspace'])` 延迟解析；`types.ts` 增加 `JobRowWire/JobsObservedView/JobsUiSnapshot`。
+- `src/client/runtime-model.ts` 纯函数（角色解析/任务关联/orderedJobs/parseExitCode/formatDuration/输出裁剪）+ i18n zh/en 各 +54 key + 原生 token 样式类；面板 tab 8→10。
+
+### Verification
+
+- `pnpm lint` 绿；`npx vitest run` **118 files / 1683 tests** 全绿；`pnpm coverage` 通过 thresholds（86.39 / 76.25 / 86.93 / 89.47）；`pnpm build`（host 1.21MB / client 411.6KB）；`verify:package` / `verify:client`（18 插槽）通过。
+- 真实 DSH 0.2.1-rc.5 Web 宿主（隔离 `DSH_HOME`、**零模型请求**）smoke **22/22**：10 tab（含新「子代理/后台」）、两视图空态、旧 8 tab 与授权卡/宽度无回归、0 pageerror / 0 console.error / 0 模型请求；dump-config 确认 `@deepseek-ai/dsh-api-job-controller`（ctx.jobs）与 `@deepseek-ai/dsh-client-ui-workspace`（openSession）在 Web 组合中。
+- 组件级 populated 证据（真实组件 + 真实 `--dsw-*` token CSS + fixture）：34 子代理工作流图（560px，0 溢出）、35 树模式、36 后台任务（展开输出 + armed 终止 + 退出码）；截图见 [docs/screenshots](docs/screenshots/README.md)。
+- **限制（如实）**：真机 populated（真实子代理/后台 job）需要模型运行，本轮零模型只验证空态与组合面；34–36 为组件级假数据证据，已在 README 标注。
+
 ## [Unreleased]（v0.2 开发线：图形化流程 + 卡片化授权，2026-11-01）
 
 > 未发版：本节记录工作区已完成、尚未发布到 npm 的变更。设计契约见 [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md)。

@@ -346,6 +346,21 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 **已知限制（如实）**：原生提问卡与 toolview 需模型真跑一轮才能出现，零模型 E2E 只验证组合面（preset 含工具、web 组合含 `ui-user-questions`）；awaiting 状态沿用既有离线构造口径（web-walkthrough §2.4），点击→执行→推进是真实链路。另有观察项：活跃态 dock 的 next chip 已从 host 的 `flow_submit(...)` 模型文案替换为阶段自然语言（`humanNextStep`），D2 复验刷新截图 30。
 
+## 3.14 v0.3：运行可视化（子代理拓扑 + 后台任务，2026-11-01）
+
+负责人需求：**子代理拓扑实时预览（工作流图 / 树双模式）+ 后台任务清单（退出码、实时输出、强制终止）也要可视化，风格与 DSH 原生一致。** 设计契约 [runtime-visualization.md](runtime-visualization.md)。数据全部来自 DSH 原生服务，不新造 host 状态。
+
+| 方向 | 交付 | 证据 |
+|---|---|---|
+| 子代理视图（面板 tab `agents`） | `subagentCatalog` 投影 + `useSessionStatus` 实时 running + FlowGate tasks/batches/taskCards/worktree 关联；角色解析（exec/review/final/investigate）；工作流图（自上而下，560/719 侧栏 0 溢出）/ 树双模式；打开子代理会话 | `src/client/panel/views/Subagents.tsx`、`runtime-model.ts`、`test/client/subagents.test.tsx`、截图 34/35 |
+| 后台任务视图（面板 tab `jobs`） | 复用 `ctx.jobs`：状态/退出码 chip/耗时/展开实时输出（observe 流式 `<pre>`）/两段式强制终止（kill）/缺服务空态 | `src/client/panel/views/Jobs.tsx`、`test/client/jobs.test.tsx`、截图 36 |
+| bridge 数据层 | `jobsAvailable/jobsSnapshot/subscribeJobs/watchJobs/observeJob/killJob/openSubagentSession`；`ctx.inject(['jobs'])` + `['uiWorkspace']` 延迟解析、防御式降级 | `src/client/bridge.ts`、`types.ts`、`test/client/bridge.test.ts`（30 例） |
+| 原生风格 | 全部 `--dsw-*` token/中性色；状态语义色仅小状态点；行/按钮/输出面板与官方 Jobs/plan 卡风格一致；reduce 关闭动效 | `styles.ts`、`visual.test`、真实宿主风格核对 |
+
+**验证**：`pnpm lint` 绿；`npx vitest run` **118 files / 1683 tests**；coverage 86.39/76.25/86.93/89.47（阈值通过）；build（host 1.21MB / client 411.6KB）；verify:package / verify:client（18 插槽）通过。真实 Web 宿主（隔离 DSH_HOME、零模型请求）smoke **22/22**：10 tab、两视图空态、旧 8 tab/授权卡/宽度无回归、0 pageerror/0 console.error/0 模型请求；dump-config 含 `@deepseek-ai/dsh-api-job-controller` 与 `@deepseek-ai/dsh-client-ui-workspace`。子代理工作流图 560px/719px 0 横向溢出（508/508、667/667）。组件级 populated 截图 34–36（真实组件 + 真实 token CSS + fixture）。
+
+**限制（如实）**：真实子代理与后台 job 需要模型运行才能产生；零模型验证只覆盖空态/组合面，populated 截图为组件级假数据（README 已披露）。
+
 ## 4. 剩余项（第六轮复验后，四分）
 
 > 第六轮独立复验确认第五轮"功能缺口全部闭环"结论不成立：7 项 P1 接线缺口已在 §3.12 修复；

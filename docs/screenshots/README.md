@@ -1,7 +1,7 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
-采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）；2026-11-01 00:16 追加"v0.2 图形化流程 + 卡片化授权 E2E"一轮（30–33 号，见下方分节）。
-当前共 **29 张 PNG**（编号 01–10、12–26、30–33；11 与 27–29 号不存在）。
+采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）；2026-11-01 00:16 追加"v0.2 图形化流程 + 卡片化授权 E2E"一轮（30–33 号，见下方分节）；2026-11-01 01:38 追加"v0.3 子代理拓扑 / 后台任务视图"一轮（34–36 号，见下方分节）。
+当前共 **32 张 PNG**（编号 01–10、12–26、30–36；11 与 27–29 号不存在）。
 环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
 复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
 
@@ -54,6 +54,22 @@
 | [33-panel-flow-map.png](33-panel-flow-map.png) | 面板流程页（中性风格）：面板头轨道、hero「④ 执行 · 你在这里」+ 灰阶 4/7 进度环、七阶段纵向时间线与门状态（G0–G3 已通过）、当前节点高亮、下一步 callout「按执行图开始下一个任务」 |
 
 限制（如实披露）：原生 `ask_user_question` 提问卡与 `flow_*` 工具调用的 toolview 需要模型真正跑一轮才会出现；本轮零模型请求只验证了组合面（`preset-flowgate` 已含 `@deepseek-ai/dsh-tool-ask-user`、web 组合含 `dsh-client-ui-user-questions`），**未覆盖**原生提问卡真机渲染。目视核对（本轮）：无大色块/彩虹轨道；活动元素颜色均来自宿主语义 token（当前阶段蓝 `#4176e6`、awaiting 徽标 warn 橙、strip 为 warn tertiary 浅底、检查项 StateDot 绿），主按钮为黑底白字、退回落款为 outline + 错误色文字（无蓝/红实心按钮），符合「少用花哨颜色」。旧观察项 `flow_submit(...)` 文案已在上一轮修复，本轮 dock/面板 callout 均为自然语言。
+
+### 2026-11-01 v0.3 追加（子代理拓扑 / 后台任务视图：真实宿主空态 + 组件级 populated）
+
+采集时间 2026-11-01 01:38–01:52（Asia/Shanghai）；**34 号于 01:48 用「工作流图窄栏自适应」修复后的重建重拍**。环境：隔离 `DSH_HOME=/tmp/fg-v2/dsh-home`、`HOME=/tmp/fg-v2/home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区 `/private/tmp/fg-v2/projA`，宿主 `dsh --profile flowgate-dev --host 127.0.0.1 --port 7130 --no-open`（未占用 60747），Playwright 1.60 + 系统 Chrome，视口 1600×1000。构建：v0.3 窄栏修复重建（2026-11-01 01:44），`lib/client.js` sha256 `ca85666cd1f4c5ef76df68f78f4789dbc8ada9bd11d738b9fa0b3288dcbd6ce3`（411,591B）、`lib/host.js` sha256 `fbfc68f2…`（不变）；35/36 仍为同轮早先构建（`f9cdfd4b…`）的组件级截图（树 / jobs 组件未改动，复核无回归）。复现脚本：`/tmp/fg-v2/k-realhost.cjs`（真实宿主 smoke）、`/tmp/fg-v2/k-preview.cjs`（35/36 组件级截图）、`/tmp/fg-v2/k2-preview.cjs`（34 重拍 + 560/719 溢出断言）。
+
+**真实宿主零模型验证（22/22 断言通过）**：面板现为 **10 个 tab**（旧 8 个 + `子代理` / `后台`，新 tab 插在「任务」之后）；点击 `子代理` 渲染 `[data-flowgate="view-agents"]` 空态「运行中 0 / 共 0 · 暂无子代理 · S4 派发执行者/审查者/调查者后显示拓扑」；`后台` 渲染 `[data-flowgate="view-jobs"]` 空态「当前没有后台任务」；旧 8 tab 全部正常（`view-ledger/pipeline/gates/tasks/trace/risk/intercepts/metrics`）；授权卡与宽度无回归（G3 awaiting 卡正常，`dock-inner` 844.8 == `--dsh-chat-content-width` 844.8、`auth-card` 844.8）；**0 pageerror / 0 console.error / 0 模型请求**。`--dump-config` 确认 web 组合含 `job-controller = @deepseek-ai/dsh-api-job-controller`（L455，决定 `ctx.jobs` 可用）与 `ui-workspace = @deepseek-ai/dsh-client-ui-workspace`（L578，`openSubagentSession` 依赖）。窄栏修复重建（`ca85666c…`）下重跑 smoke 仍 **22/22 通过**、0 pageerror / 0 console.error / 0 模型请求。空态截图（未入库）见 `/tmp/fg-v2/k-panel-agents-empty.png`、`k-panel-jobs-empty.png`。
+
+**组件级 populated 证据声明（34–36）**：本轮零模型请求**无法真机产生**子代理 / 后台 job；三张图为**组件级**证据——取自 viz 预览页 `/tmp/fg-viz-preview/runtime-preview.html`（**真实组件 + 真实 `--dsw-*` token CSS + 固定 fixture 数据**，fixture 见 `test/client/mock.ts`），Playwright 系统 Chrome 截取为 1600×1000；仅在预览页内做了「单面板居中」的排版处理，组件与数据未改。真机 populated 需模型运行，**不能**当作真实宿主 populated 证据。
+
+| 截图 | 内容 |
+|---|---|
+| [34-panel-subagents-graph.png](34-panel-subagents-graph.png) | 子代理**工作流图**（**560px 侧栏宽、自上而下**，组件级 fixture）：主会话 → 竖向主干 → 批次组 B1（`顺序` tag，已完成，执行者 T1 绿点）/ B2（`并行` tag，运行中，执行者 T2 蓝点）→ 服务组（审查者 / 终审 / 调查者，组内卡片 flex-wrap）；顶部「运行中 1 / 共 5」与「工作流图 / 树」模式切换；graph 容器 **508px，0 横向溢出** |
+| [35-panel-subagents-tree.png](35-panel-subagents-tree.png) | 子代理**树**模式（560px 侧栏宽，组件级 fixture）：批次 / 执行者 / 服务层级 + 状态「已完成 / 运行中 / 空闲」+ 各行「打开会话」入口 |
+| [36-panel-jobs.png](36-panel-jobs.png) | **后台任务**（560px 侧栏宽，组件级 fixture）：运行中 `pnpm test --watch` 展开实时输出 + 两段式「确认终止」（armed，淡红底）+ 已终止（stopped by owner）/ 失败（退出码 2）/ 完成（退出码 0）行；4 行覆盖 running / completed / failed / killed |
+
+**布局观察（原问题已修复，2026-11-01 01:44 重建）**：`子代理` 的**工作流图**已改为窄栏**自上而下**布局（主会话 → 竖向主干 → 逐组垂直堆叠的批次组 / 服务组，组内卡片 flex-wrap）。实测 `[data-flowgate="agents-graph"]`：**560px 容器 clientWidth=scrollWidth=508（横向溢出 0px）**、**719px 容器 667/667（0px）**；修复前同样两侧栏宽度下曾分别溢出 421px / 262px。tree / jobs 视图复核无回归、560px 下仍 0 溢出。**风格核对**：中性 token，无大色块 / 彩虹；饱和色仅 8px StateDot（蓝/绿/黄/红语义点）与 armed 终止按钮（62×24、10% 红底），无大面积色块。
 
 ## 说明
 

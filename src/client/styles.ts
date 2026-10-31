@@ -518,6 +518,581 @@ button.fg-rail-node {
   display: none;
 }
 
+
+/* ----- runtime visualization: subagents (graph/tree) + background jobs --- */
+.fg-runtime-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsw-radius-lg, 16px);
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary, #0f1115);
+  font-family: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif);
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+}
+
+.fg-runtime-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fg-runtime-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
+
+.fg-runtime-count {
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-runtime-empty {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 12px;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font-size: 12.5px;
+  line-height: 22px;
+}
+
+.fg-runtime-empty small {
+  display: block;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+}
+
+/* Native segmented control (primitive segment pattern). */
+.fg-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.fg-seg-btn {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fg-seg-btn[aria-pressed='true'] {
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  color: var(--dsw-alias-label-primary, #0f1115);
+  box-shadow: var(--dsw-elevation-soft, 0 1px 2px rgba(0, 0, 0, 0.06));
+}
+
+.fg-seg-btn:hover:not([aria-pressed='true']) {
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
+
+/* Workflow graph — top-down, narrow-panel adaptive workflow. */
+.fg-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding: 2px 0 4px;
+}
+
+.fg-graph-root {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-module-platform, #f4f5f7);
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Vertical trunk from the main session into the group rail. */
+.fg-graph-trunk {
+  width: 1px;
+  height: 12px;
+  margin-inline-start: 16px;
+  background: var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+}
+
+.fg-graph-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  border-inline-start: 0.5px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
+  margin-inline-start: 16px;
+  padding-inline-start: 12px;
+}
+
+.fg-graph-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Branch connector from the rail into each group header. */
+.fg-graph-group::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 14px;
+  width: 11px;
+  height: 1px;
+  background: var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
+}
+
+.fg-graph-batch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+}
+
+.fg-graph-batch-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary, #61666b);
+}
+
+.fg-graph-batch-mode {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.fg-graph-batch-spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+
+.fg-graph-batch-status {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.fg-graph-batch-count {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cards wrap: 2 columns when the panel allows, 1 column in a narrow sidebar. */
+.fg-graph-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fg-graph-cards .fg-agent-card {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fg-agent-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsw-radius-md, 12px);
+  background: var(--dsw-alias-bg-layer-2, #ffffff);
+  color: var(--dsw-alias-label-primary, #0f1115);
+  text-align: start;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fg-agent-card-button {
+  cursor: pointer;
+}
+
+.fg-agent-card-button:hover,
+.fg-agent-card-button:focus-visible {
+  border-color: var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
+  box-shadow: var(--dsw-elevation-panel, 0 1px 4px rgba(0, 0, 0, 0.06));
+}
+
+.fg-agent-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fg-agent-role {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.fg-agent-primary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
+
+.fg-agent-attempt {
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-size: 10px;
+}
+
+.fg-agent-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-size: 11.5px;
+}
+
+.fg-agent-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.fg-agent-worktree {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.fg-agent-duration {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-agent-open-hint {
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-size: 10px;
+}
+
+/* Tree mode. */
+.fg-tree,
+.fg-tree-branch {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fg-tree-root-branch {
+  margin-top: 4px;
+}
+
+.fg-tree-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 6px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: start;
+}
+
+.fg-tree-batch {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #61666b);
+  cursor: pointer;
+}
+
+.fg-tree-batch:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.fg-tree-chevron {
+  display: inline-flex;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+}
+
+.fg-tree-batch-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.fg-tree-batch-status {
+  margin-left: auto;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+  font-size: 10.5px;
+}
+
+.fg-tree-branch {
+  border-inline-start: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  margin-inline-start: 13px;
+  padding-inline-start: 10px;
+}
+
+.fg-tree-node:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.fg-tree-node-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fg-agent-title-inline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font-size: 11px;
+}
+
+/* Background jobs list (native Jobs row pattern). */
+.fg-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fg-job-row {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--dsw-radius-md, 12px);
+}
+
+.fg-job-row-live {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.fg-job-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fg-job-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 17px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.fg-job-main:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+}
+
+.fg-job-main-static {
+  cursor: default;
+}
+
+.fg-job-kind {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06));
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.fg-job-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--dsw-alias-label-primary, #0f1115);
+}
+
+.fg-job-meta {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary, #81858c);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.fg-job-chip {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsw-radius-xs, 4px);
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-job-detail {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fg-job-duration {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.fg-job-chevron {
+  display: inline-flex;
+  color: var(--dsw-alias-label-caption, #adb2b8);
+}
+
+.fg-job-chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+
+.fg-job-kill {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fg-job-kill:hover {
+  border-color: var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
+  color: var(--dsw-alias-state-error-primary, #ec1313);
+}
+
+.fg-job-kill-armed {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #ec1313) 45%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #ec1313) 10%, transparent);
+  color: var(--dsw-alias-state-error-primary, #ec1313);
+}
+
+.fg-job-kill:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+.fg-job-output {
+  box-sizing: border-box;
+  max-height: 220px;
+  overflow: auto;
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-markdown-code-block, var(--dsw-alias-bg-module-platform, #f4f5f7));
+  color: var(--dsw-alias-label-secondary, #61666b);
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fg-job-output-empty {
+  color: var(--dsw-alias-label-caption, #adb2b8);
+}
+
+.fg-job-error {
+  margin: 0 8px 8px;
+  color: var(--dsw-alias-state-error-primary, #ec1313);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 @media (max-width: 720px) {
   .fg-plan-footer {
     align-items: flex-end;
@@ -652,6 +1227,23 @@ button.fg-rail-node {
     animation: fg-ring-draw 0.8s ease-out both;
   }
 
+  /* Live-state dot: opacity breathing only. */
+  @keyframes fg-dot-live {
+    0% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.45;
+    }
+  }
+
+  .fg-dot-live {
+    animation: fg-dot-live 1.6s ease-in-out infinite;
+  }
+
   /* Running node halo in the execution graph. */
   .fg-halo {
     animation: fg-halo 1.8s ease-in-out infinite;
@@ -674,6 +1266,7 @@ button.fg-rail-node {
   .fg-rise,
   .fg-arrow,
   .fg-halo,
+  .fg-dot-live,
   .fg-ring,
   .fg-dash line,
   .fg-dash path,

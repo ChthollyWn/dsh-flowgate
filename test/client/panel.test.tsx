@@ -48,7 +48,12 @@ describe('panel surface', () => {
     for (const tab of PANEL_TABS) {
       expect(html).toContain(`data-tab="${tab.id}"`)
     }
-    expect((html.match(/data-tab="/g) ?? []).length).toBe(8)
+    // v0.3 runtime views are registered as native tabs (zh labels).
+    expect(html).toContain('data-tab="agents"')
+    expect(html).toContain('子代理')
+    expect(html).toContain('data-tab="jobs"')
+    expect(html).toContain('后台')
+    expect((html.match(/data-tab="/g) ?? []).length).toBe(10)
     expect(html).toContain('data-active-tab="pipeline"')
     expect(html).toContain('data-flowgate="view-pipeline"')
   })
@@ -80,6 +85,8 @@ describe('panel surface', () => {
       pipeline: 'view-pipeline',
       gates: 'view-gates',
       tasks: 'view-tasks',
+      agents: 'view-agents',
+      jobs: 'view-jobs',
       trace: 'view-trace',
       risk: 'view-risk',
       intercepts: 'view-intercepts',
