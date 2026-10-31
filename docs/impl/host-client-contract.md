@@ -30,13 +30,17 @@ interface FlowgateProjection {
 }
 ```
 
-### 1.1 自动流程摘要（v0.5，可选）
+### 1.1 投影 wire 值必须是 lossless JSON（v0.5.1）
+
+DSH 的 `@deepseek-ai/dsh-api-remotes` 在转发 `api-session/added` 等事件前用 `isJsonValue()` 校验参数：`undefined` 属性、NaN/Infinity、函数、非 plain object 都会使会话摘要校验失败，表现为**新建会话/子会话失败**。因此 `flowgate` 投影的 `wire.view` 输出必须是无损 JSON；本插件在 `src/host/projection/index.ts` 用 `toLosslessJson()` 做边界清洗（JSON 往返：丢弃 undefined，NaN/Infinity→null）。新增投影字段时不要直接透传内部对象。
+
+### 1.2 自动流程摘要（v0.5，可选）
 
 `snapshot.flowPlan?: { route: 'full' | 'standard' | 'fast'; autoApprove: boolean; verdict: 'approved' | 'adjusted'; reasons: string[] }`
 
 仅当变更创建时提交了 `assessment`（或负责人用 `/flow route` 覆盖）才出现；旧客户端 / 旧投影记录忽略即可。服务端以 `status.json` 的 `change.flowPlan` 为准，账本另有 `flow.assessed` / `flow.route_override`。
 
-### 1.2 上下文占用（contextPct，可选）
+### 1.3 上下文占用（contextPct，可选）
 
 host 从 DSH `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影读取：
 `sessionProjections.snapshot(session, ['contextPressure'])` 的 wire 值
@@ -47,7 +51,7 @@ host 从 DSH `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影�
 - 刷新：token-meter 每次用量样本后 `onChanged` → 延后一帧 `emit()`；普通 emit 也会重读；
 - 实现：`src/host/projection/context.ts`、`src/host/runtime.ts`（`setContextPctSource`/`snapshotWithContext`），测试 `test/host/context-pct.test.ts`。
 
-### 1.2 任务卡详情（taskCards，可选，第六轮新增）
+### 1.4 任务卡详情（taskCards，可选，第六轮新增）
 
 `RuntimeSnapshot.taskCards?: Record<string, TaskCard>`：host 把当前变更的解析后任务卡随投影快照下发，供面板"执行图节点 → 任务详情"展示；客户端必须对缺失字段降级（不显示详情），不得抛错。
 

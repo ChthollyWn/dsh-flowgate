@@ -241,6 +241,8 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 
 **v0.5（2026-11-01，自动流程接管 + auto-review）：** `R-NO-CHANGE` 接管未立项写入；`flow_new_change.assessment` 自评 + 宿主 auto-review 决定 full/standard/fast；fast 路由 G1/G3/G6 检查通过后自动通过并交付归档，standard 合并 G1+G3 一次人工确认；新增 `/flow route` 负责人覆盖。验证：`pnpm lint` 绿；`npx vitest run`（119 文件 / 1687 用例，含 auto-review 8 类规则 + fast/standard 状态机集成）；coverage 86.18 / 76.23 / 86.88 / 89.27（阈值通过）；build（host 1.23MB / client 369.4KB）；verify:package（39 文件 / 1079.2KB）/ verify:client 全绿；真机零模型 E2E：自动流程徽标 7/7（dock + 面板 `data-route=fast`）+ v0.4 回归 14/14，0 pageerror/console.error/模型请求（见 docs/impl/auto-flow.md）。
 
+**v0.5.1（2026-11-01，修复新建会话失败）：** `flowgate` 会话投影的 wire 值含 `undefined` 字段，DSH `api-session/added` 的 lossless JSON 校验拒绝，导致新建会话/子会话报 `forwarded host event "api-session/added" argument 0 is not lossless JSON data`。已在投影边界加 `toLosslessJson()` 清洗（`init()` + `wire.view()`），并补回归测试；隔离宿主旧构建可复现、修复构建 `session/create` 返回 `ok:true`（0 模型）。验证：lint 绿；119 files / 1689 tests；coverage 86.18/76.23/86.88/89.26；build host 1.23MB / client 383.4KB；verify:package 39 文件/1080.6KB；verify:client 18 插槽通过。
+
 ## 界面
 
 在真实 DSH `0.2.1-rc.5` Web 宿主（隔离 `flowgate-dev` profile）里的实拍（2026-11-01 v0.2，采集方式与零模型声明见 [docs/screenshots/](docs/screenshots/README.md)）：

@@ -393,6 +393,18 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 **验证**：`pnpm lint` 绿；`npx vitest run` **119 files / 1687 tests**（含 auto-review 8 类规则、fast 自动 G1→S4→归档、standard 合并确认、负责人覆盖/边界、接管守卫）；coverage 86.18/76.23/86.88/89.27；build（host 1.23MB / client 369.4KB）；verify:package 39 文件/1079.2KB；verify:client 18 插槽通过。真机零模型 E2E：自动流程徽标 7/7（dock+面板 `data-route=fast`）+ v0.4 回归 14/14，0 pageerror/0 console.error/0 模型请求；截图 [38-panel-auto-flow-v05](../screenshots/38-panel-auto-flow-v05.png)。
 
+## 3.17 v0.5.1：修复会话投影非 lossless JSON（新建会话失败，2026-11-01）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | 新建会话/子会话报 `gateway/internal: failed to create session: Error: forwarded host event "api-session/added" argument 0 is not lossless JSON data` |
+| 根因 | `flowgate` 投影 wire 值含显式 `undefined` 字段（`engine.snapshot()` 的 `changeId`/`activeTaskId`、`panel`、`panel.changes[].session` 等）；DSH `dsh-api-remotes` 的 `assertJsonArgs → isJsonValue()` 拒绝 `undefined`，`api-session/added` 的 summary 转发失败 |
+| 修复 | `src/host/projection/index.ts` 新增 `toLosslessJson()`；投影 `init()` 与 `wire.view()` 输出前做 JSON 往返清洗（丢 undefined、NaN/Infinity→null） |
+| 契约 | `docs/impl/host-client-contract.md §1.1` 明确：投影 wire 值必须是 lossless JSON |
+| 测试 | `test/host/projection.test.ts`：`toLosslessJson` 清洗规则 + latest 带 undefined 时 `wire.view` 无 undefined 且 JSON 往返严格相等 |
+| 真机证据 | 隔离宿主（多会话 bundle + link 本仓库）：旧构建 `POST /api/session/create`（新 sessionId）→ `gateway/internal ... not lossless JSON data`；修复构建同请求 → `{ ok: true, sessionId }`；0 模型请求 |
+| 验证 | lint 绿；119 files / 1689 tests；coverage 86.18/76.23/86.88/89.26；build host 009514a2… / client baf51e8c…；verify:package 39 文件/1080.6KB；verify:client 18 插槽 |
+
 ## 4. 剩余项（第六轮复验后，四分）
 
 > 第六轮独立复验确认第五轮"功能缺口全部闭环"结论不成立：7 项 P1 接线缺口已在 §3.12 修复；

@@ -9,6 +9,7 @@ import {
   PROJECTION_KEY,
   PROJECTION_STATE_VERSION,
   sanitizeProjection,
+  toLosslessJson,
 } from '../../src/host/projection/index.js'
 import { resetPluginSessionApiForTest, STATE_RECORD_TYPE } from '../../src/host/adapters/session-record.js'
 import { initialProjection } from '../../src/host/projection/types.js'
@@ -43,6 +44,66 @@ describe('投影定义', () => {
     expect(state.snapshot.statusLine).toContain('未启用')
   })
 
+  it('toLosslessJson 去掉 undefined、把非有限数变成 null（DSH 转发要求）', () => {
+    expect(toLosslessJson({ a: 1, b: undefined, nested: { c: undefined, d: 2 }, arr: [1, undefined], nan: NaN })).toStrictEqual({
+      a: 1,
+      nested: { d: 2 },
+      arr: [1, null],
+      nan: null,
+    })
+  })
+
+  it('wire.view 输出 lossless JSON：即使 latest 投影带 undefined 字段（新会话创建回归）', () => {
+    const now = '2026-01-01T00:00:00.000Z'
+    const dirty = {
+      snapshot: {
+        initialized: false,
+        pipeline: [],
+        tasks: {},
+        batches: [],
+        pending: [],
+        violations: [],
+        off: false,
+        locked: false,
+        interceptCounts: {},
+        nextStep: 'FlowGate 未启用',
+        statusLine: 'FlowGate 未启用',
+        updatedAt: now,
+        changeId: undefined,
+        title: undefined,
+        stage: undefined,
+        awaitingGate: undefined,
+        pendingGate: undefined,
+        activeTaskId: undefined,
+        contextPct: undefined,
+      },
+      panel: undefined,
+      revision: 0,
+      updatedAt: now,
+      epoch: undefined,
+    } as unknown as import('../../src/host/projection/types.js').FlowgateProjection
+    const definition = createFlowgateProjection(() => now, () => dirty)
+    const init = definition.init()
+    const wire = definition.wire.view(init)
+    const assertNoUndefined = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) assertNoUndefined(item)
+        return
+      }
+      if (value !== null && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) {
+          expect(item, key).not.toBeUndefined()
+          assertNoUndefined(item)
+        }
+      }
+    }
+    assertNoUndefined(wire)
+    // DSH 的 isJsonValue 等价判定：JSON 往返后必须一字节语义不变。
+    expect(JSON.parse(JSON.stringify(wire))).toStrictEqual(wire)
+    expect(wire.snapshot.changeId).toBeUndefined()
+    expect((wire as { panel?: unknown }).panel).toBeUndefined()
+  })
+
   it('apply 折叠 flowgate 状态记录；无关事件返回原引用', () => {
     const definition = createFlowgateProjection(() => '2026-01-01T00:00:00.000Z')
     const initial = definition.init()
@@ -68,11 +129,13 @@ describe('投影定义', () => {
     expect(sanitizeProjection({ snapshot: {} })).not.toBeNull()
   })
 
-  it('wire.view 原样输出投影值（stateSchema/viewSchema 仅 passthrough.parse）', () => {
+  it('wire.view 输出等价的 lossless JSON（stateSchema/viewSchema 仍为 passthrough.parse）', () => {
     const definition = createFlowgateProjection(() => '2026-01-01T00:00:00.000Z')
     const state = definition.init()
     const view = definition.wire.view(state)
-    expect(view).toBe(state)
+    // v0.5.1：投影边界做 JSON 清洗（返回克隆而不是同一个引用），内容不变。
+    expect(view).toStrictEqual(state)
+    expect(view).not.toBe(state)
     expect(definition.wire.viewSchema.parse(view)).toBe(view)
   })
 })

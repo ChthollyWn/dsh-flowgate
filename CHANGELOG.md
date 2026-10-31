@@ -6,6 +6,20 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.5.1 修复：会话投影非 lossless JSON 导致新建会话失败，2026-11-01）
+
+### Fixed
+
+- **新建会话/子会话失败**：报 `gateway/internal: failed to create session: Error: forwarded host event "api-session/added" argument 0 is not lossless JSON data`。根因是 `flowgate` 会话投影的 wire 值来自 `engine.snapshot()` / `buildPanel()`，其中无变更/无活动任务时存在显式 `undefined` 字段（`changeId`、`activeTaskId`、`panel`、`panel.changes[].session` 等）；DSH `@deepseek-ai/dsh-api-remotes` 在转发 `api-session/added` 前会用 `isJsonValue()` 校验参数，`undefined` 属性使摘要不再是 lossless JSON，导致建会话失败。普通「新建会话」、子 agent/队友会话（同一错误）都受影响。
+  - 修复：`src/host/projection/index.ts` 增加 `toLosslessJson()`（JSON 往返清洗），投影 `init()` 与 `wire.view()` 在交给 DSH 前清洗；`undefined` 被丢弃、NaN/Infinity 变 null，满足 DSH 的 lossless JSON 约束（契约已补充到 host-client-contract §1.1）。
+  - 回归测试：`test/host/projection.test.ts` 覆盖 `toLosslessJson` 与「latest 投影带 undefined 字段时 wire.view 仍 lossless」；原有 passthrough 测试改为断言内容等价（不再断言同一引用）。
+  - 真机复现/验证（隔离 DSH_HOME + 多会话 bundle profile + link 本仓库）：旧构建 `POST /api/session/create`（新 sessionId）返回 `gateway/internal ... not lossless JSON data`；修复构建同请求返回 `ok:true` 并成功创建会话（0 模型请求）。
+
+### Verification
+
+- `pnpm lint` 绿；`npx vitest run` **119 files / 1689 tests** 全绿；`pnpm coverage` 86.18 / 76.23 / 86.88 / 89.26（阈值通过）；`pnpm build`（host 1.23MB / client 383.4KB）；`verify:package` 39 文件 / 1080.6KB；`verify:client` 18 插槽通过。
+- 复现/修复证据：旧构建 session/create → `gateway/internal ... not lossless JSON data`；修复构建 → `{ ok: true, sessionId }`。
+
 ## [Unreleased]（v0.5 自动流程接管 + auto-review，2026-11-01）
 
 > 负责人指令：启用 FlowGate 后所有修改由 FlowGate 接管；模型在流程开始前判断改动大小并自动调整流程——复杂全流程、中等合并、简单不人工确认；设计 auto-review 决定是否需要人工确认与是否缩减流程。

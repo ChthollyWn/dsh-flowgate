@@ -28,6 +28,34 @@ function passthroughSchema<T>(): { parse(value: unknown): T } {
   return { parse: (value: unknown) => value as T }
 }
 
+/**
+ * 无损 JSON 边界清洗（v0.5.1 修复：新会话创建失败）。
+ *
+ * DSH 的 `@deepseek-ai/dsh-api-remotes` 在转发 `api-session/added` 等事件前会用
+ * `isJsonValue()` 校验参数；`undefined` 属性、NaN/Infinity、函数、非 plain object
+ * 都会让校验失败并抛出
+ * `forwarded host event "api-session/added" argument 0 is not lossless JSON data`。
+ *
+ * 我们的 `flowgate` 投影值来自 `engine.snapshot()` / `buildPanel()`，其中不少
+ * 可选字段在无变更/无活动任务时是显式 `undefined`（如 changeId、activeTaskId、
+ * panel、panel.changes[].session）。这些字段一旦进入会话摘要的
+ * `projections.values.flowgate` 就会让「新建会话」失败。
+ *
+ * 修法：投影的 init / wire.view 在交给 DSH 前做一次 JSON 往返清洗。JSON 本身
+ * 会把 undefined 丢掉、把 NaN/Infinity 变成 null——这正是 lossless JSON 的要求。
+ * 不做深拷贝/递归手写，避免再与 DSH 的判定规则漂移。
+ */
+export function toLosslessJson<T>(value: T): T {
+  if (value === undefined) return value
+  try {
+    // JSON.stringify 会抛 TypeError（BigInt / 循环引用），此时保底返回原值；
+    // 当前投影数据是插件自己构造的纯对象，不会走到这里。
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    return value
+  }
+}
+
 /** 校验从插件记录折叠出来的投影值（损坏时保留原状态，绝不返回半截对象）。 */
 export function sanitizeProjection(value: unknown): FlowgateProjection | null {
   if (value === null || typeof value !== 'object') return null
@@ -61,7 +89,7 @@ export function createFlowgateProjection(now: () => string, latest?: () => Flowg
     key: PROJECTION_KEY as typeof PROJECTION_KEY,
     stateVersion: PROJECTION_STATE_VERSION,
     stateSchema: passthroughSchema<FlowgateProjection>(),
-    init: () => latest?.() ?? initialProjection(now()),
+    init: () => toLosslessJson(latest?.() ?? initialProjection(now())),
     apply: (state, event) => {
       if (event && event.type === STATE_RECORD_TYPE) {
         const next = sanitizeProjection(event.data)
@@ -86,7 +114,8 @@ export function createFlowgateProjection(now: () => string, latest?: () => Flowg
     },
     wire: {
       viewSchema: passthroughSchema<unknown>(),
-      view: (state) => state,
+      // DSH 会把该值塞进 api-session/added 的会话摘要；必须是 lossless JSON。
+      view: (state) => toLosslessJson(state),
     },
   }
 }
