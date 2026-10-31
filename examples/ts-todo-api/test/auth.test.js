@@ -33,13 +33,17 @@ async function login(body) {
 describe('密码哈希', () => {
   test('哈希格式包含参数，可校验', () => {
     const stored = hashPassword('secret', { salt: 'fixed-salt' })
-    assert.match(stored, /^pbkdf2\$sha256\$100000\$fixed-salt\$/)
+    // 只断言存储格式契约，不写死待升级的迭代次数：基准任务 R3 会把它提升到 600000。
+    assert.match(stored, /^pbkdf2\$sha256\$\d+\$fixed-salt\$/)
+    const iterations = Number.parseInt(stored.split('$')[2], 10)
+    assert.ok(Number.isInteger(iterations) && iterations >= 100_000, `迭代次数不得低于当前基线，实际 ${iterations}`)
     assert.equal(verifyPassword('secret', stored), true)
     assert.equal(verifyPassword('wrong', stored), false)
   })
 
   test('篡改或格式错误的哈希校验失败', () => {
     assert.equal(verifyPassword('secret', 'not-a-hash'), false)
+    // 参数结构合法但摘要错误（旧迭代次数格式）也必须校验失败。
     assert.equal(verifyPassword('secret', 'pbkdf2$sha256$100000$salt$dGFtcGVy'), false)
   })
 

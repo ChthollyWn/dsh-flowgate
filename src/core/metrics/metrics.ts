@@ -291,10 +291,14 @@ export function computeMetrics(input: {
       return /误判/.test(dataString(event, 'reason'))
     })
     metrics['M-5'] = percent(misjudged, interceptions)
+    const hinted = ledger.filter((event) => event.type === 'rule.hinted')
+    const hintedRules = [...new Set(hinted.map((event) => String(event.data.ruleId ?? 'unknown')))]
     notes['M-5'] =
       interceptions === 0
         ? '没有任何拦截记录，误判率无法计算，保持"未知"（不参与平均值）'
-        : `误判 ${misjudged} ÷ 全部拦截 ${interceptions}；统计账本中显式标为 misjudged 或理由含「误判」的放行/例外记录`
+        : `误判 ${misjudged} ÷ 全部拦截 ${interceptions}；统计账本中显式标为 misjudged 或理由含「误判」的放行/例外记录${
+            hinted.length > 0 ? `；另有 ${hinted.length} 次规则因误判率超阈值自动降为提示（${hintedRules.join('、')}）` : ''
+          }`
   }
 
   // M-6 门禁首次通过率 --------------------------------------------------------

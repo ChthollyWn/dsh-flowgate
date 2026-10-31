@@ -1,10 +1,10 @@
 /**
  * 覆盖自检 + 原生委派关闭（完成定义：覆盖自检、delegation 关闭单测）。
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flush, setupPlugin, DEFAULT_SCHEMAS, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
-import { computeCoverage } from '../../src/host/coverage/index.js'
+import { computeCoverage, ensureCoverage } from '../../src/host/coverage/index.js'
 import { applyDelegationPolicy } from '../../src/host/guard/delegation.js'
 import { createFakeAgent, createFakeToolRuntime } from '../../src/host/testing/fake-ctx.js'
 
@@ -68,6 +68,66 @@ describe('工具覆盖自检', () => {
     harness = await setupPlugin({ missingTools: ['schemas'] })
     expect(harness.runtime.coverage()).toBeNull()
     expect(harness.runtime.featureNotes.coverage?.join('；')).toContain('schemas')
+  })
+})
+
+describe('工具覆盖自检 — tools/change 去抖与读取兜底', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('合并窗口内多次 tools/change 只触发一次扫描', async () => {
+    harness = await setupPlugin()
+    const spy = vi.spyOn(harness.runtime, 'setCoverage')
+    vi.useFakeTimers()
+    try {
+      for (let index = 0; index < 5; index += 1) harness.ctx.emitEvent('tools/change')
+      // 事件本身不立即重扫：等合并窗口结束。
+      expect(spy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(99)
+      expect(spy).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(spy).toHaveBeenCalledTimes(1)
+      // 窗口结束后不会再有背靠背的重扫（已采样的读取也不重复扫）。
+      await vi.advanceTimersByTimeAsync(500)
+      expect(spy).toHaveBeenCalledTimes(1)
+      ensureCoverage(harness.runtime)
+      expect(harness.runtime.coverage()).not.toBeNull()
+      expect(spy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('从未采样时 doctor/面板读取会同步补扫一次且不重复', async () => {
+    // 不绑定 agent：引擎不会就绪，覆盖自检从未成功采样。
+    harness = await setupPlugin({ bindAgent: false })
+    expect(harness.runtime.engine()).toBeNull()
+    const spy = vi.spyOn(harness.runtime, 'setCoverage')
+    vi.useFakeTimers()
+    try {
+      harness.ctx.emitEvent('tools/change')
+      harness.ctx.emitEvent('tools/change')
+      expect(spy).not.toHaveBeenCalled()
+
+      // doctor / /flow status 的读取入口：从未采样 → ensureCoverage 同步补采。
+      ensureCoverage(harness.runtime)
+      const report = harness.runtime.coverage()
+      expect(report).not.toBeNull()
+      expect(report?.entries.length).toBe(DEFAULT_SCHEMAS.length)
+      expect(spy).toHaveBeenCalledTimes(1)
+
+      // 读取兜底取消挂起的合并扫描，不会在窗口到期后重复采样。
+      await vi.advanceTimersByTimeAsync(500)
+      expect(spy).toHaveBeenCalledTimes(1)
+      // 多次读取前兜底也只补采一次。
+      ensureCoverage(harness.runtime)
+      expect(spy).toHaveBeenCalledTimes(1)
+    } finally {
+      spy.mockRestore()
+      vi.useRealTimers()
+    }
   })
 })
 

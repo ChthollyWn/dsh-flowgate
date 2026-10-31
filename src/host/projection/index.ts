@@ -10,12 +10,13 @@
  * `wire.viewSchema.parse`，因此这里用本地 passthrough schema（不引入 zod）；
  * 若未来 DSH 版本改为真实校验，再补 zod 依赖。
  */
-import type { DshContext } from '../adapters/dsh-types.js'
+import type { DshContext, DshSessionProjectionRegistry } from '../adapters/dsh-types.js'
 import type { HostRuntime } from '../runtime.js'
 import { STATE_RECORD_TYPE } from '../adapters/session-record.js'
 import type { FlowgateProjection } from './types.js'
 import { initialProjection } from './types.js'
 import { toAgentError } from '../errors.js'
+import { installContextPressure } from './context.js'
 
 /** 投影 key（客户端用 `useProjection('flowgate')` 读取）。 */
 export const PROJECTION_KEY = 'flowgate'
@@ -95,9 +96,12 @@ export function createFlowgateProjection(now: () => string, latest?: () => Flowg
 /** 安装投影。 */
 export function installProjection(runtime: HostRuntime): void {
   runtime.injectService('sessionProjections', (scoped: DshContext) => {
-    const registry = scoped.get('sessionProjections') as {
-      register?(definition: unknown): () => void
-    } | null
+    const registry = scoped.get('sessionProjections') as
+      | (DshSessionProjectionRegistry & { register?(definition: unknown): () => void })
+      | null
+    // 上下文占用（P1-7）与 flowgate 投影共用这次注入：token-meter 注册的
+    // contextPressure 单元与 flowgate 一样由 sessionProjections 提供。
+    installContextPressure(runtime, registry)
     if (!registry || typeof registry.register !== 'function') return
     const definition = createFlowgateProjection(
       () => runtime.isoNow(),

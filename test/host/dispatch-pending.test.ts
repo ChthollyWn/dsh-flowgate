@@ -282,7 +282,13 @@ describe('子 agent 生成待处理项后的通知（T4.6）', () => {
       const subagents = createFakeSubagents()
       engineState(engine).snapshotOverrides = { batches: [{ id: 'B1', mode: 'parallel', status: 'checkpoint', tasks: ['T1'] }] }
       taskDoneAddingPending(engine, makePending('CF-1', 'conflict', '批次 B1 集成检查点失败', { batchId: 'B1' }))
-      stubDispatch(engine, { dispatched: [makeEnvelope('T1', { mode: 'parallel' })], batchId: 'B1', mode: 'parallel', message: '已派发任务 T1（并行批次 B1）。' })
+      let parallelCalls = 0
+      stubDispatch(engine, async () => {
+        parallelCalls += 1
+        return parallelCalls === 1
+          ? { dispatched: [makeEnvelope('T1', { mode: 'parallel' })], batchId: 'B1', mode: 'parallel' as const, message: '已派发任务 T1（并行批次 B1）。' }
+          : { dispatched: [], batchId: 'B1', mode: 'parallel' as const, message: '没有可补位的任务（fake）。' }
+      })
       const h = await start({ engine, services: { subagents }, config: { projectRoot } })
 
       const { value } = await runTool(h, 'flow_dispatch_next', {})

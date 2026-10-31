@@ -356,21 +356,20 @@ describe('并行批次并发上限排队（max_agents=2）', () => {
       expect(engineDispatchCalls).toBe(1)
       expect(subagents.state.started).toHaveLength(2)
 
-      // 一轮（两个任务）都结束后，下一次派发才启动排队的第 3 个。
+      // P1-2：T1 结算释放一个槽位 → 宿主自动补位 T3（无需主会话再次调用 dispatch）。
+      running = 1 // fake 容量模拟：T1 结算后 core 侧只剩 1 个 running。
       resolvers.get('flowgate-exec-T1')?.({ output: [], structured: { summary: 'T1 完成' }, stopReason: 'completed' })
-      resolvers.get('flowgate-exec-T2')?.({ output: [], structured: { summary: 'T2 完成' }, stopReason: 'completed' })
-      await flush(20)
-      expect(dispatchBusy()).toBe(false)
-      expect(subagents.state.started).toHaveLength(2)
-      running = 0 // 两个任务结算后 core 引擎侧已无 running 任务（fake 容量模拟同步一下）。
-
-      const third = await runTool(h, 'flow_dispatch_next', {})
-      expect(third.value.ok).toBe(true)
+      await flush(30)
+      expect(engineDispatchCalls).toBeGreaterThanOrEqual(2)
       expect(subagents.state.started).toHaveLength(3)
-      expect((third.value.data?.dispatched as { taskId: string }[]).map((item) => item.taskId)).toEqual(['T3'])
       expect((subagents.state.started[2] as DshSubagentActivationSpec).label).toBe('flowgate-exec-T3')
+      expect(dispatchBusy()).toBe(true) // T2/T3 仍在跑
+
+      // 其余任务结算后收敛。
+      resolvers.get('flowgate-exec-T2')?.({ output: [], structured: { summary: 'T2 完成' }, stopReason: 'completed' })
       resolvers.get('flowgate-exec-T3')?.({ output: [], structured: { summary: 'T3 完成' }, stopReason: 'completed' })
-      await flush(20)
+      await flush(30)
+      expect(dispatchBusy()).toBe(false)
     } finally {
       await fsp.rm(projectRoot, { recursive: true, force: true })
     }

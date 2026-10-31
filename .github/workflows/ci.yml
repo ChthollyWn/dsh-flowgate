@@ -20,6 +20,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm test
+      # NFR-5：覆盖率阈值（vitest.config.ts coverage.thresholds）只在 --coverage 下生效，
+      # 因此 CI 必须显式跑一次 pnpm coverage，作为回归防线。
+      - run: pnpm coverage
       - run: pnpm build
       - run: pnpm verify:package
       - run: pnpm verify:client

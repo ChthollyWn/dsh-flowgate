@@ -11,6 +11,7 @@ import { toAgentError } from '../errors.js'
 import { postcheckStatus } from '../postcheck/index.js'
 import { projectionInfo } from '../projection/index.js'
 import { FLOWGATE_PRESETS } from '../guard/delegation.js'
+import { ensureCoverage } from '../coverage/index.js'
 
 /** 能力清单的中文标签（doctor 展示顺序固定）。 */
 const CAPABILITY_LABELS: [key: string, label: string][] = [
@@ -67,7 +68,8 @@ export async function formatDoctorReport(runtime: HostRuntime): Promise<string> 
     lines.push(`守卫心跳：工具调用 ${report.guardHeartbeat.toolCalls} 次 / 判定 ${report.guardHeartbeat.decisions} 次`)
   }
 
-  // 覆盖自检
+  // 覆盖自检：读取前兜底（工具注册早于引擎就绪时可能从未采样，同步补采一次）。
+  ensureCoverage(runtime)
   const coverage = runtime.coverage() ?? report?.coverage ?? null
   lines.push('')
   lines.push('工具覆盖自检：')

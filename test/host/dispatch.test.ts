@@ -354,7 +354,14 @@ describe('并行批次 worktree', () => {
       }
       const subagents = createFakeSubagents()
       const dispatched = [makeEnvelope('T1', { mode: 'parallel' }), makeEnvelope('T2', { mode: 'parallel' })]
-      stubDispatch(engine, { dispatched, batchId: 'B1', mode: 'parallel', message: '已派发 T1、T2（并行批次 B1）。' })
+      // 并行槽位自动补位会再次调用 dispatchNext：静态 stub 只返回一次，避免重复派发同批复用已结束任务。
+      let dispatchCalls = 0
+      stubDispatch(engine, async () => {
+        dispatchCalls += 1
+        return dispatchCalls === 1
+          ? { dispatched, batchId: 'B1', mode: 'parallel' as const, message: '已派发 T1、T2（并行批次 B1）。' }
+          : { dispatched: [], batchId: 'B1', mode: 'parallel' as const, message: '没有可补位的任务（fake）。' }
+      })
       const h = await start({ engine, services: { subagents }, config: { projectRoot } })
 
       const { value } = await runTool(h, 'flow_dispatch_next', {})
@@ -403,7 +410,13 @@ describe('并行批次 worktree', () => {
       gitMock.runGit.mockResolvedValue({ stdout: '', stderr: 'fatal: could not create work tree dir', exitCode: 128 })
       const engine = makeEngine()
       const subagents = createFakeSubagents()
-      stubDispatch(engine, { dispatched: [makeEnvelope('T1', { mode: 'parallel' })], batchId: 'B1', mode: 'parallel', message: '已派发任务 T1（并行批次 B1）。' })
+      let parallelCalls = 0
+      stubDispatch(engine, async () => {
+        parallelCalls += 1
+        return parallelCalls === 1
+          ? { dispatched: [makeEnvelope('T1', { mode: 'parallel' })], batchId: 'B1', mode: 'parallel' as const, message: '已派发任务 T1（并行批次 B1）。' }
+          : { dispatched: [], batchId: 'B1', mode: 'parallel' as const, message: '没有可补位的任务（fake）。' }
+      })
       const h = await start({ engine, services: { subagents }, config: { projectRoot } })
 
       const { value } = await runTool(h, 'flow_dispatch_next', {})

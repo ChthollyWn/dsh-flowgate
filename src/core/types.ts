@@ -192,6 +192,8 @@ export interface Decision {
   exceptionUsed?: string
   /** Non-fatal notes surfaced to the panel (e.g. non-agent changes). */
   notes?: string[]
+  /** True when a deny/human rule was auto-downgraded to a hint (M-5 misfire rate). */
+  hinted?: boolean
 }
 
 export interface PendingDraft {
@@ -959,8 +961,10 @@ export type LedgerEventType =
   | 'gate.passed'
   | 'gate.approved'
   | 'gate.rejected'
+  | 'pending.expired'
   | 'rule.denied'
   | 'rule.human'
+  | 'rule.hinted'
   | 'override.granted'
   | 'override.used'
   | 'exception.added'
@@ -1084,6 +1088,14 @@ export interface RuntimeSnapshot {
   nextStep: string
   /** One-line status bar text, <= 120 chars. */
   statusLine: string
+  /**
+   * Optional context-window occupancy in percent (0–100) for the status bar.
+   * Filled by the host only when the DSH `contextPressure` session projection
+   * (registered by `@deepseek-ai/dsh-token-meter`) reports both a token
+   * pressure sample and the routed context window; absent otherwise — the host
+   * never fabricates a number (P1-7).
+   */
+  contextPct?: number
   updatedAt: string
 }
 

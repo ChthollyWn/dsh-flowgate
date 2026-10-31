@@ -118,15 +118,6 @@ function sumCounts(summaries: TestSummary[]): TestSummary {
   return merged
 }
 
-function countFromPattern(output: string, pattern: RegExp): number[] {
-  const out: number[] = []
-  for (const match of output.matchAll(pattern)) {
-    const value = Number.parseInt(match[1] ?? '', 10)
-    out.push(Number.isFinite(value) ? value : 0)
-  }
-  return out
-}
-
 // ---------------------------------------------------------------------------
 // JUnit XML (Maven Surefire / Failsafe, Gradle test-results, pytest junitxml)
 // ---------------------------------------------------------------------------
@@ -685,7 +676,6 @@ interface GoTestEvent {
 export function parseGoTestJson(output: string): TestSummary {
   const parser = 'go-test-json'
   const events: GoTestEvent[] = []
-  let invalidLines = 0
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (line === '') continue
@@ -693,13 +683,10 @@ export function parseGoTestJson(output: string): TestSummary {
     try {
       parsed = JSON.parse(line)
     } catch {
-      invalidLines += 1
       continue
     }
     if (parsed && typeof parsed === 'object' && typeof (parsed as GoTestEvent).Action === 'string') {
       events.push(parsed as GoTestEvent)
-    } else {
-      invalidLines += 1
     }
   }
   if (events.length === 0) return emptySummary(parser)
@@ -754,7 +741,6 @@ export function parseGoTestJson(output: string): TestSummary {
   if (durationMs > 0) summary.durationMs = Math.round(durationMs)
   // Packages with only package-level events (`ok pkg`, `? pkg [no test files]`)
   // leave run = 0: nothing to count even though the package "passed".
-  void invalidLines
   return summary
 }
 

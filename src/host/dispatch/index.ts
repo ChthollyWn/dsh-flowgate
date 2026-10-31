@@ -250,6 +250,52 @@ export function installDispatch(runtime: HostRuntime): void {
   })
 }
 
+/**
+ * P1-2：并行批次槽位级补位。
+ *
+ * 一个执行者结算后（成功或失败）槽位立即空出；这里直接调 `dispatchNext` 按执行图
+ * 取同批次下一个 queued 任务并启动，不再等主会话下一次 `flow_dispatch_next`。
+ * 只处理同批次任务；engine 若错误地返回其它批次任务则回滚为失败，避免任务挂起。
+ */
+async function refillParallelSlot(
+  runtime: HostRuntime,
+  engine: EngineLike,
+  batchId: string,
+  lines: string[],
+): Promise<void> {
+  const capability = reviewCapability(runtime)
+  if (!capability.available || !capability.provider) return
+  try {
+    const outcome = await engine.dispatchNext()
+    for (const envelope of outcome.dispatched) {
+      const sameBatch = envelope.batch === batchId && envelope.mode === 'parallel'
+      if (!sameBatch) {
+        lines.push(`✗ 自动补位跳过 ${envelope.taskId}（非当前批次任务），已回滚为失败`)
+        try {
+          await engine.taskFailed(envelope.taskId, '并行槽位补位只处理同批次任务')
+        } catch {
+          // 忽略。
+        }
+        continue
+      }
+      const started = await startExecutor(runtime, engine, envelope, capability.provider)
+      if (started.ok) {
+        lines.push(`自动补位：${envelope.taskId} ${envelope.task.title}（并行批次 ${batchId}）`)
+      } else {
+        lines.push(`✗ 自动补位 ${envelope.taskId} 启动失败：${started.message}`)
+        try {
+          await engine.taskFailed(envelope.taskId, started.message)
+        } catch {
+          // 忽略。
+        }
+      }
+    }
+    if (outcome.dispatched.length > 0) runtime.emit()
+  } catch (error) {
+    runtime.noteFeature('dispatch', `并行槽位补位失败：${toAgentError(error).error}`)
+  }
+}
+
 /** 启动一个任务的执行者子 agent（成功立即返回，完成结算在后台）。 */
 async function startExecutor(
   runtime: HostRuntime,
@@ -452,6 +498,10 @@ async function finalizeTask(
     } catch {
       // 忽略。
     }
+  }
+  // P1-2：并行批次槽位释放后立即按执行图自动补位（不等主会话再调用 dispatch）。
+  if (envelope.mode === 'parallel' && envelope.batch) {
+    await refillParallelSlot(runtime, engine, envelope.batch, lines)
   }
   runtime.emit()
   // 批次集成检查点（仅并行批次；顺序批次由 engine.dispatchNext 自己推进）。

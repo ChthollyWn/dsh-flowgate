@@ -284,17 +284,72 @@ export function createFakeSystemPrompt(): FakeSystemPromptService {
   }
 }
 
-export interface FakeProjectionRegistry extends DshSessionProjectionRegistry {
-  state: { definitions: Map<string, DshProjectionDefinition<string, unknown>> }
+export interface FakeProjectionRegistryState {
+  definitions: Map<string, DshProjectionDefinition<string, unknown>>
+  /** `snapshot()` 返回的 client-visible wire 值（如 token-meter 的 contextPressure）。 */
+  values: Record<string, unknown>
+  /** `stateOf()` 返回的 host-only state（缺省回落到 `values`）。 */
+  states: Record<string, unknown>
+  /** 已注册的变更监听器（`emitChange` 用）。 */
+  listeners: Set<(session: DshSession, key: string, value: unknown, seq: unknown) => void>
 }
 
-export function createFakeProjectionRegistry(): FakeProjectionRegistry {
-  const state: FakeProjectionRegistry['state'] = { definitions: new Map() }
+export interface FakeProjectionRegistryOptions {
+  /**
+   * client-visible 投影值：模拟 token-meter 等域插件注册的 wire 单元
+   * （例如 `{ contextPressure: { projectedTokens: 120000, contextWindow: 200000 } }`）。
+   */
+  values?: Record<string, unknown>
+  /** host-only state；不传时 `stateOf()` 读 `values`。 */
+  states?: Record<string, unknown>
+}
+
+export interface FakeProjectionRegistry extends DshSessionProjectionRegistry {
+  state: FakeProjectionRegistryState
+  /** 触发一次投影变更通知（模拟 token-meter 更新 contextPressure）。 */
+  emitChange(session: DshSession, key: string, value: unknown): void
+}
+
+/**
+ * 假会话投影注册表：`register` 记录 flowgate 定义；`snapshot`/`stateOf`
+ * 返回构造时给定的投影值，`emitChange` 手动触发变更流——供 contextPct
+ * 读取/推送路径测试（P1-7）。
+ */
+export function createFakeProjectionRegistry(options: FakeProjectionRegistryOptions = {}): FakeProjectionRegistry {
+  const listeners = new Set<(session: DshSession, key: string, value: unknown, seq: unknown) => void>()
+  const state: FakeProjectionRegistryState = {
+    definitions: new Map(),
+    values: { ...(options.values ?? {}) },
+    states: { ...(options.states ?? options.values ?? {}) },
+    listeners,
+  }
   return {
     state,
     register(definition: DshProjectionDefinition<string, unknown>): () => void {
       state.definitions.set(definition.key, definition)
       return () => state.definitions.delete(definition.key)
+    },
+    onChanged(listener: (session: DshSession, key: string, value: unknown, seq: unknown) => void): () => void {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    snapshot(_session: DshSession, keys?: readonly string[]) {
+      const selected = keys === undefined ? state.values : Object.fromEntries(keys.filter((key) => key in state.values).map((key) => [key, state.values[key]]))
+      return { asOfSeq: -1, values: { ...selected } }
+    },
+    stateOf(_session: DshSession, key: string): unknown {
+      return state.states[key]
+    },
+    emitChange(session: DshSession, key: string, value: unknown): void {
+      state.values[key] = value
+      state.states[key] = value
+      for (const listener of [...listeners]) {
+        try {
+          listener(session, key, value, -1)
+        } catch {
+          // 假宿主里监听器异常不中断测试。
+        }
+      }
     },
   } as unknown as FakeProjectionRegistry
 }

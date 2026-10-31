@@ -47,6 +47,10 @@ export interface SetupOptions {
   schemas?: DshToolSchema[]
   missingTools?: ('guard' | 'restrict' | 'presentAs' | 'schemas')[]
   services?: Record<string, unknown>
+  /** 从假 ctx 的可用服务里移除这些服务名（模拟宿主组合缺服务）。 */
+  missingServices?: string[]
+  /** 假 sessionProjections 暴露的 client-visible 投影值（如 contextPressure）。 */
+  projectionValues?: Record<string, unknown>
   config?: HostConfig
   /** 不触发 agent/created（测试自己绑定会话）。 */
   bindAgent?: boolean
@@ -79,7 +83,7 @@ export async function setupPlugin(options: SetupOptions = {}): Promise<PluginHar
   const tools = createFakeToolRuntime({ schemas: options.schemas ?? DEFAULT_SCHEMAS, missing: options.missingTools })
   const commands = createFakeCommandRuntime()
   const prompt = createFakeSystemPrompt()
-  const projections = createFakeProjectionRegistry()
+  const projections = createFakeProjectionRegistry({ values: options.projectionValues })
   const subagents = createFakeSubagents()
   const childAgents = new Map<string, { ctx?: DshContext }>()
   const agents = {
@@ -97,7 +101,11 @@ export async function setupPlugin(options: SetupOptions = {}): Promise<PluginHar
     sessionQuery: createFakeSessionQuery(),
     ...options.services,
   }
-  const ctx = createFakeContext({ services, available: Object.keys(services) })
+  const missing = new Set(options.missingServices ?? [])
+  const ctx = createFakeContext({
+    services,
+    available: Object.keys(services).filter((name) => !missing.has(name)),
+  })
   const deps = createFakeDeps({ engine, homeDir, ports: createFakePorts('/fake/project') })
   const runtime = startHostPlugin(ctx, { enabled: true, projectRoot: '/fake/project', ...options.config }, deps)
   if (!runtime) throw new Error('host 插件启动失败（startHostPlugin 返回 null）')

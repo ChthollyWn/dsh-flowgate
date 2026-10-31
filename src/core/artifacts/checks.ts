@@ -73,10 +73,6 @@ function fail(
   return outcome
 }
 
-function missingDetails(list: string[], prefix: string): string[] {
-  return list.length === 0 ? [] : [prefix]
-}
-
 // ---------------------------------------------------------------------------
 // Config / level helpers
 // ---------------------------------------------------------------------------
@@ -171,32 +167,7 @@ interface FileIndex {
 
 async function collectFileIndex(fs: FileSystem, root: string, maxFiles = 3000): Promise<FileIndex> {
   const files: string[] = []
-  const visit = async (relative: string, depth: number): Promise<void> => {
-    if (files.length >= maxFiles || depth > 12) return
-    const dir = relative === '' ? root : posixJoin(root, relative)
-    let entries: string[]
-    try {
-      entries = await fs.readdir(dir)
-    } catch {
-      return
-    }
-    entries.sort()
-    for (const entry of entries) {
-      if (files.length >= maxFiles) return
-      if (entry.startsWith('.') && WALK_IGNORED.has(entry)) continue
-      if (WALK_IGNORED.has(entry)) continue
-      const childRelative = relative === '' ? entry : `${relative}/${entry}`
-      const childPath = posixJoin(root, childRelative)
-      try {
-        await fs.statSize(childPath)
-        files.push(normalizeRelPath(childRelative))
-        continue
-      } catch {
-        await visit(childRelPathOrRoot(childRelative, root), depth + 1)
-      }
-    }
-  }
-  // Read relative to root without prefixing root again inside recursion.
+  // Walk relative to root (entry names join without a leading root prefix).
   const visitRelative = async (relative: string, depth: number): Promise<void> => {
     if (files.length >= maxFiles || depth > 12) return
     const dir = relative === '' ? root : posixJoin(root, relative)
@@ -220,18 +191,12 @@ async function collectFileIndex(fs: FileSystem, root: string, maxFiles = 3000): 
       }
     }
   }
-  void visit
-  void childRelPathOrRoot
   try {
     await visitRelative('', 0)
   } catch {
     // ignore walk failures: checks that need concrete counts degrade gracefully
   }
   return { root, files }
-}
-
-function childRelPathOrRoot(relative: string, _root: string): string {
-  return relative
 }
 
 function countMatchingFiles(index: FileIndex, pattern: string): number {
@@ -1103,7 +1068,6 @@ export async function checkTaskCards(ctx: GateCheckContext): Promise<CheckOutcom
     problems.push('缺少增量规格（spec.md），无法检查场景覆盖')
   }
   const limit = maxTasksOf(ctx)
-  const skeletonLike = isSkeletonChange(ctx)
   try {
     const index = await collectFileIndex(ctx.fs, ctx.root)
     for (const task of tasks) {
@@ -1130,7 +1094,6 @@ export async function checkTaskCards(ctx: GateCheckContext): Promise<CheckOutcom
   } catch {
     // File walk is best-effort; structural checks above already ran.
   }
-  void skeletonLike
   if (problems.length > 0) {
     return fail(item, label, '逐项修任务卡：依赖无环、每个场景有任务覆盖、每个任务有场景或 chore 理由、范围收窄、file 数受限。', 'P0', {
       details: problems,

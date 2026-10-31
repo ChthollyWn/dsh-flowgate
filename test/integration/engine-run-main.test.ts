@@ -191,6 +191,27 @@ describe('run: main 任务路由', () => {
     await expect(h.engine.taskStart('T2')).rejects.toThrow('执行图要求先做')
   })
 
+  it('并行批次超出并发上限的任务进入 queued，槽位释放后按队列派发（P1-6）', async () => {
+    const h = await harness()
+    await toS4(
+      h,
+      [
+        { id: 'T1', covers: 'R1.S1', file: 'src/a.ts', run: 'subagent' },
+        { id: 'T2', covers: 'R1.S2', file: 'src/b.ts', run: 'subagent' },
+      ],
+      'parallel',
+    )
+    h.engine.getConfig().parallel.max_agents = 1
+    const first = await h.engine.dispatchNext()
+    expect(first.dispatched.map((envelope) => envelope.taskId)).toEqual(['T1'])
+    expect(h.engine.currentChange()?.tasks['T2']?.status).toBe('queued')
+    // 模拟 T1 结算；下一次派发应领取 queued 的 T2（不再重复标记）。
+    h.engine.currentChange()!.tasks['T1']!.status = 'done'
+    const second = await h.engine.dispatchNext()
+    expect(second.dispatched.map((envelope) => envelope.taskId)).toEqual(['T2'])
+    expect(h.engine.currentChange()?.tasks['T2']?.status).toBe('running')
+  })
+
   it('inline 模式下 run:main 任务仍可按执行图顺序领取', async () => {
     const h = await harness()
     await toS4(h, [{ id: 'T1', covers: 'R1.S1', file: 'src/a.ts', run: 'main' }], 'sequential')

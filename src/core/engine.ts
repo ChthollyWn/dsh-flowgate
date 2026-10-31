@@ -115,6 +115,9 @@ import {
   actionFromToolCall,
   BLOCKED_DELEGATION_TOOLS,
   explainDecision,
+  ruleMisfireRate,
+  shouldDowngradeRule,
+  type RuleFeedback,
 } from './rules'
 import { validateVerifyCommand } from './shell'
 import { loadArtifacts, loadProjectDoc, runGateChecks, artifactHashes, parseIncrementalSpec, parseRoadmap, parseTaskCardFragment } from './artifacts'
@@ -208,6 +211,8 @@ export class FlowEngine {
   /** 加载阶段发现的损坏状态文件（status.json 等）；非空即进入锁定模式（03 §14）。 */
   private stateCorruption: store.CorruptStateFile[] = []
   private interceptCounts: Record<string, number> = {}
+  /** Per-rule M-5 feedback (interceptions / misjudged), rebuilt from the ledger. */
+  private ruleFeedback: Record<string, RuleFeedback> = {}
   private lastRuleId: string | null = null
   private guardHeartbeat = { toolCalls: 0, decisions: 0 }
   private notices: string[] = []
@@ -350,13 +355,29 @@ export class FlowEngine {
 
   private async rebuildCounters(): Promise<void> {
     this.interceptCounts = {}
+    this.ruleFeedback = {}
     if (!this.ledger) return
+    const bump = (ruleId: string): RuleFeedback => {
+      const key = ruleId === '' ? 'unknown' : ruleId
+      const feedback = (this.ruleFeedback[key] ??= { interceptions: 0, misjudged: 0 })
+      return feedback
+    }
+    const misjudgedEvent = (event: { data: Record<string, unknown> }): boolean => {
+      if (event.data.misjudged === true) return true
+      if (event.data.reasonKind === 'misjudged') return true
+      return /误判/.test(String(event.data.reason ?? ''))
+    }
     try {
       const events = await this.ledger.readAll()
       for (const event of events) {
         if (event.type === 'rule.denied' || event.type === 'rule.human') {
           const ruleId = String(event.data.ruleId ?? 'unknown')
           this.interceptCounts[ruleId] = (this.interceptCounts[ruleId] ?? 0) + 1
+          const feedback = bump(ruleId)
+          feedback.interceptions += 1
+          if (misjudgedEvent(event)) feedback.misjudged += 1
+        } else if ((event.type === 'override.granted' || event.type === 'exception.added') && misjudgedEvent(event)) {
+          bump(String(event.data.ruleId ?? 'unknown')).misjudged += 1
         }
       }
       this.evidenceCounter = this.receipts.length
@@ -1413,6 +1434,23 @@ export class FlowEngine {
     })
 
     if (decision.rule) this.lastRuleId = decision.rule.ruleId
+    // M-5：误判率超过 5%（且样本足够）的规则自动降为提示，本次放行并记账进入复盘。
+    if ((decision.effect === 'deny' || decision.effect === 'human') && decision.rule) {
+      const feedback = this.ruleFeedback[decision.rule.ruleId]
+      if (shouldDowngradeRule(feedback)) {
+        const rate = ruleMisfireRate(feedback) ?? 0
+        const message = `规则 ${decision.rule.ruleId} 误判率 ${(rate * 100).toFixed(1)}%（目标 ≤5%，样本 ${feedback!.interceptions}）超过阈值：已自动降为提示，本次按提示放行，并已记为复盘候选。`
+        await this.appendLedger('rule.hinted', {
+          changeId: change.id,
+          ruleId: decision.rule.ruleId,
+          tool: action.tool,
+          interceptions: feedback!.interceptions,
+          misjudged: feedback!.misjudged,
+        })
+        this.pushNotice(message)
+        return { ...decision, effect: 'allow', hinted: true, message, notes: [...(decision.notes ?? []), message] }
+      }
+    }
     if (decision.effect === 'deny') {
       await this.logDenied(change, decision, action)
       return decision
@@ -1986,6 +2024,11 @@ export class FlowEngine {
         const toStart = subagentQueued.slice(0, capacity)
         if (toStart.length === 0) {
           if (running.length > 0) {
+            for (const taskId of subagentQueued) {
+              const queuedState = change.tasks[taskId]
+              if (queuedState && queuedState.status === 'pending') queuedState.status = 'queued'
+            }
+            await this.saveChange(change)
             return {
               dispatched: [],
               batchId: batch.batch,
@@ -2020,6 +2063,12 @@ export class FlowEngine {
           taskState.startedAt = now
           await this.appendLedger('task.started', { changeId: change.id, taskId, batch: batch.batch, mode: 'parallel' })
           dispatched.push(this.buildEnvelope(change, task, batch.batch))
+        }
+        // P1-6：超出并发上限的并行任务显式进入 queued（此前 queued 是从不写入的死状态），
+        // 面板/状态可以区分"排队中"和"待开始"；槽位释放后由宿主自动补位。
+        for (const taskId of subagentQueued.slice(capacity)) {
+          const queuedState = change.tasks[taskId]
+          if (queuedState && queuedState.status === 'pending') queuedState.status = 'queued'
         }
         await this.saveChange(change)
         this.pushNotice(`已派发批次 ${batch.batch}（并行）的 ${dispatched.map((item) => item.taskId).join('、')}；每个任务在自己的 worktree 里执行。`)
@@ -3110,6 +3159,7 @@ export class FlowEngine {
     const md = `# 分析结论：${change.title}\n\n## 结论\n\n${input.conclusion}\n\n## 建议\n\n${input.proposal}\n\n## 未确认项与局限\n\n${input.limitations.map((item) => `- ${item}`).join('\n') || '- 无'}\n\n## 源码引用\n\n${matchesToMarkdown(checks)}\n`
     await this.fs.writeFile(paths.analysis, md)
     const now = isoNow(this.clock)
+    await this.expireOpenPending(change, now)
     change.lifecycle = 'archived'
     change.stage = 'archived'
     await this.appendLedger('analysis.submitted', {
@@ -3260,6 +3310,24 @@ export class FlowEngine {
    * with an OpenSpec-style ADDED / MODIFIED / REMOVED merge (T4.4); the result
    * and warnings are recorded in the ledger as `spec.merged`.
    */
+  /**
+   * P1-5：变更归档时把仍未处理的待处理项置为 `expired`（03 §8.3：任务结束仍未处理）。
+   * 返回被过期的数量；每次都写 `pending.expired` 账本，供指标/复盘查询。
+   */
+  private async expireOpenPending(change: ChangeStatus, at: string): Promise<number> {
+    let expired = 0
+    for (const item of change.pending) {
+      if (item.status !== 'open') continue
+      item.status = 'expired'
+      item.decidedAt = at
+      item.decisionReason = '归档时仍未处理（任务结束自动过期）'
+      expired += 1
+      await this.appendLedger('pending.expired', { changeId: change.id, pendingId: item.id, kind: item.kind })
+    }
+    if (expired > 0) this.pushNotice(`${change.id} 归档：${expired} 个未处理待处理项已标记 expired（进入复盘）。`)
+    return expired
+  }
+
   private async archiveChange(change: ChangeStatus): Promise<void> {
     const now = isoNow(this.clock)
     const layout = store.layout(this.root)
@@ -3295,6 +3363,8 @@ export class FlowEngine {
         this.pushNotice(`主规格合并提示：${merged.warnings.join('；')}`)
       }
     }
+    // 归档即任务结束：未处理的待处理项生命周期收口（expired），避免"归档后仍 open"。
+    await this.expireOpenPending(change, now)
     change.lifecycle = 'archived'
     change.stage = 'archived'
     await this.fs.writeFile(posixJoin(archiveDir, 'status.json'), `${JSON.stringify(change, null, 2)}\n`)

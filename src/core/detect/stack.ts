@@ -119,24 +119,6 @@ function fact(text: string, citations: CitationRef[]): SourceFact {
   return { text, citations: usable, status: usable.length > 0 ? 'confirmed' : 'derived' }
 }
 
-function mergeCommands(...parts: Array<CommandSettings | undefined>): CommandSettings {
-  const merged: CommandSettings = {}
-  for (const part of parts) {
-    if (!part) continue
-    for (const key of Object.keys(part) as (keyof CommandSettings)[]) {
-      const value = part[key]
-      if (value !== undefined) merged[key] = value
-    }
-  }
-  return merged
-}
-
-function splitCsv(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((item) => String(item))
-  if (typeof value === 'string') return value.split(/[,\s]+/).filter((item) => item !== '')
-  return []
-}
-
 /** Read a file if it exists; record it in `readFiles` when it does. */
 async function readIfExists(
   fs: FileSystem,
@@ -160,16 +142,6 @@ async function exists(fs: FileSystem, root: string, relative: string): Promise<b
     return await fs.exists(posixJoin(root, relative))
   } catch {
     return false
-  }
-}
-
-async function readPackageJson(fs: FileSystem, root: string): Promise<Record<string, unknown>> {
-  try {
-    const text = await fs.readFile(posixJoin(root, 'package.json'))
-    const parsed = JSON.parse(text) as unknown
-    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-  } catch {
-    return {}
   }
 }
 

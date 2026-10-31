@@ -42,8 +42,14 @@ describe('commandFor', () => {
       [{ kind: 'approve', gate: 'G1' }, '/flow approve G1'],
       [{ kind: 'reject', gate: 'G1', reason: '验收标准不够' }, '/flow reject 验收标准不够'],
       [{ kind: 'approve-pending', id: 'RK-1' }, '/flow risk approve RK-1'],
+      [{ kind: 'approve-pending', id: 'PC-3', reason: '计划可以' }, '/flow plan approve PC-3 计划可以'],
       [{ kind: 'reject-pending', id: 'SC-2', reason: '范围不清' }, '/flow scope reject SC-2 范围不清'],
       [{ kind: 'reject-pending', id: 'PC-3', reason: '计划要拆' }, '/flow plan reject PC-3 计划要拆'],
+      // Blockers are cleared with `/flow unblock`, never `/flow blocker …`.
+      [{ kind: 'unblock', id: 'BL-1' }, '/flow unblock BL-1'],
+      [{ kind: 'unblock', id: 'BL-2', reason: '已修复' }, '/flow unblock BL-2 已修复'],
+      [{ kind: 'approve-pending', id: 'BL-3' }, '/flow unblock BL-3'],
+      [{ kind: 'reject-pending', id: 'BL-3', reason: '不解除' }, ''],
       [{ kind: 'allow-once', ruleId: 'R-STAGE-SRC', reason: '紧急修复' }, '/flow allow-once R-STAGE-SRC 紧急修复'],
       [{ kind: 'revoke-exception', id: 'EX-1' }, '/flow exception revoke EX-1'],
       [{ kind: 'raise-complexity', reason: '范围变大' }, '/flow complexity high 范围变大'],
@@ -79,6 +85,12 @@ describe('commandFor', () => {
       toRemotePayload({ kind: 'add-exception', ruleId: 'R-1', pathPattern: 'src/**', reason: 'x' }),
     ).toEqual({ type: 'add-exception', ruleId: 'R-1', pathPattern: 'src/**', reason: 'x' })
     expect(toRemotePayload({ kind: 'open-panel' })).toBeNull()
+    expect(toRemotePayload({ kind: 'unblock', id: 'BL-1', reason: '已修复' })).toEqual({
+      type: 'approve-pending',
+      id: 'BL-1',
+      reason: '已修复',
+    })
+    expect(toRemotePayload({ kind: 'unblock', id: 'BL-2' })).toEqual({ type: 'approve-pending', id: 'BL-2' })
   })
 
   it('unwraps gateway envelopes and plain values', () => {
@@ -161,7 +173,7 @@ describe('performAction', () => {
       { kind: 'reject-pending', id: 'SC-3', reason: '范围太大' },
       ports({ fillCommand: (command) => { filled.push(command); return true } }),
     )
-    expect(filled).toEqual(['/flow risk approve RK-2', '/flow scope reject SC-3 范围太大'])
+    expect(filled).toEqual(['/flow risk approve RK-2 接受风险', '/flow scope reject SC-3 范围太大'])
   })
 
   it('opens the panel locally and never throws when the opener fails', async () => {

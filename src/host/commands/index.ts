@@ -16,6 +16,7 @@ import { approveHumanGate, confirmCardText, rejectCurrentGate } from '../gates/i
 import { formatDoctorReport, runRepair } from '../doctor/index.js'
 import { patchConfig } from '../config-patch.js'
 import { runInit } from '../init/index.js'
+import { ensureCoverage } from '../coverage/index.js'
 
 /** 解析后的 /flow 命令。 */
 export interface ParsedFlowCommand {
@@ -184,8 +185,6 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
       runtime.emit()
       return '门禁已恢复（/flow on）。'
     }
-    case 'config':
-      throw new HostError('/flow config 未实现', '用 /flow learn、/flow parallel、/flow complexity 等专用命令')
     default:
       throw new HostError(`未知子命令：${verb}`, `运行 /flow help 查看支持的命令；当前输入：/flow ${verb}`)
   }
@@ -216,6 +215,8 @@ function statusCommand(runtime: HostRuntime): string {
   const lines = [engine.statusText()]
   const notices = safeNotices(engine)
   if (notices.length > 0) lines.push('', '通知：', ...notices.map((notice) => `- ${notice}`))
+  // 覆盖自检：读取前兜底（从未采样时同步补采一次，避免状态栏显示"未检查"）。
+  ensureCoverage(runtime)
   if (runtime.coverage()?.uncoveredWritable) {
     lines.push('', `覆盖自检：有 ${runtime.coverage()?.uncoveredWritable} 个可写工具未被规则覆盖，运行 /flow doctor 查看。`)
   }

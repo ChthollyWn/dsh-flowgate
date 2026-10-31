@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { FlowEngine } from '../../src/core/engine'
-import type { CheckOutcome } from '../../src/core/types'
+import type { ChangeStatus, CheckOutcome } from '../../src/core/types'
 import { MemoryFileSystem } from '../../src/core/util/memory-fs'
 import { FakeClock, FakeCommandRunner, FakeGit, VITEST_PASS_STDOUT } from '../helpers/fakes'
 
@@ -122,6 +122,77 @@ describe('engine administration', () => {
     expect((await h.engine.evaluateAction(action, { tool: 'write', agentRole: 'main' })).effect).toBe('allow')
     await h.engine.revokeException(exception.id, '例外到期')
     expect((await h.engine.evaluateAction(action, { tool: 'write', agentRole: 'main' })).effect).toBe('deny')
+  })
+
+  it('归档时未处理的待处理项标记 expired 并写账本（P1-5）', async () => {
+    const h = await harness()
+    await toS4(h)
+    const change = h.engine.currentChange()!
+    change.pending.push({
+      id: 'SC-9',
+      kind: 'scope',
+      changeId: change.id,
+      title: '归档前未处理的申请',
+      detail: '测试',
+      status: 'open',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+    const internal = h.engine as unknown as {
+      expireOpenPending: (c: ChangeStatus, at: string) => Promise<number>
+    }
+    const expired = await internal.expireOpenPending(change, '2026-01-02T00:00:00.000Z')
+    expect(expired).toBe(1)
+    const item = change.pending.find((entry) => entry.id === 'SC-9')
+    expect(item?.status).toBe('expired')
+    expect(item?.decisionReason).toContain('归档')
+  })
+
+  it('MCP/未知工具写入默认转人工，负责人批准后单次放行（P2-15 守卫冒烟）', async () => {
+    const h = await harness()
+    await toS4(h)
+    const action = { kind: 'mcp' as const, tool: 'mcp__demo__write' }
+    const caller = { tool: 'mcp__demo__write', agentRole: 'main' as const }
+    const human = await h.engine.evaluateAction(action, caller)
+    expect(human.effect).toBe('human')
+    const pending = h.engine.currentChange()!.pending.find((item) => item.status === 'open' && item.kind === 'risk')
+    expect(pending).toBeDefined()
+    await h.engine.decidePending(pending!.id, 'approved', '确认该 MCP 调用是只读查询')
+    const allowed = await h.engine.evaluateAction(action, caller)
+    expect(allowed.effect).toBe('allow')
+    expect(allowed.overrideUsed).toBeTruthy()
+  })
+
+  it('M-5 误判率超阈值的规则自动降为提示（放行 + 记账 + 进入复盘）', async () => {
+    const h = await harness()
+    await h.engine.init()
+    await h.engine.newChange({ title: '误判降级演练', summary: '验证规则自动降为提示' })
+    const action = { kind: 'write' as const, tool: 'write', path: 'src/index.ts' }
+    const caller = { tool: 'write', agentRole: 'main' as const }
+    const denied = await h.engine.evaluateAction(action, caller)
+    expect(denied.effect).toBe('deny')
+    const ruleId = denied.rule?.ruleId ?? ''
+    expect(ruleId).not.toBe('')
+    const internal = h.engine as unknown as {
+      ruleFeedback: Record<string, { interceptions: number; misjudged: number }>
+    }
+    // 20 次拦截 / 2 次误判 = 10% > 5% → 本次降为提示。
+    internal.ruleFeedback[ruleId] = { interceptions: 20, misjudged: 2 }
+    const hinted = await h.engine.evaluateAction(action, caller)
+    expect(hinted.effect).toBe('allow')
+    expect(hinted.hinted).toBe(true)
+    expect(hinted.message).toContain('误判率')
+    expect(hinted.message).toContain('降为提示')
+    // 样本不足 / 恰好 5%：保持原拦截。
+    internal.ruleFeedback[ruleId] = { interceptions: 19, misjudged: 19 }
+    expect((await h.engine.evaluateAction(action, caller)).effect).toBe('deny')
+    internal.ruleFeedback[ruleId] = { interceptions: 20, misjudged: 1 }
+    expect((await h.engine.evaluateAction(action, caller)).effect).toBe('deny')
+    // 复盘口径：M-5 备注列出被降级的规则。
+    internal.ruleFeedback[ruleId] = { interceptions: 20, misjudged: 2 }
+    await h.engine.evaluateAction(action, caller)
+    const metrics = await h.engine.generateMetrics()
+    expect(metrics.notes['M-5']).toContain('降为提示')
+    expect(metrics.notes['M-5']).toContain(ruleId)
   })
 
   it('计划修订：新增任务卡进入执行计划、reorder 生效且已开始任务不可重排', async () => {

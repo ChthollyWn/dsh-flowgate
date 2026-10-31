@@ -15,6 +15,13 @@ export {
   actionTargetPath,
   actionKindOf,
 } from './evaluate'
+export type { RuleFeedback } from './misfire'
+export {
+  MISFIRE_RATE_TARGET,
+  MISFIRE_MIN_SAMPLES,
+  ruleMisfireRate,
+  shouldDowngradeRule,
+} from './misfire'
 export type { ToolCategory, ToolClassification } from './toolclass'
 export { classifyTool, actionFromToolCall, BLOCKED_DELEGATION_TOOLS } from './toolclass'
 export type { TriggerHit } from './risk-triggers'

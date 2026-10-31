@@ -105,3 +105,17 @@ describe('StatusBar', () => {
     expect(html).not.toContain('status.awaiting')
   })
 })
+
+describe('StatusBar context occupancy (P1-7)', () => {
+  it('shows host-provided contextPct once it crosses the 60% threshold', () => {
+    expect(buildStatusLine(makeSnapshot({ contextPct: 61.4 }), zh)).toContain('上下文 61%')
+    // Below the threshold (or absent) the segment is hidden to keep the line short.
+    expect(buildStatusLine(makeSnapshot({ contextPct: 40 }), zh)).not.toContain('上下文')
+    expect(buildStatusLine(makeSnapshot(), zh)).not.toContain('上下文')
+  })
+
+  it('does not render a context segment when the host has no projection data', () => {
+    const html = renderView(makeProjection())
+    expect(html).not.toContain('上下文')
+  })
+})

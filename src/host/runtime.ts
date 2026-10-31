@@ -129,6 +129,11 @@ export class HostRuntime {
   sessionAppendMode: 'unknown' | 'plugin-record' | 'session-append' | 'none' = 'unknown'
   /** 最近一次引擎快照（供测试与面板兜底）。 */
   lastSnapshot: RuntimeSnapshot | null = null
+  /**
+   * 上下文占用（contextPct）数据源（projection 模块在 `contextPressure`
+   * 投影可用时注册；返回 undefined 表示本帧取不到，绝不编造数字）。P1-7。
+   */
+  private contextPctSource: (() => number | undefined) | null = null
 
   constructor(options: HostRuntimeOptions) {
     this.ctx = options.ctx
@@ -594,6 +599,37 @@ export class HostRuntime {
   // 会话投影
   // ------------------------------------------------------------------
 
+  // ------------------------------------------------------------------
+  // 上下文占用（contextPct；DSH `contextPressure` 会话投影，P1-7）
+  // ------------------------------------------------------------------
+
+  /**
+   * 安装/卸下 contextPct 数据源（projection 模块调用）。数据源同步读取宿主
+   * 投影；取不到时返回 undefined，投影保持无字段——绝不编造数字，也不因
+   * 宿主缺投影而降级插件其他功能。
+   */
+  setContextPctSource(source: (() => number | undefined) | null): void {
+    this.contextPctSource = source
+  }
+
+  /** 当前上下文占用百分比（0–100）；无投影/未采样/读取异常时 undefined。 */
+  contextPct(): number | undefined {
+    const source = this.contextPctSource
+    if (!source) return undefined
+    try {
+      const value = source()
+      return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** 投影用快照：有 contextPct 时附加可选字段，无值时保持原引用/形状。 */
+  private snapshotWithContext(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+    const contextPct = this.contextPct()
+    return contextPct === undefined ? snapshot : { ...snapshot, contextPct }
+  }
+
   projection(): FlowgateProjection {
     return this.projectionValue
   }
@@ -604,8 +640,10 @@ export class HostRuntime {
     const engine = this.engineValue
     if (!engine) return
     try {
-      const snapshot = engine.snapshot()
-      this.lastSnapshot = snapshot
+      const rawSnapshot = engine.snapshot()
+      this.lastSnapshot = rawSnapshot
+      // 上下文占用只在投影/状态条里展示，不写回引擎快照；取不到就不加字段。
+      const snapshot = this.snapshotWithContext(rawSnapshot)
       const now = this.isoNow()
       let learning: FlowgateProjection['learning'] = 'detail'
       try {

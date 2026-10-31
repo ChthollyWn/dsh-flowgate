@@ -22,6 +22,8 @@ export type ClientAction =
   | { kind: 'reject'; gate: string; reason: string }
   | { kind: 'approve-pending'; id: string; reason?: string }
   | { kind: 'reject-pending'; id: string; reason: string }
+  /** `kind: 'blocker'` pending item: clear the consecutive-failure circuit breaker. */
+  | { kind: 'unblock'; id: string; reason?: string }
   | { kind: 'allow-once'; ruleId: string; reason: string }
   | { kind: 'add-exception'; ruleId: string; pathPattern?: string; reason: string }
   | { kind: 'revoke-exception'; id: string; reason?: string }
@@ -74,6 +76,12 @@ export function pendingFamily(id: string): string | null {
   return FAMILY_BY_PREFIX[prefix] ?? null
 }
 
+/** Append a trimmed, optional reason to a command (empty → command unchanged). */
+function withReason(command: string, reason: string | undefined): string {
+  const trimmed = reason?.trim() ?? ''
+  return trimmed === '' ? command : `${command} ${trimmed}`
+}
+
 /** Human-facing command for an action; empty string when there is none. */
 export function commandFor(action: ClientAction): string {
   switch (action.kind) {
@@ -83,14 +91,29 @@ export function commandFor(action: ClientAction): string {
       return `/flow reject ${action.reason.trim()}`
     case 'approve-pending': {
       const family = pendingFamily(action.id)
-      return family !== null ? `/flow ${family} approve ${action.id}` : `/flow approve ${action.id}`
+      // `kind: 'blocker'` items are not decided through `/flow blocker …`: the
+      // documented entry is `/flow unblock <BL-n> [理由]` (engine decides the
+      // item as approved and clears the failure count). Map defensively so a
+      // stale caller still produces a runnable command.
+      if (family === 'blocker') return withReason(`/flow unblock ${action.id}`, action.reason)
+      return family !== null
+        ? withReason(`/flow ${family} approve ${action.id}`, action.reason)
+        : `/flow approve ${action.id}`
     }
     case 'reject-pending': {
       const family = pendingFamily(action.id)
+      if (family === 'blocker') {
+        // No human command rejects a circuit breaker: the only decision is
+        // "clear it". Returning '' makes performAction report invalid instead
+        // of filling an unrunnable `/flow blocker reject …` command.
+        return ''
+      }
       return family !== null
         ? `/flow ${family} reject ${action.id} ${action.reason.trim()}`
         : `/flow reject ${action.reason.trim()}`
     }
+    case 'unblock':
+      return withReason(`/flow unblock ${action.id}`, action.reason)
     case 'allow-once':
       return `/flow allow-once ${action.ruleId} ${action.reason.trim()}`
     case 'add-exception':
@@ -144,6 +167,13 @@ export function toRemotePayload(action: ClientAction): FlowgateAction | null {
         : { type: 'approve-pending', id: action.id }
     case 'reject-pending':
       return { type: 'reject-pending', id: action.id, reason: action.reason.trim() }
+    case 'unblock':
+      // The rc.5 client contract has no separate `unblock` payload and the host
+      // remote is not implemented in-tree; approving a blocker pending item is
+      // exactly the engine's unblock transition, so reuse `approve-pending`.
+      return action.reason !== undefined && action.reason.trim() !== ''
+        ? { type: 'approve-pending', id: action.id, reason: action.reason.trim() }
+        : { type: 'approve-pending', id: action.id }
     case 'allow-once':
       return { type: 'allow-once', ruleId: action.ruleId, reason: action.reason.trim() }
     case 'add-exception':

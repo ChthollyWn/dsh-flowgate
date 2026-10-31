@@ -148,6 +148,14 @@ describe('命令注册与执行', () => {
     await expect(executeFlowCommand(harness.runtime, 'frobnicate', harness.agent)).rejects.toThrow('未知子命令')
   })
 
+  it('已移除的 /flow config 桩按未知子命令处理（P1-10）', async () => {
+    harness = await setupPlugin()
+    // 曾经的 "未实现" 桩不再存在，也没有文档化入口：与其它未知子命令一致报用法错误。
+    await expect(executeFlowCommand(harness.runtime, 'config', harness.agent)).rejects.toThrow('未知子命令：config')
+    const help = await executeFlowCommand(harness.runtime, 'help', harness.agent)
+    expect(help).not.toContain('/flow config')
+  })
+
   it('handler 捕获异常返回 kind=error（不抛给宿主）', async () => {
     harness = await setupPlugin()
     const definition = harness.commands.state.commands.get('flow')

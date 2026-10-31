@@ -249,10 +249,6 @@ function gitInvocation(args: string[]): GitInvocation | null {
   return null
 }
 
-function isOutputRedirect(segment: CommandSegment, target: string): boolean {
-  return segment.redirects.includes(target) && !DEV_NULL_TARGETS.has(target)
-}
-
 function packageManagerSubcommand(name: string, args: string[]): string {
   const sub = args.find((arg) => !arg.startsWith('-')) ?? ''
   if (name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun') {
