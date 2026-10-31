@@ -1,8 +1,9 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
 采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）；2026-11-01 00:16 追加"v0.2 图形化流程 + 卡片化授权 E2E"一轮（30–33 号，见下方分节）；2026-11-01 01:38 追加"v0.3 子代理拓扑 / 后台任务视图"一轮（34–36 号，见下方分节）。
-当前共 **32 张 PNG**（编号 01–10、12–26、30–36；11 与 27–29 号不存在）。
-环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
+当前共 **33 张 PNG**（编号 01–10、12–26、30–37；11 与 27–29 号不存在）。
+
+> **2026-11-01 v0.4**：学习模式已移除（面板不再有学习模式选择器/阶段学习卡/术语表，`/flow learn` 命令与 `learning` 配置/投影字段下线）。03/17/33 等历史截图里的学习模式与阶段卡保留为历史记录。环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
 复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
 
 | 截图 | 内容 |
@@ -70,6 +71,16 @@
 | [36-panel-jobs.png](36-panel-jobs.png) | **后台任务**（560px 侧栏宽，组件级 fixture）：运行中 `pnpm test --watch` 展开实时输出 + 两段式「确认终止」（armed，淡红底）+ 已终止（stopped by owner）/ 失败（退出码 2）/ 完成（退出码 0）行；4 行覆盖 running / completed / failed / killed |
 
 **布局观察（原问题已修复，2026-11-01 01:44 重建）**：`子代理` 的**工作流图**已改为窄栏**自上而下**布局（主会话 → 竖向主干 → 逐组垂直堆叠的批次组 / 服务组，组内卡片 flex-wrap）。实测 `[data-flowgate="agents-graph"]`：**560px 容器 clientWidth=scrollWidth=508（横向溢出 0px）**、**719px 容器 667/667（0px）**；修复前同样两侧栏宽度下曾分别溢出 421px / 262px。tree / jobs 视图复核无回归、560px 下仍 0 溢出。**风格核对**：中性 token，无大色块 / 彩虹；饱和色仅 8px StateDot（蓝/绿/黄/红语义点）与 armed 终止按钮（62×24、10% 红底），无大面积色块。
+
+### 2026-11-01 追加（v0.4 移除学习模式：真实 Web 宿主验证）
+
+采集时间 2026-11-01 02:07（Asia/Shanghai）。环境：隔离 `DSH_HOME=/tmp/fg-v2/dsh-home`、`HOME=/tmp/fg-v2/home` 的 `flowgate-dev` profile（link 本仓库），宿主 `dsh --profile flowgate-dev --host 127.0.0.1 --port 7130 --no-open`，Playwright 1.60 + 系统 Chrome，视口 1600×1000。构建：v0.4 移除学习模式后重建，`lib/client.js` sha256 `f5c7016c…`、`lib/host.js` sha256 `244d3b8b…`。**零模型请求**（fake key 仅解锁 UI）。
+
+| 截图 | 内容 |
+|---|---|
+| [37-panel-pipeline-v04.png](37-panel-pipeline-v04.png) | v0.4 面板 Pipeline：**面板头已无学习模式选择器**；图形流程页保留 hero/flow-map/产物 chips/实时检查项/下一步 callout；**不再渲染阶段学习卡与术语表** |
+
+本轮真实宿主断言 **14/14 PASS**：10 tab；面板 `[data-flowgate="learning-mode"]` count 0 且 header 文案无「学习模式」；Pipeline 无 `stage-card`/`glossary`，有 `flow-map`（14 个 artifact chips）与 next-step callout；`/flow help` 不含 learn；`/flow learn brief` 返回「未知子命令：learn」；旧 `.flowgate/config.yaml` 追加 `learning: brief` 后宿主重载仍正常；0 pageerror / 0 console.error / 0 模型请求。证据 `/tmp/fg-v2/v04-e2e.json`、脚本 `/tmp/fg-v04-e2e.cjs`。历史截图 03/17/33 等仍含学习模式/阶段卡，保留为历史记录。
 
 ## 说明
 

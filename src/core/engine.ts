@@ -4980,9 +4980,8 @@ export class FlowEngine {
     }
     const notices = this.notices.slice(-3)
     if (notices.length > 0) lines.push(...notices)
-    if (this.config.learning === 'detail') lines.push('学习模式：每进入一个新阶段，先用 1–2 句话说明这一步在做什么、为什么。')
-    // NFR-8：注入预算（普通 ≤600 token，详细学习模式 ≤1000）——超了截断尾部，绝不无限增长。
-    const budget = this.config.learning === 'detail' ? 1_000 : 600
+    // NFR-8：每步运行时注入 ≤600 token——超了截断尾部，绝不无限增长。
+    const budget = 600
     let text = lines.join('\n')
     if (approx(text) > budget) {
       const maxChars = budget * 2 - 2

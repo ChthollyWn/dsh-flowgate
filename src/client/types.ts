@@ -27,7 +27,6 @@ export const LOCALE_NS = 'dsh-flowgate' as const
 // Projection (host -> client)
 // ---------------------------------------------------------------------------
 
-export type LearningMode = 'detail' | 'brief' | 'off'
 export type ComplexityLevel = 'low' | 'medium' | 'high' | 'ultra'
 export type RiskLevel = 'normal' | 'high'
 export type ChangeKind = 'change' | 'analysis'
@@ -167,7 +166,6 @@ export interface PanelExtras {
 export interface FlowgateProjection {
   snapshot: RuntimeSnapshot
   panel?: PanelExtras
-  learning?: LearningMode
   revision: number
   updatedAt: string
   /** Host-process epoch (optional; absent on records written by older plugin versions). */

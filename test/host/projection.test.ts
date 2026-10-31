@@ -41,7 +41,6 @@ describe('投影定义', () => {
     expect(state.revision).toBe(0)
     expect(state.snapshot.initialized).toBe(false)
     expect(state.snapshot.statusLine).toContain('未启用')
-    expect(state.learning).toBe('detail')
   })
 
   it('apply 折叠 flowgate 状态记录；无关事件返回原引用', () => {
@@ -104,7 +103,6 @@ describe('插件运行期投影', () => {
     }
     expect(after).toBeGreaterThan(before)
     const latest = [...session.state.appended].reverse().find((event) => event.type === STATE_RECORD_TYPE)
-    expect(latest?.data).toMatchObject({ learning: 'detail' })
     expect((latest?.data.snapshot as { stage?: string }).stage).toBe('S4')
     expect(typeof latest?.data.revision).toBe('number')
   })

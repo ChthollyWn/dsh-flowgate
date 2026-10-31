@@ -129,7 +129,6 @@ export interface RoadmapSummary {
 export interface FlowgateProjection {
   snapshot: RuntimeSnapshot
   panel?: PanelExtras
-  learning?: 'detail' | 'brief' | 'off'
   revision: number
   updatedAt: string
   /**
@@ -141,9 +140,6 @@ export interface FlowgateProjection {
    */
   epoch?: string
 }
-
-/** 学习模式默认值。 */
-export const DEFAULT_LEARNING = 'detail' as const
 
 /** 未初始化/无变更时的兜底快照（投影 init 与降级共用）。 */
 export function emptySnapshot(now: string): RuntimeSnapshot {
@@ -169,7 +165,6 @@ export function emptySnapshot(now: string): RuntimeSnapshot {
 export function initialProjection(now: string): FlowgateProjection {
   return {
     snapshot: emptySnapshot(now),
-    learning: DEFAULT_LEARNING,
     revision: 0,
     updatedAt: now,
   }

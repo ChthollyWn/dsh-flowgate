@@ -15,7 +15,7 @@ import type {
   TaskState,
   Violation,
 } from '../types'
-import { STAGE_CARD_ORDER, STAGE_CARD_TITLES } from '../learn'
+import { STAGE_CARD_ORDER, STAGE_CARD_TITLES } from '../stage-meta'
 
 export interface DashboardInput {
   changes: ChangeStatus[]
@@ -416,6 +416,5 @@ ${sections}
 `
 }
 
-/** Learning cards re-exported here for hosts that import the dashboard barrel. */
-export { STAGE_LEARNING_CARDS, STAGE_CARD_TITLES } from '../learn'
-export type { LearningCard } from '../learn'
+/** Stage titles re-exported for hosts that import the dashboard barrel. */
+export { STAGE_CARD_TITLES } from '../stage-meta'

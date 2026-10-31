@@ -58,7 +58,6 @@ export const FLOW_COMMAND_HELP = [
   '/flow exception add <规则id> <路径模式|-> <理由> | revoke <EX-n> [理由] | list — 规则例外管理',
   '/flow complexity <低|中|高|超高> [理由] — 改复杂度',
   '/flow risk-level <普通|高> [理由] — 改风险等级',
-  '/flow learn <detail|brief|off> — 学习模式',
   '/flow metrics [--csv] — 指标',
   '/flow report — 生成 HTML 交付报告',
   '/flow board — 生成跨会话看板 dashboard.html',
@@ -146,8 +145,6 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
       return complexityCommand(runtime, rest)
     case 'risk-level':
       return riskCommand(runtime, rest)
-    case 'learn':
-      return learnCommand(runtime, args)
     case 'metrics': {
       const engine = await engineFor(runtime, agent)
       const set = await engine.generateMetrics()
@@ -583,16 +580,6 @@ async function riskCommand(runtime: HostRuntime, rest: string): Promise<string> 
   const result = await engine.changeRiskLevel(level, reason === '' ? undefined : reason)
   runtime.emit()
   return result.message || `风险等级已改为 ${level}。`
-}
-
-async function learnCommand(runtime: HostRuntime, args: string[]): Promise<string> {
-  const mode = (args[0] ?? '').toLowerCase()
-  if (mode !== 'detail' && mode !== 'brief' && mode !== 'off') {
-    throw new HostError('用法：/flow learn <detail|brief|off>', 'detail = 每阶段解释（默认）；brief = 一句话；off = 关闭')
-  }
-  await patchConfig(runtime, { learning: mode })
-  const labels: Record<string, string> = { detail: '详细（每阶段解释）', brief: '简要', off: '关闭' }
-  return `学习模式已改为：${labels[mode]}。`
 }
 
 async function parallelCommand(runtime: HostRuntime, args: string[]): Promise<string> {

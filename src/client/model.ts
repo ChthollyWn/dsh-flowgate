@@ -26,7 +26,6 @@ import type {
   GatePanel,
   GateState,
   InterceptRow,
-  LearningMode,
   Lifecycle,
   MergedConfirm,
   ReviewRow,
@@ -42,8 +41,8 @@ import type { Tone } from './theme'
 import { toneOf } from './theme'
 
 export { toneOf }
-import type { PipelineStageId } from './learn/cards'
-import { cardsFor } from './learn/cards'
+import type { PipelineStageId } from './stage-info'
+import { artifactsForStage } from './stage-info'
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -334,19 +333,16 @@ function narrowPanel(raw: unknown): PanelExtrasSafe {
 
 /**
  * Narrow a raw projection value. Accepts both the contract shape
- * (`{snapshot, panel?, learning?, revision, updatedAt}`) and a bare
+ * (`{snapshot, panel?, revision, updatedAt}`) and a bare
  * `RuntimeSnapshot` for forward/backward compatibility.
  */
 export function normalizeProjection(raw: unknown): FlowgateProjection | null {
   if (!isRecord(raw)) return null
   const snapshot = coerceSnapshot(isRecord(raw.snapshot) ? raw.snapshot : raw)
   if (snapshot === null) return null
-  const learning: LearningMode | undefined =
-    raw.learning === 'detail' || raw.learning === 'brief' || raw.learning === 'off' ? raw.learning : undefined
   return {
     snapshot,
     panel: narrowPanel(raw.panel),
-    learning,
     revision: numOr(raw.revision, 0),
     updatedAt: str(raw.updatedAt, snapshot.updatedAt),
     ...(typeof raw.epoch === 'string' && raw.epoch !== '' ? { epoch: raw.epoch } : {}),
@@ -1036,7 +1032,6 @@ export interface PanelModel {
   lifecycle?: string
   /** Input-dock state (also drives the panel header rail). */
   flowState: DockState
-  learning: LearningMode
   pipeline: StageNodeModel[]
   roadmap?: RoadmapSummary
   gate: GateModel
@@ -1626,7 +1621,6 @@ export function buildPanelModel(proj: FlowgateProjection | null, t: TFn): PanelM
     stage: snapshot?.stage !== undefined ? normalizeStage(snapshot.stage) : undefined,
     lifecycle: snapshot?.lifecycle,
     flowState: dockStateOf(snapshot),
-    learning: proj?.learning ?? 'detail',
     pipeline: buildPipelineNodes(snapshot, t),
     roadmap: panel.roadmap,
     gate: buildGateModel(proj, t),
@@ -1919,13 +1913,7 @@ export function trialRuleLocal(
   }
 }
 
-/** Stage-card selection for the pipeline view (localized). */
-export function stageCardFor(stage: string | undefined, t: TFn) {
-  const locale = localeOf(t)
-  const cards = cardsFor(locale)
-  const key = normalizeStage(stage)
-  if (key === 'S0' || key === 'S1' || key === 'S2' || key === 'S3' || key === 'S4' || key === 'S5' || key === 'S6') {
-    return cards[key]
-  }
-  return cards.S0
+/** Artifact chips for one stage in the pipeline view (localized). */
+export function stageArtifacts(stage: string | undefined, t: TFn): string[] {
+  return artifactsForStage(normalizeStage(stage), localeOf(t))
 }

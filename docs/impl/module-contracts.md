@@ -348,7 +348,7 @@ export function renderChangeReport(input: ReportInput): string          // 单�
 export interface ReportInput { change: ChangeStatus; artifacts: ArtifactBundle; evidence: EvidenceReceipt[]; ledger: LedgerEvent[]; reviews: ReviewRecord[]; metrics: MetricSet; generatedAt: string }
 export function renderDashboard(input: DashboardInput): string         // 跨会话看板 HTML
 export interface DashboardInput { changes: ChangeStatus[]; snapshot?: RuntimeSnapshot; pending: PendingItem[]; generatedAt: string }
-export const STAGE_LEARNING_CARDS: Record<StageId, LearningCard>        // 7 阶段学习卡（六部分全文），client 与报告共用
+export const STAGE_CARD_TITLES: Record<StageId, string>              // 阶段标题（报告/看板共用；学习卡已于 v0.4 移除）
 export interface LearningCard { what: string; why: string; criteria: string[]; upstream: string; antiPatterns: string[]; good: string; bad: string }
 ```
 

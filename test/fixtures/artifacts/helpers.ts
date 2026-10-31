@@ -414,7 +414,6 @@ export function makeFs(extra: Record<string, string> = {}): MemoryFileSystem {
 export function validConfig(): FlowgateConfig {
   return {
     levels: { complexity: 'auto', risk: 'auto' },
-    learning: 'detail',
     dispatch: 'auto',
     commands: {},
     limits: {

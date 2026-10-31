@@ -6,6 +6,27 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.4 移除学习模式，2026-11-01）
+
+> 未发版：负责人决定去掉学习模式（产品简化、少文字）。只做移除，不新增能力。
+
+### Removed
+
+- **客户端**：面板头部的学习模式选择器（详细/简洁/关闭）；阶段学习卡（`StageCard`、`src/client/learn/**`，做什么/为什么/合格标准/方法来源/反模式/正反例）；Pipeline 里的折叠学习卡与术语表；`LearningMode` 类型、`FlowgateProjection.learning`、`PanelModel.learning`、`ClientAction.learn` 与 `/flow learn` 命令映射。
+- **host/core**：`FlowgateConfig.learning` 配置字段与默认值/校验；`/flow learn` 命令（现在作为未知子命令报错）；投影 wire 字段 `learning`；engine 的“学习模式”注入提示与 1000 token 差异化预算（注入预算统一 ≤600）。
+- **核心学习卡数据**：`src/core/learn/**` 删除；报告/看板只保留 `STAGE_CARD_TITLES`/`STAGE_CARD_ORDER`（迁至 `src/core/stage-meta.ts`），不再导出 `STAGE_LEARNING_CARDS`/`LearningCard`。
+- 文档：README/README.en 命令表与功能状态、需求文档 FR-8.3/8.4/NFR-8、技术方案/执行方案对应章节标注移除。
+
+### Changed
+
+- 图形流程页保留可操作内容：hero、FlowMap、实时门禁检查项、产物 chips（改用 `src/client/stage-info.ts` 的 `STAGE_ARTIFACTS`）、下一步 callout、roadmap；单位置更少文字。
+- 兼容：旧 `.flowgate/config.yaml` 中的 `learning:` 键加载时忽略、不报错；旧投影记录里的 `learning` 字段读取方忽略；旧 `/flow learn` 返回“未知子命令”而不是崩溃。
+
+### Verification
+
+- `pnpm lint` 绿；`npx vitest run` **117 files / 1669 tests** 全绿；`pnpm coverage` 通过 thresholds（86.31 / 76.23 / 86.88 / 89.37）；`pnpm build`（host 1.21MB / client 381.4KB）；`verify:package` 39 文件 / 1062.5KB；`verify:client`（18 插槽）通过。
+- 真实宿主（隔离 DSH_HOME、零模型请求）E2E **14/14**：10 tab；面板 0 个 `learning-mode` 锚点、header 无“学习模式”；Pipeline 无 `stage-card`/`glossary`，仍有 `flow-map`/artifact chips/next-step callout/live-checks；`/flow help` 不含 learn；`/flow learn brief` 报“未知子命令”；旧配置带 `learning: brief` 仍可加载；0 pageerror / 0 console.error / 0 模型请求。截图 [37-panel-pipeline-v04](docs/screenshots/37-panel-pipeline-v04.png)。
+
 ## [Unreleased]（v0.3 运行可视化：子代理拓扑 + 后台任务，2026-11-01）
 
 > 未发版：负责人需求——子代理拓扑实时预览（工作流图 / 树双模式）+ 后台任务清单（退出码、实时输出、强制终止）也要可视化，风格与 DSH 原生一致。设计契约见 [docs/impl/runtime-visualization.md](docs/impl/runtime-visualization.md)。

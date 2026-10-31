@@ -30,7 +30,6 @@ export const DEFAULT_LIMITS = {
 export function makeConfig(overrides: Partial<FlowgateConfig> = {}): FlowgateConfig {
   const base: FlowgateConfig = {
     levels: { complexity: 'auto', risk: 'auto' },
-    learning: 'detail',
     dispatch: 'auto',
     commands: {},
     limits: { ...DEFAULT_LIMITS },

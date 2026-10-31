@@ -75,7 +75,6 @@ function makeProjection(snapshotOverrides: Partial<RuntimeSnapshot> = {}): Flowg
   return {
     snapshot,
     panel: { gate: { gate: 'G3', state: 'awaiting', awaitingOwner: true, items: [] } },
-    learning: 'detail',
     revision: 7,
     updatedAt: '2026-10-30T09:20:00Z',
   }

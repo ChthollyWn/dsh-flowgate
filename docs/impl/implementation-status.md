@@ -361,6 +361,20 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 **限制（如实）**：真实子代理与后台 job 需要模型运行才能产生；零模型验证只覆盖空态/组合面，populated 截图为组件级假数据（README 已披露）。
 
+## 3.15 v0.4：移除学习模式（2026-11-01）
+
+负责人决定去掉学习模式（产品简化、少文字）。纯移除，行为约束不变。
+
+| 方向 | 变更 | 证据 |
+|---|---|---|
+| 客户端 UI | 删除面板学习模式选择器；删除阶段学习卡（`src/client/learn/**`）、折叠 details、术语表；Pipeline 保留 hero/FlowMap/实时检查项/下一步/roadmap | `src/client/panel/Panel.tsx`、`panel/views/Pipeline.tsx`、`visual/FlowMap.tsx`、`stage-info.ts`、`test/client/*` |
+| 客户端类型/动作 | 删除 `LearningMode`、`FlowgateProjection.learning`、`PanelModel.learning`、`ClientAction.learn` | `src/client/{types,model,actions}.ts` |
+| host/core | 删除 `FlowgateConfig.learning`（默认/校验/解析）、`/flow learn` 命令与 help、投影 `learning` 字段、engine 学习提示与差异化预算（统一 600） | `src/core/{types,engine,store/config}.ts`、`src/host/{runtime,projection,commands}` |
+| 核心学习卡数据 | 删除 `src/core/learn/**` 与 `STAGE_LEARNING_CARDS`；报告/看板保留 `STAGE_CARD_TITLES`/`STAGE_CARD_ORDER`（迁至 `src/core/stage-meta.ts`） | `src/core/stage-meta.ts`、`src/core/report/*`、`src/core/dashboard/*` |
+| 兼容 | 旧 config 的 `learning:` 键忽略；旧投影字段忽略；`/flow learn` → 未知子命令 | `test/core/store/config.test.ts`、`test/host/commands.test.ts` |
+
+**验证**：`pnpm lint` 绿；`npx vitest run` **117 files / 1669 tests**；coverage 86.31/76.23/86.88/89.37（阈值通过）；build（host 1.21MB / client 381.4KB）；verify:package 39 文件/1062.5KB；verify:client 18 插槽通过。真实 DSH Web 宿主（隔离 DSH_HOME、零模型请求）E2E **14/14**：10 tab；面板 0 个 `learning-mode` 锚点、header 无“学习模式”；Pipeline 无 `stage-card`/`glossary`，保留 `flow-map`/artifact chips/live-checks/next-step callout；`/flow help` 无 learn；`/flow learn brief` 报未知子命令；旧配置 `learning: brief` 仍可加载；0 pageerror/0 console.error/0 模型请求。截图 [37-panel-pipeline-v04](../screenshots/37-panel-pipeline-v04.png)。
+
 ## 4. 剩余项（第六轮复验后，四分）
 
 > 第六轮独立复验确认第五轮"功能缺口全部闭环"结论不成立：7 项 P1 接线缺口已在 §3.12 修复；
@@ -376,7 +390,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 - 真实 guard 拦截→面板→误判反馈端到端、preset persona/工具集运行时差异、真实确认卡产生路径、5 个预置缺陷检出率、PTC / `ask_user_question` 结构化字段（需真模型会话与完整宿主组合）。
 - Desktop 宿主人工走查与 UI 冷启动人工计时（Web/headless 已有证据，启动增量仅模块加载口径）。
 - **P2-14 口径修正**：headless 真模型 E2E 未在第六轮 HEAD 复跑（历史真机结果见 §3.4/§3.5；compat 文档据此标注"本轮未复跑"）。
-- **T5.2 学习模式抽查未做**：实现只在 detail 模式注入提示文本，无强制/度量；需真实模型会话人工抽查 10 次（≥8 次符合）。
+- ~~T5.2 学习模式抽查~~：学习模式已于 v0.4 移除（负责人决定），该项关闭。
 
 ### 4.2 可离线补做（Playwright + Chrome 可用，非环境受限）
 
@@ -417,4 +431,4 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 4. **真实 Web/Desktop 走查**：真实 `R-STAGE-SRC` 拦截 → 面板 → 误判反馈闭环、preset 运行时差异、真实确认卡、PTC/`ask_user_question` 结构化字段、5 个预置缺陷检出率；补 Desktop 兼容矩阵与 UI 冷启动人工计时。
 5. **可离线补做（不需要模型）**：自动接续/`doctor` 扩展明细截图、projection epoch 重启真机复验（Playwright+Chrome 可用）。
 6. **自举（负责人决策项）**：用 FlowGate 管自身仓库开发（04 §9）；不做则从 backlog 移除并同步文档。
-7. **P2 后续/口径**：`run: auto` 按 size 路由（或保持显式 `run: main`）、M-17 上下文阈值数据源、dispatch 摘要落账、worktree 归因、T4.4 PR/CHANGELOG 生成引导、T5.2 学习模式抽查；T2.1"每产物 10 正/反例"的 fixture 形式补齐。
+7. **P2 后续/口径**：`run: auto` 按 size 路由（或保持显式 `run: main`）、M-17 上下文阈值数据源、dispatch 摘要落账、worktree 归因、T4.4 PR/CHANGELOG 生成引导；T2.1"每产物 10 正/反例"的 fixture 形式补齐。

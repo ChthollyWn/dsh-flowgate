@@ -670,12 +670,6 @@ export class HostRuntime {
       // 上下文占用只在投影/状态条里展示，不写回引擎快照；取不到就不加字段。
       const snapshot = this.snapshotWithContext(rawSnapshot)
       const now = this.isoNow()
-      let learning: FlowgateProjection['learning'] = 'detail'
-      try {
-        learning = engine.getConfig().learning
-      } catch {
-        // 用默认值。
-      }
       let panel
       try {
         panel = buildPanel({ engine, intercepts: this.intercepts, dashboardPath: '.flowgate/dashboard.html', now })
@@ -686,7 +680,6 @@ export class HostRuntime {
         JSON.stringify({
           snapshot: snapshotForHash(snapshot),
           panel: panel ?? null,
-          learning,
         }),
       )
       if (contentHash === this.lastEmitHash) return
@@ -695,7 +688,6 @@ export class HostRuntime {
       const projection: FlowgateProjection = {
         snapshot,
         panel,
-        learning,
         revision: this.revisionValue,
         updatedAt: now,
         epoch: this.projectionEpoch,

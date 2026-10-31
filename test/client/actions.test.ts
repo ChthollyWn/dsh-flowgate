@@ -80,7 +80,6 @@ describe('commandFor', () => {
       [{ kind: 'report' }, '/flow report'],
       [{ kind: 'board' }, '/flow board'],
       [{ kind: 'metrics-export' }, '/flow metrics --csv'],
-      [{ kind: 'learn', mode: 'brief' }, '/flow learn brief'],
     ]
     for (const [action, command] of cases) {
       expect(commandFor(action)).toBe(command)

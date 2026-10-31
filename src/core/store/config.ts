@@ -43,7 +43,6 @@ export const DEFAULT_CONFIG_PATH = '.flowgate/config.yaml'
 function buildDefaultConfig(): FlowgateConfig {
   return {
     levels: { complexity: 'auto', risk: 'auto' },
-    learning: 'detail',
     dispatch: 'auto',
     commands: {},
     limits: {
@@ -217,9 +216,6 @@ function validateConfig(config: FlowgateConfig): void {
   }
   if (!['auto', 'normal', 'high'].includes(String(levels.risk))) {
     failValidation('levels.risk', `只能取 auto / normal / high，实际为 ${JSON.stringify(levels.risk)}`, '风险取 auto 或 normal / high。')
-  }
-  if (!['detail', 'brief', 'off'].includes(String(config.learning))) {
-    failValidation('learning', '只能取 detail / brief / off', '学习模式取 detail、brief 或 off。')
   }
   if (!['auto', 'subagent', 'inline'].includes(String(config.dispatch))) {
     failValidation('dispatch', '只能取 auto / subagent / inline', '派发模式取 auto、subagent 或 inline。')

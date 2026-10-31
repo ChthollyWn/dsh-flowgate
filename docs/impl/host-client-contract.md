@@ -18,7 +18,6 @@ interface FlowgateProjection {
   /** 面板补充数据（可选；没有时面板按 snapshot 降级显示） */
   panel?: PanelExtras
   /** 学习模式；默认 'detail' */
-  learning?: 'detail' | 'brief' | 'off'
   /** 单调递增的修订号，客户端用它做变更检测/重渲染 */
   revision: number
   /** 生成时间 ISO */
@@ -161,4 +160,4 @@ agent 工具里仍然没有批准/退回能力。`performAction` 的 ports 顺�
 
 - 投影状态必须带 `revision`；host 每变更一次 +1。
 - 客户端遇到未知 `stage`/`gate`/字段时显示原文而不是崩溃。
-- 学习卡内容由 client 打包（i18n）；host 只提供 `learning` 模式。
+- 学习模式/阶段学习卡已于 v0.4 移除；阶段展示只用 `snapshot.stage` 与 `panel.gate`，旧记录里的 `learning` 字段由读取方忽略。

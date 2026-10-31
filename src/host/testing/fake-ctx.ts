@@ -732,7 +732,6 @@ function makeSnapshot(state: FakeEngineState): RuntimeSnapshot {
 export function defaultFakeConfig(): Record<string, unknown> {
   return {
     levels: { complexity: 'auto', risk: 'auto' },
-    learning: 'detail',
     dispatch: 'inline',
     commands: {},
     limits: {

@@ -14,7 +14,7 @@
 import type { ReactElement } from 'react'
 import type { TFn } from '../i18n'
 import type { PanelModel } from '../model'
-import { gateForStage, gateStateLabel, isHumanGate, nextStepForPanel, stageCardFor } from '../model'
+import { gateForStage, gateStateLabel, isHumanGate, nextStepForPanel, stageArtifacts } from '../model'
 import { NATIVE } from '../theme'
 import { ArrowIcon, GateGlyph, ShieldIcon, SparkIcon, StageGlyph } from './icons'
 
@@ -71,7 +71,7 @@ export function FlowMap({ model, t, selectedStage, onSelectStage }: FlowMapProps
                 : node.status === 'blocked'
                   ? 'failed'
                   : 'pending'
-          const artifacts = stageCardFor(node.stage, t).artifacts.slice(0, 2)
+          const artifacts = stageArtifacts(node.stage, t).slice(0, 2)
           const selected = selectedStage !== undefined ? selectedStage === node.stage : isHere
           const color = STATUS_COLOR[node.status] ?? NATIVE.labelCaption
           const previousDone = index > 0 && model.pipeline[index - 1]?.status === 'done'

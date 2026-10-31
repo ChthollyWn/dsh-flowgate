@@ -51,7 +51,6 @@ describe('normalizeProjection', () => {
     expect(proj).not.toBeNull()
     expect(proj?.snapshot.changeId).toBe('C-003')
     expect(proj?.revision).toBe(7)
-    expect(proj?.learning).toBe('detail')
     expect(proj?.panel?.gate?.gate).toBe('G3')
   })
 
@@ -59,7 +58,6 @@ describe('normalizeProjection', () => {
     const proj = normalizeProjection(makeSnapshot())
     expect(proj).not.toBeNull()
     expect(proj?.snapshot.changeId).toBe('C-003')
-    expect(proj?.learning).toBeUndefined()
   })
 
   it('returns null for junk instead of throwing', () => {
@@ -353,10 +351,6 @@ describe('panel model', () => {
     expect(bare.ledger).toHaveLength(1)
   })
 
-  it('defaults the learning mode to detail when the host omits it', () => {
-    const proj = { ...makeProjection(), learning: undefined }
-    expect(buildPanelModel(proj, zh).learning).toBe('detail')
-  })
 
   it('maps task-card plan extras used by the task detail (T5.1)', () => {
     const base = makeSnapshot()

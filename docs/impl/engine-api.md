@@ -71,7 +71,7 @@ await engine.load()
 
 - `Decision.message`：短版（阶段、动作、规则 id、为什么、怎么解锁 ≤ 300 字）。
 - `TaskStartOutcome.envelope`：任务卡 + 覆盖场景 + 上下文片段 + 验证组 + TDD 要求。
-- `InjectionBundle.text`：每步追加；包含阶段、允许动作、活动任务、待处理项、下一步；学习模式 detail 时加一句"说明这一步在做什么"。
+- `InjectionBundle.text`：每步追加；包含阶段、允许动作、活动任务、待处理项、下一步（≤600 token；学习模式已于 v0.4 移除）。
 - 所有 agent 可见文案中文；错误返回 `{ error, hint }` 由 host 包装。
 
 ## 事件回调

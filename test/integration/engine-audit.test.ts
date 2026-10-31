@@ -555,17 +555,14 @@ describe('面板规则/注入预算（T5.1 / NFR-8）', () => {
     expect(ids).toContain('R-SCOPE')
   })
 
-  it('注入文本按 token 预算截断（普通 ≤600 / 详细 ≤1000）', async () => {
+  it('注入文本按统一 token 预算截断（≤600）', async () => {
     const harness = await createHarness()
     await harness.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
     const engine = harness.engine as unknown as { notices: string[]; buildInjection: () => { text: string; approxTokens: number } }
     engine.notices = ['超长通知 ' + 'x'.repeat(3000), '通知 2', '通知 3']
-    const detailBundle = engine.buildInjection()
-    expect(detailBundle.approxTokens).toBeLessThanOrEqual(1_000)
-    expect(detailBundle.text).toContain('…')
-    ;(harness.engine as unknown as { config: { learning: string } }).config.learning = 'brief'
-    const briefBundle = engine.buildInjection()
-    expect(briefBundle.approxTokens).toBeLessThanOrEqual(600)
+    const bundle = engine.buildInjection()
+    expect(bundle.approxTokens).toBeLessThanOrEqual(600)
+    expect(bundle.text).toContain('…')
   })
 })
 

@@ -47,7 +47,6 @@ export type TddState = 'none' | 'red' | 'green'
 export type BatchMode = 'sequential' | 'parallel'
 export type BatchStatus = 'pending' | 'running' | 'checkpoint' | 'done' | 'failed' | 'blocked'
 export type DispatchMode = 'auto' | 'subagent' | 'inline'
-export type LearningMode = 'detail' | 'brief' | 'off'
 
 export type PendingKind =
   | 'risk'
@@ -288,7 +287,6 @@ export interface ReviewSettings {
 
 export interface FlowgateConfig {
   levels: LevelSettings
-  learning: LearningMode
   dispatch: DispatchMode
   commands: CommandSettings
   limits: LimitSettings
@@ -664,7 +662,7 @@ export interface GitPort {
  * 冻结时用于判定的配置子集。
  *
  * 只冻结会改变判定结果的部分：规则、风险触发器、等级定义与数量/预算限制。
- * 命令、派发、并行、学习模式等不属于「契约」（变更期间可调整）。
+ * 命令、派发、并行等不属于「契约」（变更期间可调整）。
  */
 export interface ContractConfigSnapshot {
   rules: Rule[]

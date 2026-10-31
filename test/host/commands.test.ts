@@ -120,14 +120,9 @@ describe('命令注册与执行', () => {
     await expect(executeFlowCommand(harness.runtime, 'conflict reject CF-1', harness.agent)).rejects.toThrow('退回必须写理由')
   })
 
-  it('/flow learn brief 合并写回 config.yaml 并 refresh', async () => {
+  it('/flow learn 已被移除：作为未知子命令报错', async () => {
     harness = await setupPlugin()
-    const text = await executeFlowCommand(harness.runtime, 'learn brief', harness.agent)
-    expect(text).toContain('学习模式')
-    const fs = harness.runtime.ports()?.fs
-    expect(fs).toBeDefined()
-    const raw = await fs?.readFile('.flowgate/config.yaml')
-    expect(raw).toContain('"learning": "brief"')
+    await expect(executeFlowCommand(harness.runtime, 'learn brief', harness.agent)).rejects.toThrow('未知子命令')
   })
 
   it('/flow complexity 降低必须写理由', async () => {

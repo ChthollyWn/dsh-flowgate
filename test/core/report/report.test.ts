@@ -7,7 +7,7 @@ import type {
   MetricSet,
   ReviewRecord,
 } from '../../../src/core/types'
-import { STAGE_LEARNING_CARDS, STAGE_CARD_TITLES, escapeHtml, renderChangeReport } from '../../../src/core/report'
+import { STAGE_CARD_TITLES, escapeHtml, renderChangeReport } from '../../../src/core/report'
 
 const CHANGE: ChangeStatus = {
   id: 'C-003',
@@ -543,39 +543,5 @@ describe('报告防 XSS：所有用户文本必须 HTML 转义', () => {
     const html = renderChangeReport(reportInput({ ledger }))
     expect(html).not.toContain('<b>evil</b>')
     expect(html).toContain('&lt;b&gt;evil&lt;/b&gt;')
-  })
-})
-
-describe('STAGE_LEARNING_CARDS：7 个阶段学习卡（+ 路线图 + 归档）', () => {
-  it('覆盖 roadmap 与 S0–S6，每项六部分齐全且内容具体', () => {
-    const required = ['roadmap', 'S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'] as const
-    for (const stage of required) {
-      const card = STAGE_LEARNING_CARDS[stage]
-      expect(card, stage).toBeDefined()
-      expect(card.what.length, `${stage}.what`).toBeGreaterThan(60)
-      expect(card.why.length, `${stage}.why`).toBeGreaterThan(40)
-      expect(card.criteria.length, `${stage}.criteria`).toBeGreaterThanOrEqual(3)
-      expect(card.upstream.length, `${stage}.upstream`).toBeGreaterThan(20)
-      expect(card.antiPatterns.length, `${stage}.antiPatterns`).toBeGreaterThanOrEqual(3)
-      expect(card.good.length, `${stage}.good`).toBeGreaterThan(40)
-      expect(card.bad.length, `${stage}.bad`).toBeGreaterThan(40)
-      // 六部分都用中文书写
-      const all = [card.what, card.why, card.criteria.join(''), card.upstream, card.antiPatterns.join(''), card.good, card.bad].join('')
-      expect(all, stage).toMatch(/[\u4e00-\u9fa5]/)
-    }
-    expect(STAGE_CARD_TITLES.S3).toContain('设计')
-  })
-
-  it('归档阶段也有完整卡片（满足 Record<StageId, LearningCard>）', () => {
-    const card = STAGE_LEARNING_CARDS.archived
-    expect(card.what.length).toBeGreaterThan(20)
-    expect(card.criteria.length).toBeGreaterThanOrEqual(3)
-    expect(card.good.length).toBeGreaterThan(20)
-  })
-
-  it('每个阶段都写明了对应的上游做法', () => {
-    for (const stage of ['roadmap', 'S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6'] as const) {
-      expect(STAGE_LEARNING_CARDS[stage].upstream, stage).toMatch(/借鉴|Superpowers|OpenSpec|gstack/)
-    }
   })
 })

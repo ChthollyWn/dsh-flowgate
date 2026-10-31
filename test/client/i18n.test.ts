@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createTranslator, DICTS, format, localeOf, normalizeLocale } from '../../src/client/i18n'
-import { LEARNING_STAGES } from '../../src/client/learn/cards'
+import { PIPELINE_STAGES } from '../../src/client/stage-info'
 import { PANEL_TABS } from '../../src/client/panel/Panel'
 
 const root = process.cwd()
@@ -37,7 +37,7 @@ describe('dictionaries', () => {
   })
 
   it('cover every dynamic key family used by the views', () => {
-    for (const stage of LEARNING_STAGES) {
+    for (const stage of PIPELINE_STAGES) {
       for (const prefix of ['stage.', 'stage.idx.']) {
         expect(DICTS.zh[`${prefix}${stage}`], `${prefix}${stage}`).toBeDefined()
       }

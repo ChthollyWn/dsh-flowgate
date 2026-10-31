@@ -3,11 +3,10 @@
  * Mirrors docs/impl/host-client-contract.md, including the "degrade" variants
  * (not initialized / paused change / low-complexity confirm card).
  */
-import type { FlowgateProjection, JobRowWire, LearningMode, PanelExtras } from '../../src/client/types'
+import type { FlowgateProjection, JobRowWire, PanelExtras } from '../../src/client/types'
 import type { RuntimeSnapshot, TaskCard } from '../../src/core/types'
 
 export interface ProjectionOverrides {
-  learning?: LearningMode
   snapshot?: Partial<RuntimeSnapshot>
   panel?: PanelExtras
 }
@@ -285,7 +284,6 @@ export function makeProjection(overrides: ProjectionOverrides = {}): FlowgatePro
   return {
     snapshot: makeSnapshot(overrides.snapshot),
     panel: overrides.panel ?? makePanel(),
-    learning: overrides.learning ?? 'detail',
     revision: 7,
     updatedAt: '2026-10-30T09:20:00Z',
   }

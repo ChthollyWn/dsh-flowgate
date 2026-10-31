@@ -36,10 +36,8 @@ export function sanitizeProjection(value: unknown): FlowgateProjection | null {
   if (snapshot === null || typeof snapshot !== 'object') return null
   const revision = typeof record.revision === 'number' ? record.revision : 0
   const updatedAt = typeof record.updatedAt === 'string' ? record.updatedAt : new Date().toISOString()
-  const learning = record.learning === 'brief' || record.learning === 'off' || record.learning === 'detail' ? record.learning : 'detail'
   const projection: FlowgateProjection = {
     snapshot: snapshot as FlowgateProjection['snapshot'],
-    learning,
     revision,
     updatedAt,
   }

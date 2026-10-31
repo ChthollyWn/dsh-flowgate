@@ -155,20 +155,15 @@ describe('intercepts view — host rule hints are card-oriented', () => {
   })
 })
 
-describe('pipeline view — learning-mode copy', () => {
-  it('learning=off hides the long examples (no command copy at all)', () => {
-    const html = renderView(PipelineView, makeProjection({ learning: 'off' }))
-    expectNoTypedCommand(visibleCopy(html), 'pipeline(off)')
-  })
-
-  it('learning=detail S6 stage card shows no typed command copy', () => {
-    // SSR only: the pipeline view keys the selected stage off `snapshot.stage`,
-    // so an S6 projection renders the S6 learning card (examples + antipatterns)
-    // without needing the click/hook harness.
-    const projection = makeProjection({ snapshot: { stage: 'S6' }, learning: 'detail' })
+describe('pipeline view — no learning mode anymore', () => {
+  it('renders the graphical flow without stage cards, glossary or mode selector', () => {
+    const projection = makeProjection({ snapshot: { stage: 'S6' } })
     const html = renderView(PipelineView, projection)
-    expect(html).toContain('data-flowgate="stage-card"')
-    expect(html).toContain('data-flowgate="stage-card-bad"')
-    expectNoTypedCommand(visibleCopy(html), 'pipeline(S6)')
+    expect(html).toContain('data-flowgate="flow-map"')
+    expect(html).not.toContain('data-flowgate="stage-card')
+    expect(html).not.toContain('data-flowgate="glossary')
+    expect(html).not.toContain('data-flowgate="learning-mode"')
+    expect(html).not.toMatch(/\/flow\s+(learn|approve|reject)/)
   })
 })
+

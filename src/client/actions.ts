@@ -18,7 +18,6 @@
  * event handler actually runs.
  */
 import type { FlowgateAction, FlowgateRemote, ActionEnvelope } from './types'
-import type { LearningMode } from './types'
 import type { TFn } from './i18n'
 
 export type ClientAction =
@@ -47,7 +46,6 @@ export type ClientAction =
   | { kind: 'report' }
   | { kind: 'board' }
   | { kind: 'metrics-export' }
-  | { kind: 'learn'; mode: LearningMode }
   | { kind: 'open-panel' }
   | { kind: 'copy-evidence'; text: string }
   /** 负责人确认非 agent 改动（T1.4 验收 #3）；不传 path 表示全部确认。 */
@@ -168,8 +166,6 @@ export function commandFor(action: ClientAction): string {
       return '/flow board'
     case 'metrics-export':
       return '/flow metrics --csv'
-    case 'learn':
-      return `/flow learn ${action.mode}`
     case 'open-panel':
     case 'copy-evidence':
       return ''

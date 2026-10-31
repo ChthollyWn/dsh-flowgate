@@ -229,12 +229,11 @@ function isFileAction(action: RuleEvaluationInput['action']): action is FileActi
  * 更无法上报根因；这里把只读观测类工具和会推进流程的工具分开。
  */
 export const READ_ONLY_OTHER_TOOLS: ReadonlySet<string> = new Set([
-  // 只读 flow 工具（flow_investigate 是只读调查，flow_learn 是学习模式查询/切换提示）。
+  // 只读 flow 工具（flow_investigate 是只读调查）。
   'flow_status',
   'flow_diff',
   'flow_report_risk',
   'flow_investigate',
-  'flow_learn',
   // 只读宿主工具（正常走 guard 时大多返回 null 动作，这里兜底直接喂给引擎的调用）。
   'read',
   'read_file',

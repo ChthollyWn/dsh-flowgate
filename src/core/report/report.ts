@@ -22,7 +22,7 @@ import type {
   TaskStatus,
 } from '../types'
 import { METRIC_DEFINITIONS, formatMetricValue, type MetricDefinition } from '../metrics'
-import { STAGE_CARD_ORDER, STAGE_CARD_TITLES } from '../learn'
+import { STAGE_CARD_ORDER, STAGE_CARD_TITLES } from '../stage-meta'
 
 export interface ReportInput {
   change: ChangeStatus
@@ -951,7 +951,6 @@ ${body}
 `
 }
 
-/** Learning cards re-exported here for hosts that import the report barrel. */
-export { STAGE_LEARNING_CARDS, STAGE_CARD_TITLES, STAGE_CARD_ORDER } from '../learn'
-export type { LearningCard } from '../learn'
+/** Stage titles/order re-exported for hosts that import the report barrel. */
+export { STAGE_CARD_TITLES, STAGE_CARD_ORDER } from '../stage-meta'
 export type { StageId }

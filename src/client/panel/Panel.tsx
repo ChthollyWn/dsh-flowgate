@@ -1,12 +1,12 @@
 /**
- * Right-sidebar panel (T2.6 / T3.6 / T5.1): header, learning-mode selector and
+ * Right-sidebar panel (T2.6 / T3.6 / T5.1): header and
  * the eight views. `PanelSurface` is the pure SSR-testable body; `Panel` is the
  * slot container that reads the session projection, wires host actions and
  * applies the command fallback.
  */
 import React from 'react'
 import type { TFn } from '../i18n'
-import type { FlowgateProjection, LearningMode, SlotPropRecord } from '../types'
+import type { FlowgateProjection, SlotPropRecord } from '../types'
 import type { HostBridge } from '../bridge'
 import { sessionIdOf } from '../bridge'
 import type { PanelModel } from '../model'
@@ -88,21 +88,14 @@ export interface PanelSurfaceProps {
   activeTab: PanelTab
   onTabChange: (tab: PanelTab) => void
   onAction: (action: ClientAction) => void
-  onLearningChange?: (mode: LearningMode) => void
   notice?: { text: string; tone: 'ok' | 'warn' | 'error' }
   onDismissNotice?: () => void
   /** v0.3: native runtime data for the agents / jobs tabs. */
   runtime?: PanelRuntimeData
 }
 
-const LEARNING_MODES: { id: LearningMode; labelKey: 'learning.detail' | 'learning.brief' | 'learning.off' }[] = [
-  { id: 'detail', labelKey: 'learning.detail' },
-  { id: 'brief', labelKey: 'learning.brief' },
-  { id: 'off', labelKey: 'learning.off' },
-]
-
 export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
-  const { model, t, activeTab, onTabChange, onAction, onLearningChange, notice, onDismissNotice, runtime } = props
+  const { model, t, activeTab, onTabChange, onAction, notice, onDismissNotice, runtime } = props
   return (
     <div
       data-flowgate="panel"
@@ -156,32 +149,6 @@ export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
             </span>
           ) : null}
           {model.off ? <span style={{ fontSize: 11, color: COLORS.fail }}>{t('tone.blocked')}</span> : null}
-          <span style={{ flex: 1 }} />
-          <span style={{ fontSize: 10, color: COLORS.faint }}>{t('card.learningMode')}</span>
-          <div role="group" aria-label={t('panel.learningModeAria')} style={{ display: 'inline-flex', gap: 3 }}>
-            {LEARNING_MODES.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                aria-pressed={model.learning === mode.id}
-                data-flowgate="learning-mode"
-                data-mode={mode.id}
-                onClick={() => onLearningChange?.(mode.id)}
-                style={{
-                  fontFamily: UI_FONT,
-                  fontSize: 10.5,
-                  padding: '1px 7px',
-                  borderRadius: 999,
-                  border: `1px solid ${model.learning === mode.id ? COLORS.info : COLORS.border}`,
-                  background: model.learning === mode.id ? COLORS.infoBg : 'transparent',
-                  color: model.learning === mode.id ? COLORS.text : COLORS.dim,
-                  cursor: 'pointer',
-                }}
-              >
-                {t(mode.labelKey)}
-              </button>
-            ))}
-          </div>
         </div>
       </header>
 
@@ -311,7 +278,6 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
   const runtimeRunningKey = readRunningKey(props, runtimeCatalog)
   const [remoteProjection, setRemoteProjection] = React.useState<FlowgateProjection | null>(null)
   const [activeTab, setActiveTab] = React.useState<PanelTab>('pipeline')
-  const [learningOverride, setLearningOverride] = React.useState<LearningMode | undefined>(undefined)
   const [notice, setNotice] = React.useState<{ text: string; tone: 'ok' | 'warn' | 'error' } | undefined>(undefined)
 
   const effective = projection ?? remoteProjection
@@ -336,10 +302,7 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
     }
   }, [projection, bridge])
 
-  const model = React.useMemo(() => {
-    const built = buildPanelModel(effective, t)
-    return learningOverride !== undefined ? { ...built, learning: learningOverride } : built
-  }, [effective, t, learningOverride])
+  const model = React.useMemo(() => buildPanelModel(effective, t), [effective, t])
 
   const sessionId = sessionIdOf(props)
   const handleAction = (action: ClientAction): void => {
@@ -367,11 +330,6 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
     })()
   }
 
-  const handleLearning = (mode: LearningMode): void => {
-    setLearningOverride(mode)
-    handleAction({ kind: 'learn', mode })
-  }
-
   return (
     <PanelSurface
       model={model}
@@ -379,7 +337,6 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
       activeTab={activeTab}
       onTabChange={setActiveTab}
       onAction={handleAction}
-      onLearningChange={handleLearning}
       {...(notice !== undefined ? { notice } : {})}
       onDismissNotice={() => setNotice(undefined)}
       runtime={{

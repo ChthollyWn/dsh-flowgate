@@ -6,10 +6,9 @@
  *     all painted with native label/border tokens (no coloured wash);
  *  2. `FlowMap`: vertical seven-stage timeline with neutral gate badges,
  *     artifact chips and the next-step callout;
- *  3. stage detail: live gate checks as small semantic dots + the learning card
- *     collapsed by default (`<details>`); learning mode `off` hides the long
- *     form entirely;
- *  4. roadmap progress (when the host sends it) + glossary in detailed mode.
+ *  3. stage detail: the stage's live gate checks as small semantic dots and
+ *     its next-step phrase (learning mode/cards were removed in v0.4);
+ *  4. roadmap progress (when the host sends it).
  *
  * The old imperative stage-chip row is replaced by `FlowMap`, but the original
  * `data-flowgate="stage-node"` / `data-stage-status` anchors are kept on the
@@ -19,9 +18,7 @@ import React from 'react'
 import type { ViewProps } from '../view-types'
 import { EmptyState, Section } from '../Common'
 import { NATIVE } from '../../theme'
-import { gateForStage, isHumanGate, nextStepForPanel, stageCardFor, stageIndex, stageLabel } from '../../model'
-import { StageCard } from '../../learn/StageCard'
-import { visibleParts } from '../../learn/cards'
+import { gateForStage, isHumanGate, nextStepForPanel, stageIndex, stageLabel } from '../../model'
 import { FlowMap } from '../../visual/FlowMap'
 import { AnimatedProgress } from '../../visual/Motion'
 import { GateGlyph, SparkIcon, StageGlyph } from '../../visual/icons'
@@ -48,13 +45,11 @@ export function PipelineView({ model, t }: ViewProps): React.ReactElement {
 
   const heroStage = currentStage ?? model.pipeline.find((node) => node.isCurrent)?.stage ?? model.pipeline[0]?.stage ?? 'S0'
   const stageNode = model.pipeline.find((node) => node.stage === selected) ?? model.pipeline[0]
-  const card = stageCardFor(stageNode?.stage ?? 'S0', t)
   const gate = gateForStage(stageNode?.stage)
   const liveChecks =
     gate !== null && model.gate.gate === gate && model.gate.items.length > 0
       ? model.gate.items.map((item) => ({ label: item.label, passed: item.passed }))
       : undefined
-  const parts = visibleParts(model.learning)
   const done = model.pipeline.filter((node) => node.status === 'done').length
   const next = nextStepForPanel(model, t)
 
@@ -137,7 +132,7 @@ export function PipelineView({ model, t }: ViewProps): React.ReactElement {
         <FlowMap model={model} t={t} selectedStage={selected} onSelectStage={setSelected} />
       </Section>
 
-      {/* 3. Stage detail: live checks + collapsed learning card ---------- */}
+      {/* 3. Stage detail: live checks + next step ------------------------- */}
       <Section title={t('viz.stageDetail', { idx: stageNode?.index ?? '', stage: stageNode?.label ?? '' })}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: NATIVE.labelTertiary }}>
           {gate !== null ? (
@@ -182,31 +177,6 @@ export function PipelineView({ model, t }: ViewProps): React.ReactElement {
             ))}
           </ul>
         ) : null}
-        {model.learning !== 'off' ? (
-          <details data-flowgate="stage-card-details" data-collapsed="true" className="fg-collapse" style={{ marginTop: 4 }}>
-            <summary
-              data-flowgate="stage-card-summary"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: NATIVE.labelTertiary, padding: '2px 0' }}
-            >
-              <SparkIcon size={11} color={NATIVE.labelTertiary} />
-              <span>{t('viz.learningCard')}</span>
-              <span style={{ fontSize: 11, color: NATIVE.labelCaption }}>{t('viz.learningCardHint')}</span>
-            </summary>
-            <StageCard
-              stage={stageNode?.stage ?? 'S0'}
-              stageLabel={stageNode?.label ?? ''}
-              index={stageNode?.index}
-              card={card}
-              mode={model.learning}
-              t={t}
-              checks={liveChecks}
-            />
-          </details>
-        ) : (
-          <div data-flowgate="learning-off" style={{ fontSize: 11, color: NATIVE.labelTertiary, padding: '2px 0' }}>
-            {t('learning.offHint')}
-          </div>
-        )}
         <div
           data-flowgate="stage-next-inline"
           data-kind={next.kind}
@@ -255,19 +225,6 @@ export function PipelineView({ model, t }: ViewProps): React.ReactElement {
         </Section>
       ) : null}
 
-      {/* 5. Glossary (detailed learning mode only) ------------------------ */}
-      {parts.upstream ? (
-        <Section title={t('glossary.title')}>
-          <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 11.5, lineHeight: 1.55, color: NATIVE.labelTertiary }}>
-            <li>{t('glossary.gate')}</li>
-            <li>{t('glossary.evidence')}</li>
-            <li>{t('glossary.fresh')}</li>
-            <li>{t('glossary.scope')}</li>
-            <li>{t('glossary.tdd')}</li>
-            <li>{t('glossary.handoff')}</li>
-          </ul>
-        </Section>
-      ) : null}
     </div>
   )
 }

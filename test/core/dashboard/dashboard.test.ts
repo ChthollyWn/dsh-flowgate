@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChangeStatus, PendingItem, RuntimeSnapshot, StageProgress } from '../../../src/core/types'
 import { renderDashboard } from '../../../src/core/dashboard'
-import { STAGE_LEARNING_CARDS, STAGE_CARD_TITLES } from '../../../src/core/dashboard'
+import { STAGE_CARD_TITLES } from '../../../src/core/dashboard'
 
 const STAGE_ORDER: StageProgress['stage'][] = ['roadmap', 'S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'archived']
 
@@ -284,9 +284,9 @@ function statusLineFragment(): string {
   return SNAPSHOT.statusLine
 }
 
-describe('看板与报告共用学习卡', () => {
-  it('dashboard 也导出 STAGE_LEARNING_CARDS 与阶段标题', () => {
-    expect(STAGE_LEARNING_CARDS.S4.what).toContain('任务')
+describe('看板与报告共用阶段标题', () => {
+  it('dashboard still exports the stage titles', () => {
+    expect(STAGE_CARD_TITLES.S4).toContain('执行')
     expect(STAGE_CARD_TITLES.S6).toBe('S6 交付')
   })
 })

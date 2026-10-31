@@ -58,11 +58,11 @@ describe('panel surface', () => {
     expect(html).toContain('data-flowgate="view-pipeline"')
   })
 
-  it('offers the three learning modes with aria-pressed state', () => {
+  it('no longer renders the removed learning-mode selector', () => {
     const html = renderSurface('pipeline')
-    expect((html.match(/data-flowgate="learning-mode"/g) ?? []).length).toBe(3)
-    expect(html).toContain('data-mode="detail"')
-    expect(html).toContain('aria-pressed="true"')
+    expect(html).not.toContain('data-flowgate="learning-mode"')
+    expect(html).not.toContain('学习模式')
+    expect(html).not.toContain('Learning mode')
   })
 
   it('shows the not-enabled banner and empty states for an uninitialized project', () => {
@@ -154,37 +154,21 @@ describe('pipeline view (graphical flow page, contract §3)', () => {
     // StageCard keeps tiny semantic ✓/✗ accents (learning content, T5 scope).
   })
 
-  it('collapses the learning card by default and hides it in learning mode off', () => {
-    const html = renderToStaticMarkup(<PipelineView model={model()} t={zh} onAction={noop} />)
-    expect(html).toContain('data-flowgate="stage-card-details"')
-    expect(html).toContain('data-collapsed="true"')
-    expect(html).not.toMatch(/<details[^>]*\bopen\b/)
-    expect(html).toContain('data-flowgate="stage-card-summary"')
-
-    const offProjection = { ...makeProjection(), learning: 'off' as const }
-    const offHtml = renderToStaticMarkup(
-      <PipelineView model={buildPanelModel(offProjection, zh)} t={zh} onAction={noop} />,
-    )
-    expect(offHtml).toContain('data-flowgate="learning-off"')
-    expect(offHtml).not.toContain('data-flowgate="stage-card"')
-  })
-
-  it('renders seven stage nodes with status and the full stage card', () => {
+  it('renders seven stage nodes with status, artifact chips and live checks', () => {
     const html = renderToStaticMarkup(<PipelineView model={model()} t={zh} onAction={noop} />)
     expect((html.match(/data-flowgate="stage-node"/g) ?? []).length).toBe(7)
     expect(html).toContain('data-stage="S3"')
     expect(html).toContain('data-stage-status="current"')
     expect(html).toContain('data-stage-status="done"')
-    // Six parts of the stage card (criteria are live gate checks while the gate is open).
-    for (const part of ['what', 'why', 'artifacts', 'upstream', 'antipatterns', 'good', 'bad']) {
-      expect(html).toContain(`data-flowgate="stage-card-${part}"`)
-    }
-    expect(
-      html.includes('data-flowgate="stage-card-criteria"') || html.includes('data-flowgate="stage-card-live-checks"'),
-    ).toBe(true)
+    expect(html).toContain('data-flowgate="map-artifacts"')
+    expect((html.match(/data-flowgate="artifact-chip"/g) ?? []).length).toBeGreaterThan(0)
+    expect(html).toContain('data-flowgate="live-checks"')
+    // The removed learning cards/glossary never render again.
+    expect(html).not.toContain('data-flowgate="stage-card')
+    expect(html).not.toContain('data-flowgate="glossary')
+    expect(html).not.toContain('Superpowers writing-plans')
     expect(html).toContain('S3')
     expect(html).toContain('设计拆解')
-    expect(html).toContain('Superpowers writing-plans')
   })
 
   it('shows roadmap progress when the host sends it', () => {

@@ -12,7 +12,6 @@ import {
 describe('config defaults', () => {
   it('DEFAULT_CONFIG 覆盖 03 §9.5 的关键字段', () => {
     expect(DEFAULT_CONFIG.levels).toEqual({ complexity: 'auto', risk: 'auto' })
-    expect(DEFAULT_CONFIG.learning).toBe('detail')
     expect(DEFAULT_CONFIG.dispatch).toBe('auto')
     expect(DEFAULT_CONFIG.commands).toEqual({})
     expect(DEFAULT_CONFIG.limits.task_max_files).toBe(5)
@@ -167,13 +166,21 @@ describe('config load & hash', () => {
 
   it('读取并合并真实配置文件，且不修改 DEFAULT_CONFIG', async () => {
     const fs = new MemoryFileSystem({
+      '.flowgate/config.yaml': 'triggers:\n  consecutive_failure_limit: 5\n',
+    })
+    const loaded = await loadConfig(fs, '')
+    expect(loaded.triggers.consecutive_failure_limit).toBe(5)
+    expect(DEFAULT_CONFIG.triggers.consecutive_failure_limit).toBe(3)
+  })
+
+  it('旧配置里遗留的 learning 键被忽略，不影响加载', async () => {
+    const fs = new MemoryFileSystem({
       '.flowgate/config.yaml': 'learning: brief\ntriggers:\n  consecutive_failure_limit: 5\n',
     })
     const loaded = await loadConfig(fs, '')
-    expect(loaded.learning).toBe('brief')
     expect(loaded.triggers.consecutive_failure_limit).toBe(5)
-    expect(DEFAULT_CONFIG.learning).toBe('detail')
-    expect(DEFAULT_CONFIG.triggers.consecutive_failure_limit).toBe(3)
+    // 类型上已没有 learning；运行时多余键既不参与校验也不阻塞加载。
+    expect((loaded as unknown as Record<string, unknown>).learning).toBe('brief')
   })
 
   it('configHash 确定且对配置变化敏感', () => {
