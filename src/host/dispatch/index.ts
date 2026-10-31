@@ -470,7 +470,11 @@ async function finalizeTask(
   if (parsed.filesChanged.length > 0) lines.push(`改动文件：${parsed.filesChanged.join('、')}`)
   if (parsed.evidenceIds.length > 0) lines.push(`证据：${parsed.evidenceIds.join('、')}`)
   if (parsed.remaining.length > 0) lines.push(`遗留：${parsed.remaining.join('；')}`)
-  if (parsed.questions.length > 0) lines.push(`需要负责人决定：${parsed.questions.join('；')}`)
+  if (parsed.questions.length > 0) {
+    lines.push(`需要负责人决定：${parsed.questions.join('；')}`)
+    // T4.6：未决问题交回主会话，并明确要求它用 ask_user_question 问负责人。
+    lines.push('下一步：主会话用 ask_user_question 把上面的问题问负责人，拿到答复后再继续派发/执行。')
+  }
   const failed = typeof summary === 'string' || result === null || result.stopReason !== 'completed'
   try {
     if (failed) {

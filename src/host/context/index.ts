@@ -265,7 +265,23 @@ async function onTurnStopping(runtime: HostRuntime, payload: { agent?: DshAgent;
   } catch {
     // 默认 2。
   }
-  if (state.count >= maxContinues) return
+  if (state.count >= maxContinues) {
+    // T3.3：同一轮第 3 次不再拦截，但必须记账（此前静默 return，审计里看不到）。
+    const suppressedState = state as typeof state & { suppressedRecorded?: boolean }
+    if (suppressedState.suppressedRecorded !== true) {
+      suppressedState.suppressedRecorded = true
+      void engine
+        .recordTurnContinued({
+          turn,
+          count: state.count,
+          ...(snapshot.activeTaskId ? { taskId: snapshot.activeTaskId } : {}),
+          reason: '超过每轮拦截上限，静默放行（已记账）',
+          suppressed: true,
+        })
+        .catch((error: unknown) => runtime.noteFeature('turn', `抑制记账失败：${toAgentError(error).error}`))
+    }
+    return
+  }
   const text = lastAssistantText(agent)
   if (!claimsCompletion(text)) return
   let receipts: EvidenceReceipt[] = []

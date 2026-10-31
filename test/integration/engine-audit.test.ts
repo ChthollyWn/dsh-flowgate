@@ -545,3 +545,39 @@ describe('集成检查点验证与降级标注（T4.9）', () => {
     expect(harness.engine.snapshot().batches.find((batch) => batch.id === 'B1')?.downgraded).toBe('worktree 不可用')
   })
 })
+
+describe('面板规则/注入预算（T5.1 / NFR-8）', () => {
+  it('getEffectiveRules 返回内置规则（即使 config.rules 为空）', async () => {
+    const harness = await createHarness()
+    await harness.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    const ids = harness.engine.getEffectiveRules().map((rule) => rule.id)
+    expect(ids).toContain('R-STAGE-SRC')
+    expect(ids).toContain('R-SCOPE')
+  })
+
+  it('注入文本按 token 预算截断（普通 ≤600 / 详细 ≤1000）', async () => {
+    const harness = await createHarness()
+    await harness.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    const engine = harness.engine as unknown as { notices: string[]; buildInjection: () => { text: string; approxTokens: number } }
+    engine.notices = ['超长通知 ' + 'x'.repeat(3000), '通知 2', '通知 3']
+    const detailBundle = engine.buildInjection()
+    expect(detailBundle.approxTokens).toBeLessThanOrEqual(1_000)
+    expect(detailBundle.text).toContain('…')
+    ;(harness.engine as unknown as { config: { learning: string } }).config.learning = 'brief'
+    const briefBundle = engine.buildInjection()
+    expect(briefBundle.approxTokens).toBeLessThanOrEqual(600)
+  })
+})
+
+describe('空仓库自动走项目级澄清（T2.7）', () => {
+  it('没有工程清单时 /flow new 自动立项 PROJECT 路线图而非大变更', async () => {
+    const harness = await createHarness()
+    const { engine, fs } = harness
+    await fs.remove('package.json')
+    const outcome = await engine.newChange({ title: '会员管理系统', summary: '做一个会员管理系统' })
+    expect(outcome.changeId).toBe('PROJECT')
+    expect(engine.currentChange()?.stage).toBe('roadmap')
+    expect(fs.listFiles()).toContain('.flowgate/project-clarify.md')
+    expect(fs.listFiles()).toContain('.flowgate/roadmap.md')
+  })
+})

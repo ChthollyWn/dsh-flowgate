@@ -164,7 +164,10 @@ function buildRisks(engine: EngineLike): RiskRow[] {
 }
 
 function buildRules(engine: EngineLike): RuleRow[] {
-  const rules = engine.getConfig().rules ?? []
+  // T5.1：面板规则统计/试跑要显示实际生效的规则（内置规则 + 已批准项目规则），
+  // 而不是只看 config.rules（/flow init 默认是空数组，导致真实项目里"试跑不可用"）。
+  const effective = typeof engine.getEffectiveRules === 'function' ? engine.getEffectiveRules() : engine.getConfig().rules ?? []
+  const rules = effective
   const counts = engine.snapshot().interceptCounts ?? {}
   return rules.map((rule) => ({
     id: rule.id,

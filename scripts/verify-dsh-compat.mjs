@@ -71,6 +71,23 @@ try {
   record('读取 package.json', false, error.message)
 }
 
+// ---- 离线结构检查（04 §T6.2 的 6 类逐项证据；真实运行仍需桌面/Web 宿主）----
+try {
+  const { readFileSync } = await import('node:fs')
+  const hostBundle = readFileSync(join(ROOT, 'lib', 'host.js'), 'utf8')
+  const clientBundle = readFileSync(join(ROOT, 'lib', 'client.js'), 'utf8')
+  record('host 入口产物存在且导出 apply/inject/name', /export\s*\{[^}]*apply/.test(hostBundle) && hostBundle.includes('inject'))
+  const toolNames = new Set(hostBundle.match(/['"]?(flow_[a-z_]+)['"]?/g) ?? [])
+  record('工具注册（flow_* 至少 15 个）', toolNames.size >= 15, `${toolNames.size} 个 flow_* 名称`)
+  record('守卫接线（tools/pre-execute 与 guard）', hostBundle.includes('tools/pre-execute') && /guard/i.test(hostBundle))
+  record('子 agent 能力接线（startActivation）', hostBundle.includes('startActivation'))
+  record('浏览器包产物存在且走 __ModuleLoader__ 协议', clientBundle.includes('__ModuleLoader__'))
+  const pkgManifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  record('面板/客户端声明存在（dsh.client）', Boolean(pkgManifest.dsh?.client?.platform === 'web'))
+} catch (error) {
+  record('离线结构检查（host/client 产物）', false, String(error?.message ?? error))
+}
+
 const failed = results.filter((result) => !result.ok)
 if (WRITE) {
   const dir = join(ROOT, 'docs', 'compat')

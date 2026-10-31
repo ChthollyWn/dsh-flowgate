@@ -450,6 +450,11 @@ export class FlowEngine {
     return this.config
   }
 
+  /** 面板/试跑用：当前变更实际生效的规则（内置 + 项目规则，按冻结契约）。 */
+  getEffectiveRules(): Rule[] {
+    return loadRules(this.configFor(this.current))
+  }
+
   /**
    * 当前变更生效的判定配置。
    *
@@ -870,9 +875,34 @@ export class FlowEngine {
     await this.fs.writeFile(layout.config, stringifyYaml(plain))
   }
 
+  /** 空仓库判定（T2.7）：没有常见工程清单时先走项目级澄清 + 路线图。 */
+  private async looksLikeEmptyRepository(): Promise<boolean> {
+    for (const marker of [
+      'package.json',
+      'pyproject.toml',
+      'setup.py',
+      'requirements.txt',
+      'pom.xml',
+      'build.gradle',
+      'build.gradle.kts',
+      'go.mod',
+      'Cargo.toml',
+      'composer.json',
+      'Gemfile',
+    ]) {
+      if (await this.fs.exists(marker)) return false
+    }
+    return true
+  }
+
   async newChange(input: NewChangeInput): Promise<NewChangeOutcome> {
     if (!this.state?.initialized) throw new FlowGateError('FlowGate 未初始化', '先运行 /flow init')
     if (this.state.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow doctor 诊断，/flow repair 恢复')
+    // T2.7：空仓库里 `/flow new <需求>` 不应直接立一个大变更——先走项目级澄清 + 路线图。
+    if (!input.project && !input.fromRoadmap && !this.roadmapApprovedByOwner() && (await this.looksLikeEmptyRepository())) {
+      this.pushNotice('检测到空仓库：先进入项目级澄清与路线图（PROJECT 变更），批准 GR 后再从路线图立项。')
+      return this.newChange({ ...input, project: true })
+    }
     if (!this.state.changes.every((change) => change.lifecycle !== 'active') && !input.project) {
       const active = this.state.changes.filter((change) => change.lifecycle === 'active')
       if (active.length > 0 && this.current && this.current.lifecycle === 'active') {
@@ -4436,7 +4466,14 @@ export class FlowEngine {
   }
 
   /** Record a turn-continuation steer (T3.3 / M-4) for metrics and audit. */
-  async recordTurnContinued(input: { turn?: number; count?: number; taskId?: string; reason?: string } = {}): Promise<void> {
+  async recordTurnContinued(input: {
+    turn?: number
+    count?: number
+    taskId?: string
+    reason?: string
+    /** true = 超过每轮上限后的静默放行（仍记账，避免审计空白）。 */
+    suppressed?: boolean
+  } = {}): Promise<void> {
     const change = this.current
     await this.appendLedger('turn.continued', {
       changeId: change?.id,
@@ -4444,6 +4481,7 @@ export class FlowEngine {
       turn: input.turn,
       count: input.count,
       reason: input.reason,
+      suppressed: input.suppressed === true,
     })
   }
 
@@ -4867,7 +4905,13 @@ export class FlowEngine {
     const notices = this.notices.slice(-3)
     if (notices.length > 0) lines.push(...notices)
     if (this.config.learning === 'detail') lines.push('学习模式：每进入一个新阶段，先用 1–2 句话说明这一步在做什么、为什么。')
-    const text = lines.join('\n')
+    // NFR-8：注入预算（普通 ≤600 token，详细学习模式 ≤1000）——超了截断尾部，绝不无限增长。
+    const budget = this.config.learning === 'detail' ? 1_000 : 600
+    let text = lines.join('\n')
+    if (approx(text) > budget) {
+      const maxChars = budget * 2 - 2
+      text = `${text.slice(0, Math.max(0, maxChars))}…`
+    }
     return { text, approxTokens: approx(text) }
   }
 

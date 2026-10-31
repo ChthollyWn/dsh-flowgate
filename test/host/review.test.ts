@@ -667,3 +667,17 @@ describe('调查并发上限（T4.10）', () => {
     expect(results.every((result) => result.ok)).toBe(true)
   })
 })
+
+describe('审查模型配置（T4.3 死配置修复）', () => {
+  it('review.model 传入子 agent 的 agentOptions', async () => {
+    const engine = makeEngine()
+    const subagents = subagentsReturning(reviewResult(passStructured()), 'child-model')
+    const h = await start({ engine, services: { subagents, sessionQuery: sessionQueryWith({ 'child-model': ['src/a.ts'] }) } })
+    withDiff(h)
+    engine.getConfig().review.model = 'cheap-reviewer'
+    const outcome = await runTaskReview(h.runtime, 'T1')
+    expect(outcome.ok).toBe(true)
+    const spec = (subagents as unknown as { state: { started: { request: { agentOptions?: { model?: string } } }[] } }).state.started[0]
+    expect(spec?.request.agentOptions?.model).toBe('cheap-reviewer')
+  })
+})

@@ -102,7 +102,16 @@ export async function collectDiff(runtime: HostRuntime, taskId?: string): Promis
 }
 
 /** 审查提示词。 */
-export function buildReviewPrompt(input: {
+export function reviewerAgentOptions(runtime: HostRuntime): { model?: string } {
+  try {
+    const model = runtime.requireEngine().getConfig().review?.model
+    return typeof model === 'string' && model.trim() !== '' ? { model: model.trim() } : {}
+  } catch {
+    return {}
+  }
+}
+
+function buildReviewPrompt(input: {
   taskId?: string
   changeTitle: string
   taskTitle?: string
@@ -252,6 +261,7 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
           prompt,
           outputSchema: REVIEW_OUTPUT_SCHEMA,
           signal: controller.signal,
+          agentOptions: reviewerAgentOptions(runtime),
           ...(runtime.root() ? { cwd: runtime.root() as string } : {}),
         },
         signal: controller.signal,
@@ -508,6 +518,7 @@ async function runOneFinalPhase(input: {
           prompt,
           outputSchema: REVIEW_OUTPUT_SCHEMA,
           signal: controller.signal,
+          agentOptions: reviewerAgentOptions(runtime),
           ...(runtime.root() ? { cwd: runtime.root() as string } : {}),
         },
         signal: controller.signal,
@@ -806,6 +817,7 @@ export async function runInvestigation(
         agentPreset: FLOWGATE_PRESETS.reviewer,
         prompt,
         signal: controller.signal,
+        agentOptions: reviewerAgentOptions(runtime),
         ...(runtime.root() ? { cwd: runtime.root() as string } : {}),
       },
       signal: controller.signal,

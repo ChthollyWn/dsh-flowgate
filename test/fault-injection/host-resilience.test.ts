@@ -375,3 +375,23 @@ describe('故障注入：会话租约文件损坏（sessions.json 被截断）',
     expect(afterRepair.message).not.toContain('R-LOCKED')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 故障注入：浏览器包缺失（T6.2 第四类）
+// ---------------------------------------------------------------------------
+describe('浏览器包缺失', () => {
+  it('host 入口不依赖 client 产物：浏览器 bundle 缺失时宿主插件的加载路径不变', async () => {
+    const { readFileSync } = await import('node:fs')
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+      main?: string
+      exports?: Record<string, string>
+    }
+    // host 入口是 lib/host.js；client 产物只通过 exports["./client"] 暴露，
+    // 由 DSH Web shell 加载——浏览器包缺失不会让 host 插件 import 失败。
+    expect(pkg.main).toBe('./lib/host.js')
+    expect(pkg.exports?.['./client']).toBe('./lib/client.js')
+    const hostEntry = readFileSync('src/host/index.ts', 'utf8')
+    expect(hostEntry).not.toContain('./client')
+    expect(hostEntry).not.toContain('../client')
+  })
+})
