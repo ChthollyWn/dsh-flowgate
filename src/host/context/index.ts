@@ -4,7 +4,9 @@
  * 注入：优先 `ctx.systemPrompt.section`（追加式、工具面不变 → KV cache 友好）；
  * 宿主缺 systemPrompt 时退回 `agent/pre-step` 的 enter 分支追加 user 消息。
  * 文本来自 `engine.buildInjection()`（≤600 token，包含阶段/允许动作/活动任务/
- * 待处理项/下一步）。
+ * 待处理项/下一步）；末尾再追加固定的「卡片优先交互契约」（§0 规则 2）：
+ * 负责人拍板走客户端授权卡片、澄清/选择走原生 ask_user_question 提问卡。
+ * 未初始化时 buildInjection 为空文本，契约也不追加，避免污染普通项目提示词。
  *
  * 拦住宣布完成：`agent/turn-stopping` 无返回值（rc.5 事实），必须调
  * `agent.steer(userMessage)` 重新打开 inbox。触发条件（03 §6.6）：
@@ -21,6 +23,26 @@ import { sha256Hex } from '../../core/util/hash.js'
 const INJECTION_ORDER = 9000
 /** 注入文本未变化时，最多隔几步重复注入一次（避免每步都追加 600 token）。 */
 const REPEAT_INTERVAL_STEPS = 4
+/**
+ * 卡片优先交互契约（ui-interaction-redesign §0 规则 2 / §5.2）。
+ *
+ * 只随已初始化项目的 runtime 注入一起追加，避免污染未启用 FlowGate 的普通项目提示词。
+ * 约束两件事：① 需要负责人拍板的步骤走客户端授权卡片，不要让负责人手输 `/flow`；
+ * ② agent 需要澄清/选择时必须调用原生 `ask_user_question`（带 options），
+ * 由宿主渲染成提问卡片，而不是在普通文本里提问。
+ */
+export const INTERACTION_CONTRACT =
+  '交互契约：需要负责人拍板的步骤由客户端授权卡片完成，不要要求负责人输入 /flow 命令；需要澄清/选择时必须调用 ask_user_question（带 options），不要在普通文本里提问。'
+
+/**
+ * 把卡片优先交互契约追加到 runtime 注入文本末尾（仅当注入文本非空时）。
+ * section 与 pre-step 两条注入路径共用，保证 debug/兜底模式下契约不丢。
+ */
+export function withInteractionContract(text: string): string {
+  if (text.trim() === '') return ''
+  return `${text}\n${INTERACTION_CONTRACT}`
+}
+
 /** 完成类表述（小写比较）。 */
 const COMPLETION_PATTERN =
   /(完成|已完成|搞定了|全部通过|都通过了|测试通过|修复(了|完成)|已修复|实现了|done|fixed|finished|passing|all tests pass|tests pass|implemented|resolved)/i
@@ -160,7 +182,7 @@ export function installContext(runtime: HostRuntime): void {
           const engine = runtime.engine()
           if (!engine || !engine.isInitialized()) return ''
           if (!shouldInject(runtime, context?.agent)) return ''
-          return engine.buildInjection().text
+          return withInteractionContract(engine.buildInjection().text)
         } catch (error) {
           runtime.noteFeature('context', `系统提示注入失败：${toAgentError(error).error}`)
           return ''
@@ -182,7 +204,7 @@ export function installContext(runtime: HostRuntime): void {
     if (!engine || !engine.isInitialized() || !runtime.isEnabled()) return result
     if (!shouldInject(runtime, payload.agent)) return result
     try {
-      const text = engine.buildInjection().text
+      const text = withInteractionContract(engine.buildInjection().text)
       if (text.trim() === '') return result
       const agentId = payload.agent ? String(payload.agent.id) : 'unknown'
       const state = injectionStates.get(agentId) ?? { steps: 0 }

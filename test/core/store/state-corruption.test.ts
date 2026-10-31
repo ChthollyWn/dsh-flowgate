@@ -211,12 +211,14 @@ describe('engine.load — 损坏 status.json 进入锁定模式（03 §14）', (
     await expect(reloaded.newChange({ title: '趁锁立项', summary: '应被拒绝' })).rejects.toThrow('锁定模式')
   })
 
-  it('快照 nextStep 指向诊断/修复而不是「立项」', async () => {
+  it('快照 nextStep 指向授权卡片修复而不是「立项」', async () => {
     const h = makeHarness()
     await setupCorruptedChange(h)
     const reloaded = reload(h, 'session-corruption-next-step')
     await reloaded.load()
-    expect(reloaded.snapshot().nextStep).toContain('/flow repair')
+    expect(reloaded.snapshot().nextStep).toContain('授权卡片')
+    expect(reloaded.snapshot().nextStep).toContain('修复')
+    expect(reloaded.snapshot().nextStep).not.toContain('/flow')
   })
 
   it('多个损坏文件时锁定原因给出数量与代表路径（路径不刷屏）', async () => {

@@ -85,22 +85,31 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 Then initialize the project to be governed and start the first change:
 
 ```text
-/flow init                       # scan the repo, draft .flowgate/project.md (owner confirms)
-/flow new add sharing to the todo list   # create a change, enter S1 requirements
-...                              # agent reads code, asks structured questions, writes clarify/proposal/spec
-/flow approve G1                 # you sign off the requirements
-...                              # S2 context -> S3 design/risk/task cards; agent calls flow_submit
-/flow approve G3                 # approve design, risks, and task list in one go
-...                              # S4 execution (per execution graph); plugin verifies and reviews each task
-/flow report                     # after S5, generate the HTML delivery report
-/flow approve G6                 # delivery confirmation; plugin archives specs
+Day to day you only need **natural language and clicks** — every decision that needs you appears as a card; no commands to memorize:
+
+```text
+[the input dock shows an "Enable FlowGate" authorization card] → click it to initialize (scan repo, draft project.md)
+"add sharing to the todo list"                → the agent creates the change and enters S1 clarification
+                                             → the agent asks you through native question cards (click options / type a line)
+[G1 authorization card]                      → click "Approve & continue" to sign off the requirements
+                                             → S2 context → S3 design / risks / task cards
+[G3 authorization card]                      → one click approves the design, risks, and task list
+                                             → S4 execution (per the execution graph); the plugin verifies and reviews each task
+[G6 authorization card]                      → click "Approve & deliver"; the plugin writes the report and archives specs
 ```
 
-> Projects that never ran `/flow init` are **not** gated; the status bar only suggests `/flow init` (FR-15.1).
+- **Graphical flow:** the dock above the composer is a seven-stage animated rail (breathing current stage, solid completed links, dashed upcoming links); the right sidebar has a full graphical flow page (progress ring + vertical timeline + "next step" arrow).
+- **Click-to-authorize:** approve / reject / clear breaker / confirm external changes are all executed by the card button (`ctx.remote.commands.execute`) — **nothing is written into the composer**, and you never press Enter to confirm a command.
+- **Question cards:** questions use the native `ask_user_question` tool, rendered as DSH question cards (options + custom text); the agent is told not to ask in plain prose.
+- **In-conversation visualization:** every `flow_*` tool call renders as a mini seven-stage rail, showing where that call sits in the pipeline.
+
+> Projects that never ran `/flow init` are **not** gated; the dock shows a one-click enable card (FR-15.1).
+>
+> Power users can still use the `/flow` commands listed below; they are equivalent to the cards. Normal flows never need a typed command.
 >
 > Host requirements: `engines.dsh >=0.2.1-rc.5 <0.3.0`; `@deepseek-ai/*` packages are peerDependencies only, so host core packages never enter the bundle.
 
-## Commands (human-only; never sent to the model)
+## Commands (human-only; never sent to the model; for power users/troubleshooting — normal flows use cards)
 
 | Command | Purpose |
 |---|---|
@@ -126,7 +135,7 @@ Then initialize the project to be governed and start the first change:
 | `/flow metrics [--csv]` | Show metrics (M-1..M-18) |
 | `/flow report` | Generate and open the HTML delivery report |
 | `/flow doctor` / `/flow repair` | Self-check / rebuild state from the ledger and artifacts |
-| `/flow off` / `/flow on` | Turn gating off / on for this session (recorded; status bar turns red when off) |
+| `/flow off` / `/flow on` | Turn gating off / on for this session (recorded; the dock turns red and offers a recovery card when off) |
 
 ## Model tools (no approve, override, or lower-level tools)
 
@@ -178,7 +187,7 @@ For the full rule definitions, command tokenization, and false-positive regressi
 ```text
 src/core/          pure logic: state machine, rules, artifact checks, ledger, evidence, metrics, reports (no @deepseek-ai/* imports)
 src/host/          DSH host adapter: guards, commands, tools, presets, projection, review and dispatch
-src/client/        React panel and input status bar (bundled for window.__ModuleLoader__)
+src/client/        graphical input dock (seven-stage rail + authorization cards), right sidebar panel, conversation tool views (bundled for window.__ModuleLoader__)
 skills/            15 built-in skills (SKILL.md + learn.md learning cards)
 examples/          three benchmark repos: ts-todo-api, py-csv-cli, java-renewal
 docs/              requirements, technical design, execution plan, implementation contracts, method sources, DSH references
@@ -214,20 +223,30 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | `.flowgate/`, change ledger, hash-chained + HMAC audit ledger, cross-session leases, locked mode and `/flow repair` | ✅ done (tamper located by line; strict rebuild round-trip) |
 | Verification receipts, input-hash freshness, risk engine, rework invalidation, verifiable citations | ✅ done |
 | Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 wired + dedicated unit tests (slot refill, checkpoint repair/retry, `run: main` routing, line-level read coverage, same-diff dedupe, three final conclusions, checkpoint task verification + full tests); a real headless host verified worktree creation, executor subagents, task gates and review, and **sequential dispatch settled all the way to S5** (3 batches done, G4 passed); parallel batches really start but the one-shot run exits before the integration-checkpoint merge, so an interactive/long-lived host is still needed |
-| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ walked through in a real DSH web host: status bar, 8 views, in-session preset switch, panel-button Remote fallback, low-complexity confirmation card (25 screenshots; `13-`–`26-` added this round); execution-graph nodes are clickable with a task-detail panel (scope / verify groups / covers); rule trial is a client-side approximation (respects off/locked/effective rule decisions/exceptions) explicitly labelled "host decision is authoritative", and custom project rules it cannot evaluate locally are listed; intercept-view misjudgement feedback verified at component level |
+| Graphical flow visualization (input dock / panel flow page / in-conversation tool rail) | ✅ 2026-11-01 v0.2: the input dock became a seven-stage animated rail + next-step chip + graphical state card (demo/locked/off/idle/active/awaiting/pending/blocked); the sidebar gained a `panel-rail` and a graphical flow page (hero progress ring, vertical timeline, human/auto gate badges, "you are here", next-step callout, collapsed learning card); each `flow_*` tool call renders a mini seven-stage rail; motion only animates transform/opacity/stroke and respects `prefers-reduced-motion`; **cards and panels use DSH's native `--dsw-*` design tokens, the authorization card mirrors the native plan-approval card (warn strip + white card + primary/outline buttons), and widths strictly match `--dsh-chat-content-width` (real-host measurement: dock/card 844.8px, ±0px)**; real-host screenshots in [docs/screenshots](docs/screenshots/README.md) |
+| Card-first interaction (click-to-authorize + native question cards) | ✅ 2026-11-01 v0.2: human gates / pending items (SC·RK·PC·RL·TM·CF·BL) / non-agent change confirmation / enable / repair are all clickable authorization cards; a click executes the equivalent command through `ctx.remote.commands.execute` (`sessions.binding().session.command` as fallback) and **the composer is never filled**; the FlowGate preset composes the native `ask_user_question` tool for question cards; user-facing `/flow` hints in host/core were rewritten as card guidance (only help / usage errors / doctor diagnostics remain); real-host click flow in [docs/screenshots](docs/screenshots/README.md) |
+| 8-view right sidebar panel, stage cards, learning modes | ✅ walked through in a real DSH web host: 8 views, in-session preset switch, panel approvals, pending decisions, exception list/revoke, non-agent change confirmation; context occupancy (`contextPct`) wired to the DSH token-meter projection (shown ≥60%); stale GREEN detected by input hash; execution-graph nodes are clickable with a task-detail panel; rule trial is a client-side approximation explicitly labelled "host decision is authoritative"; intercept-view misjudgement feedback verified at component level |
 | HTML delivery report, cross-session dashboard | ✅ done (single-file, offline, samples in test/fixtures) |
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
 | With / without plugin evaluation report | ✅ **18/18 runs done + manual scoring of all 4 subjective metrics 18/18** (9 tasks × A/B, real model + headless); this round also adds the from-scratch and dispatch (inline vs auto) comparisons ([§6.5–§6.7](docs/evaluation.md)). Honest conclusion: B did not win on requirement coverage (most B runs were blocked by environment/human gates); its real gains are zero false completions and auditable process — small sample, not generalizable |
 
 **Verification boundary** (locally measured in the sixth round, 2026-10-31): `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (**112 files / 1522 tests**; fifth round 107/1459, i.e. +5 files / +63 tests); `pnpm coverage` passes thresholds (80/80/80/70; total 86.40 / 76.25 / 86.92 / 89.46, core/host details in implementation-status §2); the npm package is about **39 files / ~1.03MB** (exact value in implementation-status §2 and the release notes); a real DSH 0.2.1-rc.5 process composes and imports this plugin via `--dump-config`, and `verify:compat` reruns **13/13** in an isolated profile (sixth round used a fresh build in `/tmp/fg-audit-env`, dump-config 1314 lines; `--dump-config-schema` also fails on rc.5 for the host's own preset rows, so it is not used as evidence — see [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); startup overhead **+16.2ms** and uninstall cleanliness pass; real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs plus subjective scoring, with counterexamples/blockers and sandbox caveats in [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md). **The independent sixth-round re-verification drove fixes for 7 P1 wiring gaps** (parallel worktree execution root, dispatch double-settlement, S5 regression verdict, compaction/cross-session re-injection, clarify placeholders, low-complexity task limit; see implementation-status §3.12), and local gates are all green; **the sixth-round commits are pushed** (`cea85dd` + `25fffac`), and CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) is **success** (lint → test → coverage → build → verify:package → verify:client). Fifth-round acceptance and sixth-round re-verification records are in [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md).
 
+**v0.2 (2026-11-01, graphical flow + card authorization) local gates:** `pnpm lint` / `npx vitest run` (**116 files / 1642 tests**) / `pnpm coverage` (86.39 / 76.24 / 86.93 / 89.47, thresholds pass) / `pnpm build` (host 1.21MB / client 346.6KB) / `verify:package` (39 files / 1065.3KB) / `verify:client` all green; real DSH web host click-to-authorize and graphical flow walkthrough in [docs/screenshots](docs/screenshots/README.md) and [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md).
+
 ## Screenshots
 
-Taken in a real DSH `0.2.1-rc.5` web host (isolated `flowgate-dev` profile); how to reproduce: [docs/screenshots/](docs/screenshots/README.md).
+Taken in a real DSH `0.2.1-rc.5` web host (isolated `flowgate-dev` profile). v0.2, 2026-11-01 — capture method and the zero-model-request disclosure are in [docs/screenshots/](docs/screenshots/README.md).
 
-| Input-dock status bar | Right-sidebar panel |
+| Graphical input dock (seven-stage rail + next step; same width as the native content column) | Authorization card (click-to-authorize, composer empty; native plan-card style) |
 |---|---|
-| ![status bar](docs/screenshots/01-statusbar-home.png) | ![panel](docs/screenshots/03-panel-overview.png) |
+| ![graphical dock](docs/screenshots/30-flow-dock-active.png) | ![authorization card](docs/screenshots/31-flow-auth-card.png) |
+
+| After approving (G3 passed, stage S4) | Graphical flow page in the sidebar |
+|---|---|
+| ![approved](docs/screenshots/32-flow-approved.png) | ![flow page](docs/screenshots/33-panel-flow-map.png) |
+
+Historical screenshots of the pre-v0.2 text status line and the 8-view panel remain under [docs/screenshots](docs/screenshots/README.md) (01–26).
 
 ## FAQ
 
@@ -238,7 +257,7 @@ No dead ends: `/flow allow-once`, "add exception" in the panel, `/flow off` (rec
 There is a feedback loop: mark an interception as a false positive in the panel → allow once / add an exception (with a reason, revocable) / export evidence. The target is a false-positive rate (M-5) ≤ 5%; rules above that are downgraded to warnings and go into the retro (only after ≥ 20 intercepts; the downgrade allows that one action, logs `rule.hinted`, and enters the retro).
 
 **What happens if I don't initialize?**
-Nothing is gated. Gating is enabled only when `.flowgate/config.yaml` exists; the status bar merely suggests `/flow init`.
+Nothing is gated. Gating is enabled only when `.flowgate/config.yaml` exists; the dock shows an "Enable FlowGate" authorization card that initializes it in one click (equivalent to `/flow init`).
 
 **My stack isn't auto-detected.**
 Detection covers Maven, Gradle, npm / pnpm / yarn, pytest, Go, and Cargo. If detection fails, write commands in `.flowgate/project.md` or override them under `commands:` in `config.yaml`. If the project genuinely has no tests, set `test: none`; the baseline falls back to build / type-check / lint and a "missing automated tests" risk is recorded automatically.

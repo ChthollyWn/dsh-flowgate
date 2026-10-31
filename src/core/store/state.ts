@@ -143,14 +143,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * 单个 status.json 不可解析/结构非法时抛出的错误。
  *
- * 消息保持既有格式（`变更状态文件损坏：<路径>（<原因>）。运行 /flow repair 重建。`），
+ * 消息保持既有格式（`变更状态文件损坏：<路径>（<原因>）。等待负责人在授权卡片上修复（从账本重建）。`），
  * 同时把 `path` / `reason` 暴露给 {@link listChangesDetailed}，供 engine 汇总成锁定原因。
  */
 class StateFileCorruptionError extends Error {
   readonly path: string
   readonly reason: string
 
-  constructor(path: string, reason: string, hint = '运行 /flow doctor 诊断，/flow repair 重建。') {
+  constructor(path: string, reason: string, hint = '等待负责人在授权卡片上修复（诊断后从账本重建）。') {
     super(`变更状态文件损坏：${path}（${reason}）。${hint}`)
     this.name = 'StateFileCorruptionError'
     this.path = path
@@ -175,7 +175,7 @@ export async function readChangeStatus(
     throw new StateFileCorruptionError(path, `非法 JSON（${detail}）`)
   }
   if (!isRecord(parsed) || typeof parsed.id !== 'string') {
-    throw new StateFileCorruptionError(path, '缺少字符串字段 id', '运行 /flow repair 重建。')
+    throw new StateFileCorruptionError(path, '缺少字符串字段 id', '等待负责人在授权卡片上修复（从账本重建）。')
   }
   return parsed as unknown as ChangeStatus
 }
@@ -337,7 +337,7 @@ export class SessionLeaseCorruptionError extends Error {
   readonly reason: string
 
   constructor(path: string, reason: string) {
-    super(`会话租约文件损坏：${path}（${reason}）。运行 /flow repair 重建。`)
+    super(`会话租约文件损坏：${path}（${reason}）。等待负责人在授权卡片上修复（从账本重建）。`)
     this.name = 'SessionLeaseCorruptionError'
     this.path = path
     this.reason = reason

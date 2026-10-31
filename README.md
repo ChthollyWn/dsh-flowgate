@@ -82,25 +82,31 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 "$DSH" --profile flowgate-dev
 ```
 
-在要被管控的项目里初始化，然后开始第一个变更：
+在要被管控的项目里，**日常只需要自然语言和点击**——所有需要你拍板的步骤都会以卡片出现，不用记命令：
 
 ```text
-/flow init                       # 扫描仓库，生成 .flowgate/project.md 草稿（负责人确认）
-/flow new 给待办列表加分享功能      # 立项，进入 S1 需求澄清
-...                              # agent 读代码、结构化提问、产出 clarify/proposal/spec
-/flow approve G1                 # 你定稿需求
-...                              # S2 上下文 → S3 设计/风险/任务卡，agent 调用 flow_submit
-/flow approve G3                 # 你一次批准设计、风险和任务清单
-...                              # S4 执行（按执行图）；每个任务由插件验证并审查
-/flow report                     # S5 通过后生成 HTML 交付报告
-/flow approve G6                 # 交付确认；插件归档规格
+[输入区 dock 出现「启用 FlowGate」授权卡] → 点一下完成初始化（扫描仓库、生成 project.md 草稿）
+「给待办列表加分享功能」                   → agent 立项，进入 S1 需求澄清
+                                          → agent 用原生提问卡片逐题澄清（点选项/填一句即可）
+[G1 授权卡]                               → 点「批准并推进」定稿需求
+                                          → S2 上下文 → S3 设计/风险/任务卡
+[G3 授权卡]                               → 点「确认并推进」一次批准设计、风险与任务清单
+                                          → S4 执行（按执行图）；任务由插件验证并审查
+[G6 授权卡]                               → 点「批准并交付」；插件生成报告并归档规格
 ```
 
-> 没执行过 `/flow init` 的项目**不会**被拦截，状态条只提示可以用 `/flow init` 启用（FR-15.1）。
+- **图形化流程**：输入区上方的 dock 是一个七阶段动画轨道（当前阶段脉冲、已完成实线、未完成虚线），右侧栏还有整页的图形流程页（进度环 + 竖向时间线 + 「下一步」箭头）。
+- **点击即授权**：批准/退回/解除熔断/确认外部改动等动作都由授权卡按钮直接执行（`ctx.remote.commands.execute`），**不会把命令写进输入框**，你不需要按回车确认任何命令。
+- **提问卡片**：需要你回答的问题由 agent 调用原生 `ask_user_question`，渲染成 DSH 的提问卡片（选项 + 自定义文本），不会在普通文本里向你提问。
+- **会话内可视化**：每次 `flow_*` 工具调用在聊天里显示为迷你七阶段轨道，能直接看到这次调用处在流程的哪一段。
+
+> 没执行过 `/flow init` 的项目**不会**被拦截，dock 用授权卡提示一键启用（FR-15.1）。
+>
+> 进阶用户仍可使用 `/flow` 命令（见下表）；命令与卡片等价，正常流程不需要输入命令。
 >
 > 插件对 DSH 的要求：`engines.dsh >=0.2.1-rc.5 <0.3.0`；`@deepseek-ai/*` 只作 peerDependencies，不把宿主核心包打进依赖树。
 
-## 命令表（人工专属，不会进入模型消息）
+## 命令表（人工专属，不会进入模型消息；高级用户/排障用，日常用授权卡片即可）
 
 | 命令 | 作用 |
 |---|---|
@@ -127,7 +133,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 | `/flow metrics [--csv]` | 查看指标（M-1～M-18） |
 | `/flow report` | 生成并打开 HTML 交付报告 |
 | `/flow doctor` / `/flow repair` | 自检 / 从账本和产物重建状态 |
-| `/flow off` / `/flow on` | 本会话关闭 / 恢复门禁（记账；关闭时状态条变红） |
+| `/flow off` / `/flow on` | 本会话关闭 / 恢复门禁（记账；关闭时 dock 变红并提供恢复卡） |
 
 ## 模型工具（没有批准、放行、降低等级类工具）
 
@@ -179,7 +185,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 ```text
 src/core/          纯逻辑：状态机、规则、产物检查、账本、证据、指标、报告（不引用 @deepseek-ai/*）
 src/host/          DSH 宿主适配：守卫、命令、工具、preset、投影、审查与派发
-src/client/        React 面板与输入框状态条（window.__ModuleLoader__ 打包）
+src/client/        图形化输入区 dock（七阶段轨道+授权卡）、右侧栏面板、会话工具视图（window.__ModuleLoader__ 打包）
 skills/            15 个内置技能（SKILL.md + learn.md 教学卡）
 examples/          三个基准仓库：ts-todo-api、py-csv-cli、java-renewal
 docs/             需求、技术方案、执行方案、实现契约、方法来源追踪表、DSH 参考
@@ -215,20 +221,30 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | `.flowgate/` 目录、台账、账本哈希链 + HMAC、跨会话接续与租约、锁定模式与 `/flow repair` | ✅ 已实现（篡改可定位第 N 行；重建可严格往返） |
 | 证据回执、输入哈希判定过期、风险引擎、返工失效范围、可核验源码引用 | ✅ 已实现 |
 | 审查子 agent、按执行图派发、worktree 并行、集成检查点 | 🟡 host 侧已接线 + 专项单测（并行槽位补位、检查点修复任务与重试、`run: main` 路由、行级读取覆盖、同 diff 去重、终审三份结论、检查点任务验证+全量测试）；真实 headless 宿主已验证 worktree 创建、执行者子 agent、任务门/审查，**顺序派发完整结算到 S5**（3 批次全部 done、G4 通过）；并行批次真实启动但一次性运行在集成检查点合并前退出，待交互式/常驻宿主复验 |
-| 输入框状态条、右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：状态条、8 视图、会话内切换工程模式 preset、面板按钮 Remote 兜底、低复杂度确认卡、待处理项（scope/risk/plan/rule/conflict/blocker）面板审批、例外列表/撤销、非 agent 改动确认（25 张截图）；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；GREEN 过期按输入哈希显示；执行图节点可点击并展开任务详情（scope/验证组/covers）；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），并标注精确判定以宿主实际拦截为准，本地无法判定的项目自定义规则会列出；拦截视图误判反馈仍为组件级验证 |
+| 图形化流程可视化（输入区 dock / 面板流程页 / 会话内工具轨道） | ✅ 2026-11-01 v0.2：输入区 dock 改为七阶段动画轨道 + 下一步 chip + 图形化状态卡（demo/locked/off/idle/active/awaiting/pending/blocked 8 态）；右侧栏新增 `panel-rail` 与图形流程页（hero 进度环、纵向时间线、人工/自动门徽标、「你在这里」、下一步 callout、默认折叠的学习卡）；会话内每个 `flow_*` 工具调用渲染迷你七阶段轨道；动画只动 transform/opacity/stroke，遵守 `prefers-reduced-motion`；**卡片与面板统一使用 DSH 原生 `--dsw-*` 设计 token，授权卡与原生 plan 审批卡同构（warn strip + 白卡 + 黑白主按钮/outline），宽度严格对齐 `--dsh-chat-content-width`（真实宿主实测 dock/授权卡 844.8px，±0px）**；真实宿主截图见 [docs/screenshots](docs/screenshots/README.md) |
+| 卡片优先交互（点击即授权 + 原生提问卡片） | ✅ 2026-11-01 v0.2：人工门 / 待处理项（SC·RK·PC·RL·TM·CF·BL）/ 非 agent 改动确认 / 启用 / 修复全部为可点击授权卡；点击经 `ctx.remote.commands.execute` 直接执行等价命令（`sessions.binding().session.command` 兜底），**输入框不再被填入命令**；FlowGate preset 组合原生 `ask_user_question`，澄清与选择走提问卡片；host/core 中面向用户的 `/flow` 提示已清理为卡片导向（仅保留 help / 用法错误 / doctor 诊断）；真实宿主点击流程见 [docs/screenshots](docs/screenshots/README.md) |
+| 右侧栏 8 视图面板、阶段卡、学习模式 | ✅ 已在真实 DSH Web 宿主走查：8 视图、会话内切换工程模式 preset、面板审批、待处理项处理、例外列表/撤销、非 agent 改动确认；上下文占用（contextPct）已接 DSH token-meter 投影（≥60% 才提示）；GREEN 过期按输入哈希显示；执行图节点可点击并展开任务详情（scope/验证组/covers）；规则试跑为客户端本地近似（尊重 off/locked/实际规则 decision/生效例外），并标注精确判定以宿主实际拦截为准；拦截视图误判反馈仍为组件级验证 |
 | HTML 交付报告、跨会话看板 | ✅ 已实现（单文件离线可用，样例见 test/fixtures） |
 | 指标 M-1～M-18 自动计算与导出、规则沉淀、只读分析任务 | ✅ 已实现（取不到的数据标"未知"，不用 0 代替） |
 | 有 / 无插件对照评测报告 | ✅ **18/18 run 完成 + 4 项主观指标人工评分 18/18**（9 任务 × A/B，真实模型 + headless）；本轮另补跑从 0 开发演练与派发（inline vs auto）对照（[§6.5–§6.7](docs/evaluation.md)）。诚实结论：B 在需求覆盖上没有胜出（多数 B run 被环境/人工门阻塞），真实收益是 0 虚假完成与可审计过程；样本小、不可外推 |
 
 **验证边界**（2026-10-31 第六轮本地实测）：`pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` 全绿（**112 文件 / 1522 用例**；第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70；合计 86.40 / 76.25 / 86.92 / 89.46，core/host 明细见 implementation-status §2）；npm 包约 **39 文件 / 约 1.03MB**（精确值见 implementation-status §2 与发布说明）；真实 DSH 0.2.1-rc.5 下 `--dump-config` 已加载本插件，隔离 profile 复跑 `verify:compat` **13/13**（第六轮在 `/tmp/fg-audit-env` 用新构建复跑，dump-config 1314 行；`--dump-config-schema` 在 rc.5 上会因宿主自带 preset 行同样报错，不作为判据，见 [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)）；启动增量 **+16.2ms**、卸载干净度通过；真实 web 宿主界面与真模型 S0→S6 已走查；有/无插件对照评测已完成 18/18 run 并补齐主观评分，结论含反例/阻塞原因与 sandbox 限制，见 [docs/evaluation.md](docs/evaluation.md) 与 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)。**第六轮由独立复验驱动修复了 7 项 P1 接线缺口**（并行 worktree 执行根、派发双结算、S5 回归判定、上下文压缩/跨会话重注入、澄清占位符、低复杂度任务数上限；见 implementation-status §3.12），本地门禁全绿；**第六轮提交已推送**（`cea85dd` + `25fffac`），CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint → test → coverage → build → verify:package → verify:client）。第五轮验收与第六轮复验记录见 [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
+**v0.2（2026-11-01，图形化流程 + 卡片授权）本地门禁：** `pnpm lint` / `npx vitest run`（**116 文件 / 1642 用例**）/ `pnpm coverage`（86.39 / 76.24 / 86.93 / 89.47，阈值通过）/ `pnpm build`（host 1.21MB / client 346.6KB）/ `verify:package`（39 文件 / 1065.3KB）/ `verify:client` 全绿；真实 DSH Web 宿主的点击即授权与图形化流程页走查见 [docs/screenshots](docs/screenshots/README.md) 与 [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md)。
+
 ## 界面
 
-在真实 DSH `0.2.1-rc.5` Web 宿主（隔离 `flowgate-dev` profile）里的实拍，采集方式见 [docs/screenshots/](docs/screenshots/README.md)：
+在真实 DSH `0.2.1-rc.5` Web 宿主（隔离 `flowgate-dev` profile）里的实拍（2026-11-01 v0.2，采集方式与零模型声明见 [docs/screenshots/](docs/screenshots/README.md)）：
 
-| 输入框状态条 | 右侧栏面板 |
+| 输入区图形化 dock（七阶段轨道 + 下一步；与原生内容列同宽） | 授权卡（点击即授权，输入框为空；原生 plan 卡风格） |
 |---|---|
-| ![状态条](docs/screenshots/01-statusbar-home.png) | ![面板](docs/screenshots/03-panel-overview.png) |
+| ![图形化 dock](docs/screenshots/30-flow-dock-active.png) | ![授权卡](docs/screenshots/31-flow-auth-card.png) |
+
+| 点击批准后（G3 通过、进入 S4） | 右侧栏图形流程页（进度环 / 时间线 / 门状态） |
+|---|---|
+| ![批准后](docs/screenshots/32-flow-approved.png) | ![图形流程页](docs/screenshots/33-panel-flow-map.png) |
+
+旧版文字状态条与 8 视图面板的历史截图保留在 [docs/screenshots](docs/screenshots/README.md)（01–26 号）。
 
 ## FAQ
 
@@ -239,7 +255,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 误判反馈闭环：在面板标"误判" → 放行本次 / 加入例外（写理由，可撤销）/ 导出证据。指标 M-5 误判率目标 ≤ 5%，超过 5% 的规则自动降为提示并进入复盘（累计拦截 ≥ 20 次才生效，避免新规则被一两次误判放倒；降级只放行本次并写账本 `rule.hinted`）。
 
 **不初始化会怎样？**
-没有任何拦截。只有项目里存在 `.flowgate/config.yaml` 才启用；状态条只提示可以用 `/flow init`。
+没有任何拦截。只有项目里存在 `.flowgate/config.yaml` 才启用；dock 会显示一张「启用 FlowGate」授权卡，点一下即可初始化（等价于 `/flow init`）。
 
 **要是我用的技术栈探测不到？**
 探测支持 Maven、Gradle、npm / pnpm / yarn、pytest、Go、Cargo；探测不到时在 `.flowgate/project.md` 里手动写命令，或在 `config.yaml` 的 `commands:` 覆盖。项目确实没有测试时写 `test: none`，基线改用构建 / 类型检查 / lint，并自动登记"缺少自动化测试"风险。

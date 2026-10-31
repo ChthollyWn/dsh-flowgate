@@ -139,7 +139,7 @@ export const STAGE_CARDS: Record<Locale, Record<PipelineStageId, ClientStageCard
       upstream: 'gstack /ship、/document-release；OpenSpec archive；Superpowers finishing-a-development-branch',
       antiPatterns: ['没看报告就批准 G6', '把未确认的非 agent 改动一起提交', '归档前不合并增量规格'],
       good: '打开报告核对 8 个部分后批准 G6，增量规格合并进主规格，变更目录归档。',
-      bad: '直接 /flow approve G6，报告没生成，风险项还有一条打开着。',
+      bad: '直接一键批准 G6，报告没生成，风险项还有一条打开着。',
     },
   },
   en: {
@@ -250,7 +250,7 @@ export const STAGE_CARDS: Record<Locale, Record<PipelineStageId, ClientStageCard
       upstream: 'gstack /ship and /document-release; OpenSpec archive; Superpowers finishing-a-development-branch',
       antiPatterns: ['Approve G6 without reading the report', 'Commit unconfirmed non-agent edits', 'Archive without merging the incremental spec'],
       good: 'Review all eight report sections, approve G6, merge the incremental spec into the main spec and archive the change directory.',
-      bad: 'Run /flow approve G6 with no report generated and one risk item still open.',
+      bad: 'Approve G6 in one click with no report generated and one risk item still open.',
     },
   },
 }

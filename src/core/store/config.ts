@@ -370,12 +370,12 @@ export function configHash(config: FlowgateConfig): string {
   return sha256(stableJson(config))
 }
 
-/** 把完整配置渲染为 YAML 文本（`/flow init` 写默认配置、诊断时展示用）。 */
+/** 把完整配置渲染为 YAML 文本（初始化写默认配置、诊断时展示用）。 */
 export function renderConfigYaml(config: FlowgateConfig): string {
   const body = stringifyYaml(config, { lineWidth: 0 })
   const header = [
     '# FlowGate 项目配置',
-    '# 由 /flow init 生成，可手工修改；修改只影响新变更（进行中的变更按创建时冻结的契约，见 docs/03 §9.8）。',
+    '# 由 FlowGate 初始化生成，可手工修改；修改只影响新变更（进行中的变更按创建时冻结的契约，见 docs/03 §9.8）。',
     '# 字段说明见 docs/03-技术方案.md §9.5。commands.test 写 none 表示项目确实没有自动化测试。',
     '',
   ].join('\n')

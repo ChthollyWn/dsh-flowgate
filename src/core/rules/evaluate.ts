@@ -60,7 +60,7 @@ const LOCK_RULE: Rule = {
   when: {},
   decision: 'deny',
   why: '锁定模式：状态损坏或账本被篡改时，门禁内的写入全部拒绝，避免在不可信状态上继续操作。',
-  unlock: '让负责人运行 /flow doctor 诊断、/flow repair 从账本和产物重建状态，锁定解除后重试。',
+  unlock: '等待负责人在授权卡片上修复（诊断后从账本和产物重建状态），锁定解除后重试。',
   source: 'FR-11.2 锁定模式',
   builtin: false,
 }

@@ -58,7 +58,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 | `/flow` 命令族 | ✅ `/flow status`、`/flow init`、`/flow doctor`、`/flow new` 在真实会话中执行，输出渲染在会话里 |
 | `/flow init` 产物 | ✅ 在示例仓库生成 `.flowgate/`（config.yaml、project.md、state、目录内 `.gitignore` 等） |
 | 模型工具 | ✅ 修复后 **14/14 注册成功**（doctor 可见工具清单） |
-| 输入框状态条 | ✅ dock 渲染 `◆ FlowGate …`，≤120 字符、颜色分级、点击可打开面板 |
+| 输入框状态条（历史，v0.2 已被图形化 dock 取代） | ✅ dock 渲染 `◆ FlowGate …`，≤120 字符、颜色分级、点击可打开面板 |
 | 右侧栏面板 | ✅ 两段式注册生效；8 视图标签、学习模式、七阶段流程、阶段卡与术语表渲染正常；有变更时显示变更编号/标题/等级 |
 | 会话投影 | ⚠️ 隔离 home 里 `appendPluginRecord` 不可解析 → 走 host 内存快照兜底（正常安装时走插件记录） |
 | 模型调用 | ⚠️ 隔离 demo home 的凭据是引用式，`DeepSeek Messages transport failed`；工具调用/守卫拦截需要桌面会话或有效 API key 才能端到端演示 |
@@ -327,6 +327,25 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 > 第六轮门禁数字见 §2：**112 files / 1522 tests** 全绿、lint/typecheck 通过、coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）、compat 13/13、startup +16.2ms、uninstall 通过；CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功。
 > 第六轮仍开放项（四分：环境受限 / 可离线补做 / 需负责人决策 / 后续 P2）见 §4；逐项证据见 [acceptance-gap-audit §7](acceptance-gap-audit-2026-10-31.md)。
 
+## 3.13 v0.2：图形化流程 + 卡片化授权（2026-11-01）
+
+负责人两条需求：① vibecoding 全流程可视化——尽量用 UI/UX 元素、少用文字、先一眼看懂流程/当前/下一步，多用动态动画；② 需要人确认的步骤用授权卡片，不再让用户手输命令——会话框只输入自然语言，所有问题用提问卡片/授权卡片点击交互。设计契约 [ui-interaction-redesign.md](ui-interaction-redesign.md)。
+
+| 方向 | 交付 | 证据 |
+|---|---|---|
+| 图形化流程（输入区） | 新 dock：七阶段动画轨道 + 下一步 chip + 8 态图形卡（demo/locked/off/idle/active/awaiting/pending/blocked）；授权卡（gate/pending/external/enable/repair/reconnect）+ 内联退回理由 | `src/client/dock/StatusBar.tsx`、`src/client/visual/*`、`src/client/styles.ts`、`test/client/status-bar.test.tsx`、`visual.test.tsx` |
+| 图形化流程（面板） | `panel-rail` 全局可见；Pipeline 图形流程页（hero 进度环、纵向 FlowMap、人工/自动门徽标、「你在这里」、下一步 callout、折叠学习卡）；ExecutionGraph 运行动效 | `src/client/panel/Panel.tsx`、`views/Pipeline.tsx`、`ExecutionGraph.tsx`、`test/client/panel.test.tsx` |
+| 原生 plan 风格与宽度（负责人反馈迭代） | 授权卡照抄官方 `PlanReviewPanel`：frame `padding:6px calc(var(--dsh-composer-side-clearance)+16px) 10px`、card `max-width:var(--dsh-chat-content-width)` + `--dsw-specific-input-major`/`radius-xl`/`elevation-panel`；warn strip + 白卡 + 黑白 primary/outline 按钮；rail/next chip/面板全部切换 `--dsw-*` 中性 token，去大色块/彩虹色；新增 `data-flowgate="flow-dock-inner"` | `src/client/styles.ts`、`dock/StatusBar.tsx`、`visual/*`、`panel/views/{Pipeline,Gates}.tsx`、`theme.ts`、`visual.test.tsx`；真实宿主实测见下 |
+| 会话内工具可视化 | 16 个 `flow_*` 工具注册 `tool.call.toolview`，聊天中渲染迷你七阶段轨道 + 状态行；防御式降级 | `src/client/toolviews/**`、`test/client/toolviews.test.tsx` |
+| 点击即授权（不再填命令） | `bridge.runCommand` 双层（`remote.commands.execute` → `sessions.binding().session.command`）；`performAction` 顺序 remote→executeCommand→旧降级；面板/dock 按钮全部直连 | `src/client/actions.ts`、`bridge.ts`、`test/client/actions.test.ts`、`bridge.test.ts`、`gates-auth.test.tsx` |
+| 提问卡片 | `preset-flowgate` 组合 `@deepseek-ai/dsh-tool-ask-user`；systemPrompt 追加「交互契约」（仅已初始化项目）：拍板走授权卡、提问必须 `ask_user_question`（带 options） | `cordis.patch.yml`、`src/host/context/index.ts`、`test/host/preset-composition.test.ts`、`context.test.ts` |
+| 文案去命令化 | host/core 三批清理（task-3/7/8）：nextStep / pushNotice / 工具结果 / 门禁 hint / 规则 unlock / 派发 / init / 会话接续 → 「等待负责人在授权卡片上确认/处理」；仅保留 help/用法错误/doctor 诊断 | `src/core/engine.ts`、`src/host/**`、相关 11 个测试文件 |
+| i18n | zh/en 447 keys parity；新增 dock/viz/pipeline 等 key，清理 trial/learning 中 `/flow` 提示 | `src/client/locale/*.json`、`test/client/i18n.test.ts` |
+
+**验证**：`pnpm lint`（lint-layers + tsc）绿；`npx vitest run` **116 files / 1642 tests** 全绿；`pnpm coverage` 通过 thresholds（合计 **86.39 / 76.24 / 86.93 / 89.47**）；`pnpm build`（host 1.21MB / client 346.6KB）；`verify:package` **39 文件 / 1065.3KB**；`verify:client`（18 插槽）通过。真实 DSH 0.2.1-rc.5 Web 宿主（隔离 `DSH_HOME`、零模型请求）E2E **35/35 断言**：awaiting 授权卡点击「确认并推进」→ 真实 `POST /api/commands/execute` → G3 passed、阶段 S4、写盘一致、**composer 全程为空**、0 pageerror/console.error；面板 flow-map/you-are-here/next-step-callout；8 tab 无 `/flow` 手输文案；reduced-motion 0 动画。截图 [screenshots 30–33](../screenshots/README.md)。原生风格/宽度改造后真实宿主复验：`--dsh-chat-content-width=844.8px`，`[data-flowgate="flow-dock-inner"]` 与授权卡均为 **844.8px（±0px，等于原生 PlanReviewPanel 的 max-width）**，dock 外框 = composer hero 外框 = 908.8px（±0px）；active 12/12、awaiting 43/44（唯一未过为旧断言 `data-tone="attention"`，原生 strip 语义改为 `warn`，`data-kind/data-gate/data-action` 不变）；0 pageerror / 0 console.error / 0 模型请求；30–33 截图已按新风格重拍。
+
+**已知限制（如实）**：原生提问卡与 toolview 需模型真跑一轮才能出现，零模型 E2E 只验证组合面（preset 含工具、web 组合含 `ui-user-questions`）；awaiting 状态沿用既有离线构造口径（web-walkthrough §2.4），点击→执行→推进是真实链路。另有观察项：活跃态 dock 的 next chip 已从 host 的 `flow_submit(...)` 模型文案替换为阶段自然语言（`humanNextStep`），D2 复验刷新截图 30。
+
 ## 4. 剩余项（第六轮复验后，四分）
 
 > 第六轮独立复验确认第五轮"功能缺口全部闭环"结论不成立：7 项 P1 接线缺口已在 §3.12 修复；
@@ -360,7 +379,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 - **C0 骨架首任务 TDD 死锁**（greenfield 真机发现，产品决策）：C0 只允许写工程骨架、`package.json` 在 RED 前不可写，导致 C0→C1 卡住。需决定 C0 豁免 TDD，或给出标准 allow-once SOP。
 - `run: auto` 按 size 路由未实现：当前 `auto` 与 `subagent` 行为一致（均由派发宿主起子 agent），需要主会话做的小任务要显式写 `run: main`；skills 已如实说明。
-- **Remote 非降级路径：v0.1 决策不做**（Typert Remote 需构建期生成器，面板按钮走"把 `/flow …` 填进输入框"兜底），后续版本再评估。
+- ~~**Remote 非降级路径：v0.1 决策不做**~~（2026-11-01 更新：卡片/按钮已改为点击即执行——客户端经**官方命令 remote** `ctx.remote.commands.execute(sessionId, line, [])`（与 slash-command UI 同源，`sessions.binding().session.command` 兜底）直接执行等价 `/flow` 命令，不再填输入框；FlowGate 自有 Typert Remote 仍不做，后续按需评估）。
 - 上下文阈值 / M-17 数据源、dispatch 摘要落账、worktree 归因、T4.4 PR/CHANGELOG 生成仍为引导（P2 后续）。
 - `appendPluginRecord` 属实验性 API，DSH 升级可能失效：每个 RC 跑 `verify:compat`；不可用时只保留内存投影。
 
@@ -368,7 +387,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 
 - 纯逻辑：`src/core/{state,rules,shell,artifacts,plan,citations,detect,roadmap,ledger,store,evidence,risk,revision,metrics,report,dashboard,learn,tamper}/`（含 `rules/misfire.ts` 的 M-5 降级、`tamper/` 的篡改检测纯函数），编排入口 `src/core/engine.ts`。
 - 宿主适配：`src/host/`（入口 `index.ts`；`adapters/`、`guard/`、`commands/`、`tools/`、`projection/`（含 `context.ts` 上下文占用/token 用量数据源）、`review/`（读取覆盖行级核对、终审三份结论）、`dispatch/`（含 `pending.ts`、`redispatch.ts`、并行槽位补位、检查点验证）、`verify/run.ts`（S5 运行证据）、`open.ts`（report/board 打开）等）。
-- 浏览器半侧：`src/client/`（`dock/StatusBar.tsx`、`panel/` 8 视图、`learn/`、`actions.ts`、`i18n/`）。
+- 浏览器半侧：`src/client/`（`dock/StatusBar.tsx` 图形化 dock、`visual/` 轨道/流程图/图标、`styles.ts`、`toolviews/` 会话工具轨道、`panel/` 8 视图、`learn/`、`actions.ts`、`bridge.ts`、`i18n/`）。
 - 内容：`skills/`（15 技能 × SKILL+learn）、`examples/`（3 个基准仓库 + 空仓库）、`docs/`（00–04 原始方案 + 本目录实现文档 + spike-report + compat + screenshots + evaluation-data）。
 - 脚本：`scripts/{lint-layers,run-evaluation,collate-evaluation,verify-package,verify-client-bundle,verify-dsh-compat,verify-uninstall,measure-startup}.mjs`；CI：`.github/workflows/ci.yml`。
 

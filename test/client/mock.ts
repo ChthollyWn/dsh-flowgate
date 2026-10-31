@@ -111,7 +111,7 @@ export function makeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): RuntimeS
       uncoveredWritable: 1,
       checkedAt: '2026-10-30T09:00:00Z',
     },
-    nextStep: '/flow approve G3',
+    nextStep: '等待负责人在授权卡上批准 G3',
     statusLine: '',
     updatedAt: '2026-10-30T09:20:00Z',
     ...overrides,
@@ -351,4 +351,98 @@ export function makeEmptyProjection(): FlowgateProjection {
   }
 }
 
-export const LONG_NEXT_STEP = '/flow approve G6 --with-report ' + 'x'.repeat(160)
+export const LONG_NEXT_STEP =
+  '继续实现 T2，然后跑集成检查点、补齐新鲜证据并进入 S4 阶段 ' + 'x'.repeat(160)
+
+// ---------------------------------------------------------------------------
+// Dock-state fixtures (contract §2): one projection per input-dock state.
+// ---------------------------------------------------------------------------
+
+/** Active change without any human decision waiting (`data-state="active"`). */
+export function makeActiveProjection(): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      pending: [],
+      violations: [],
+      interceptCounts: {},
+      nextStep: '继续实现 T2，然后补证据并进入 S4',
+    },
+    panel: { gate: undefined },
+  })
+}
+
+/** No active change: the dock asks for one sentence instead of showing a card. */
+export function makeIdleProjection(): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      changeId: undefined,
+      title: undefined,
+      kind: undefined,
+      complexity: undefined,
+      risk: undefined,
+      stage: undefined,
+      lifecycle: undefined,
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      pipeline: [],
+      tasks: {},
+      batches: [],
+      pending: [],
+      violations: [],
+      interceptCounts: {},
+      nextStep: '',
+    },
+    panel: {},
+  })
+}
+
+/** One open risk takeover and one scope change (`data-state="pending"`). */
+export function makePendingProjection(): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      pending: makeSnapshot().pending,
+      violations: [],
+      interceptCounts: { 'R-STAGE-SRC': 1 },
+      nextStep: '',
+    },
+    panel: { gate: undefined },
+  })
+}
+
+/** Locked mode (`data-state="locked"` → repair card). */
+export function makeLockedProjection(): FlowgateProjection {
+  return makeProjection({ snapshot: { locked: true, awaitingGate: undefined, pending: [] }, panel: {} })
+}
+
+/** Gates switched off (`data-state="off"` → reconnect card). */
+export function makeOffProjection(): FlowgateProjection {
+  return makeProjection({ snapshot: { off: true, awaitingGate: undefined, pending: [] }, panel: {} })
+}
+
+/** Boundary violations + an unconfirmed non-agent change (`data-state="blocked"`). */
+export function makeBlockedProjection(): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      pending: [],
+      violations: [
+        {
+          id: 'V-1',
+          changeId: 'C-003',
+          path: 'src/A.java',
+          kind: 'outside-scope',
+          detectedAt: '2026-10-30T09:00:00Z',
+          source: 'post',
+        },
+      ],
+      externalChanges: [{ path: 'src/manual.ts', at: '2026-11-01T09:00:00+08:00', origin: 'external' }],
+      nextStep: '',
+    },
+    panel: { gate: undefined },
+  })
+}

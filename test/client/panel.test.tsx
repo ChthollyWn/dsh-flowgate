@@ -41,6 +41,10 @@ describe('panel surface', () => {
     expect(html).toContain('会员续费')
     expect(html).toContain('中 · 普通风险')
     expect(html).toContain('③ 设计拆解')
+    // The compact seven-stage rail is visible from every tab.
+    expect(html).toContain('data-flowgate="panel-rail"')
+    expect(html).toContain('data-flowgate="flow-rail"')
+    expect((html.match(/data-flowgate="rail-node"/g) ?? []).length).toBe(7)
     for (const tab of PANEL_TABS) {
       expect(html).toContain(`data-tab="${tab.id}"`)
     }
@@ -116,7 +120,48 @@ describe('ledger view (T3.7)', () => {
   })
 })
 
-describe('pipeline view (T2.6 / T3.6 / T5.2)', () => {
+describe('pipeline view (graphical flow page, contract §3)', () => {
+  it('renders the hero, vertical flow map, you-are-here marker and next callout', () => {
+    const html = renderToStaticMarkup(<PipelineView model={model()} t={zh} onAction={noop} />)
+    expect(html).toContain('data-flowgate="pipeline-hero"')
+    expect(html).toContain('data-stage="S3"')
+    expect(html).toContain('data-flowgate="progress-ring"')
+    expect(html).toContain('data-value="3"')
+    expect(html).toContain('data-max="7"')
+    expect(html).toContain('data-flowgate="flow-map"')
+    expect((html.match(/data-flowgate="flow-map-node"/g) ?? []).length).toBe(7)
+    expect((html.match(/data-you-are-here="true"/g) ?? []).length).toBe(1)
+    expect(html).toContain('你在这里')
+    // Human gates get a shield glyph, automatic gates a spark glyph.
+    expect(html).toContain('data-gate-kind="human"')
+    expect(html).toContain('data-gate-kind="auto"')
+    expect(html).toContain('data-flowgate="next-step-callout"')
+    expect(html).toContain('data-kind="human"')
+    expect(html).toContain('data-flowgate="live-checks"')
+    // No user-visible command anywhere on the flow page.
+    expect(html).not.toContain('/flow')
+    // Native tokens only: no hard-coded palette on the flow page.
+    expect(html).toContain('var(--dsw-alias-label-primary')
+    expect(html).toContain('var(--dsw-alias-border-l2')
+    expect(html).not.toContain('#2563eb')
+    // StageCard keeps tiny semantic ✓/✗ accents (learning content, T5 scope).
+  })
+
+  it('collapses the learning card by default and hides it in learning mode off', () => {
+    const html = renderToStaticMarkup(<PipelineView model={model()} t={zh} onAction={noop} />)
+    expect(html).toContain('data-flowgate="stage-card-details"')
+    expect(html).toContain('data-collapsed="true"')
+    expect(html).not.toMatch(/<details[^>]*\bopen\b/)
+    expect(html).toContain('data-flowgate="stage-card-summary"')
+
+    const offProjection = { ...makeProjection(), learning: 'off' as const }
+    const offHtml = renderToStaticMarkup(
+      <PipelineView model={buildPanelModel(offProjection, zh)} t={zh} onAction={noop} />,
+    )
+    expect(offHtml).toContain('data-flowgate="learning-off"')
+    expect(offHtml).not.toContain('data-flowgate="stage-card"')
+  })
+
   it('renders seven stage nodes with status and the full stage card', () => {
     const html = renderToStaticMarkup(<PipelineView model={model()} t={zh} onAction={noop} />)
     expect((html.match(/data-flowgate="stage-node"/g) ?? []).length).toBe(7)
@@ -159,6 +204,12 @@ describe('gates view (T2.6 / T2.8)', () => {
     expect(html).toContain('提示：新增任务或并入 T3')
     expect(html).toContain('data-action="gate-approve"')
     expect(html).toContain('data-action="gate-reject"')
+    // Native plan-card shell + native buttons (no blue/red filled buttons).
+    expect(html).toContain('class="fg-plan-card"')
+    expect(html).toContain('data-flowgate="auth-shimmer"')
+    expect(html).toContain('fg-native-btn-primary')
+    expect(html).toContain('fg-native-btn-outline')
+    expect(html).not.toContain('#2563eb')
     expect(html).toContain('门 G3')
     expect(html).toContain('data-flowgate="execution-graph"')
   })

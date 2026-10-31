@@ -179,7 +179,7 @@ const README = `# .flowgate/ 目录说明
 ## 文件
 
 - \`config.yaml\` —— 规则、流程等级、触发器、命令、并行与会话设置。修改只影响新变更。
-- \`project.md\` —— 项目级上下文包（/flow init 生成，负责人维护）。
+- \`project.md\` —— 项目级上下文包（启用 FlowGate 时生成，负责人维护）。
 - \`project-clarify.md\` —— 项目级澄清记录（仅从 0 开发时）。
 - \`roadmap.md\` —— 项目路线图（仅从 0 开发时；GR 后冻结）。
 - \`specs/<capability>/spec.md\` —— 主规格：系统现在"应该怎样"。
@@ -202,7 +202,7 @@ const README = `# .flowgate/ 目录说明
 
 ## 恢复
 
-\`/flow doctor\` 检查账本完整性；\`/flow repair\` 从账本和产物重建 status.json 与台账。
+需要诊断时可运行 \`/flow doctor\` 检查账本完整性；面板/输入区授权卡片上的「修复」会从账本和产物重建 status.json 与台账。
 账本损坏或被篡改时进入锁定模式，拒绝门禁内的写入。
 `
 

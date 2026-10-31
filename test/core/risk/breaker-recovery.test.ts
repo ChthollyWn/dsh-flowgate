@@ -222,7 +222,9 @@ describe('T-FAILURE-LIMIT — 只读动作放行（真实事故回归）', () =>
       const decision = await h.engine.evaluateAction(action, MAIN)
       expect(decision.effect, `${action.kind}:${action.tool}`).toBe('human')
       expect(decision.rule?.ruleId).toBe('T-FAILURE-LIMIT')
-      expect(decision.message).toContain('/flow unblock')
+      // 卡片优先（§0 规则 2）：守卫决策消息不再要求负责人手输 /flow 命令。
+      expect(decision.message).toContain('授权卡片')
+      expect(decision.message).not.toContain('/flow unblock')
     }
 
     // 被拦动作不再新建 BL：仍只有 1 个 open blocker。
@@ -256,7 +258,9 @@ describe('T-FAILURE-LIMIT — 待处理项幂等', () => {
     const blockers = openBlockers(change)
     expect(blockers).toHaveLength(1)
     expect(blockers[0]).toMatchObject({ id: 'BL-1', kind: 'blocker', data: { taskId: 'T1' } })
-    expect(blockers[0]!.detail).toContain('/flow unblock BL-1')
+    // 卡片优先（§0 规则 2）：待处理项 detail 不再要求负责人手输 /flow 命令。
+    expect(blockers[0]!.detail).toContain('授权卡片')
+    expect(blockers[0]!.detail).not.toContain('/flow unblock')
 
     // 继续失败（直接调 engine.runVerify，绕过 guard）：failureCount 增长但 BL 不新增。
     await failVerify(h, 2)

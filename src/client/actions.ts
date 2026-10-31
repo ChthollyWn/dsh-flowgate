@@ -3,12 +3,16 @@
  * (H10 degradation path; docs/impl/host-client-contract.md §2).
  *
  * Rules:
- *  - Human actions are only reachable through buttons or `/flow` commands; no
- *    agent tool maps to them.
+ *  - Human actions are only reachable through cards, buttons or `/flow`
+ *    commands; no agent tool maps to them.
  *  - Preferred path: `remote.flowgate.action(payload)`.
- *  - Fallback: write the equivalent `/flow ...` command into the composer
- *    draft (and focus it), so the owner can press Enter. If the composer is
- *    unavailable, copy the command instead.
+ *  - Click-to-execute path: the equivalent `/flow ...` line is submitted
+ *    through the host command remote (`ctx.remote.commands.execute`). The
+ *    click itself is the human act — the owner never types or re-confirms a
+ *    command in the composer.
+ *  - Last resort (host without the command remote): write the command into
+ *    the composer draft, then copy it. Those degradations keep the plugin
+ *    usable on older hosts; they are never the intended flow.
  *
  * Everything here is pure enough for SSR tests: no DOM is touched unless an
  * event handler actually runs.
@@ -28,6 +32,16 @@ export type ClientAction =
   | { kind: 'add-exception'; ruleId: string; pathPattern?: string; reason: string }
   | { kind: 'revoke-exception'; id: string; reason?: string }
   | { kind: 'raise-complexity'; reason?: string }
+  /**
+   * Dock authorization cards for the three non-project states
+   * (docs/impl/ui-interaction-redesign.md §2): demo → `/flow init`,
+   * locked → `/flow repair`, off → `/flow on`. They have no host remote
+   * payload, so `performAction` submits them through the click-to-execute
+   * port (never through the composer).
+   */
+  | { kind: 'enable' }
+  | { kind: 'repair' }
+  | { kind: 'gates-on' }
   | { kind: 'resume'; changeId: string; takeover?: boolean }
   | { kind: 'pause'; changeId?: string }
   | { kind: 'report' }
@@ -43,7 +57,13 @@ export interface ActionPorts {
   t: TFn
   /** Host remote face, when the gateway provides it. */
   remote?: FlowgateRemote
-  /** Write the command into the composer draft; return true when it worked. */
+  /**
+   * Submit the equivalent command through the host command remote; the click
+   * is the authorization, so no composer round-trip happens. Returns true when
+   * the host accepted the command.
+   */
+  executeCommand?: (command: string) => boolean | Promise<boolean>
+  /** Legacy: write the command into the composer draft; true when it worked. */
   fillCommand?: (command: string) => boolean | Promise<boolean>
   /** Clipboard fallback; return true when copied. */
   copyText?: (text: string) => boolean | Promise<boolean>
@@ -53,7 +73,11 @@ export interface ActionPorts {
 
 export interface ActionOutcome {
   ok: boolean
-  /** True when the command fallback was used instead of the remote. */
+  /**
+   * True when the legacy command fallback (composer draft / clipboard) was
+   * used instead of the remote or the click-to-execute path. A successful
+   * click-to-execute reports `fallback=false`.
+   */
   fallback: boolean
   message: string
   command?: string
@@ -126,6 +150,14 @@ export function commandFor(action: ClientAction): string {
       return `/flow external confirm ${action.path !== undefined && action.path !== '' ? action.path : 'all'}`
     case 'raise-complexity':
       return `/flow complexity high ${action.reason?.trim() ?? ''}`.trim()
+    // Dock authorization cards for non-project states: the click itself is the
+    // confirmation, so these map straight to the equivalent `/flow` line.
+    case 'enable':
+      return '/flow init'
+    case 'repair':
+      return '/flow repair'
+    case 'gates-on':
+      return '/flow on'
     case 'resume':
       return `/flow resume ${action.changeId}${action.takeover === true ? ' --takeover' : ''}`
     case 'pause':
@@ -275,7 +307,17 @@ export async function performAction(action: ClientAction, ports: ActionPorts): P
     }
   }
 
-  // Fallback (H10): composer draft first, then clipboard.
+  // Click-to-execute: the button click is the human authorization. Submit the
+  // equivalent command through the host command remote so the owner never has
+  // to type or press Enter in the composer.
+  if (ports.executeCommand !== undefined) {
+    const executed = await safeAsyncCall(() => ports.executeCommand?.(command))
+    if (executed) {
+      return { ok: true, fallback: false, message: t('actions.executed'), command }
+    }
+  }
+
+  // Legacy degradation (H10): composer draft first, then clipboard.
   if (ports.fillCommand !== undefined) {
     const filled = await safeAsyncCall(() => ports.fillCommand?.(command))
     if (filled) {
@@ -286,7 +328,7 @@ export async function performAction(action: ClientAction, ports: ActionPorts): P
   if (copied) {
     return { ok: true, fallback: true, message: t('actions.copyCommand', { cmd: command }), command }
   }
-  return { ok: false, fallback: true, message: t('actions.clipboardFailed', { cmd: command }), command }
+  return { ok: false, fallback: true, message: t('actions.executeFailed'), command }
 }
 
 function safeCall(fn: () => boolean): boolean {

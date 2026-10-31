@@ -19,7 +19,7 @@ export const BUILTIN_RULES: Rule[] = [
       'FlowGate 自己维护的文件（账本、进行状态、证据、审查结论、报告、配置、密钥文件、.git 内部）不能由 agent 写，' +
       '否则过程记录可被改写，篡改检测与范围归因都会失真。',
     unlock:
-      '这些文件由插件或负责人写入：改流程配置请在 .flowgate/config.yaml 里改，改状态用 flow_* 工具或 /flow 命令；' +
+      '这些文件由插件或负责人写入：改流程配置请在 .flowgate/config.yaml 里改，改状态用 flow_* 工具；' +
       '普通产物请按阶段流程写对应文件。',
     source: '威胁模型（03 §2.3）· FR-4.6',
     builtin: true,
@@ -33,7 +33,7 @@ export const BUILTIN_RULES: Rule[] = [
     decision: 'deny',
     why: '只读分析任务（A-xxx）只允许读代码、搜索和 FlowGate 工具，写文件或执行命令会改变被分析的对象。',
     unlock:
-      '分析任务不产出代码：把结论写进 flow_submit_analysis 的结构化提交（带源码引用）；要动手改代码请用 /flow new --related-to <A-编号> 新建关联变更。',
+      '分析任务不产出代码：把结论写进 flow_submit_analysis 的结构化提交（带源码引用）；要动手改代码请调用 flow_new_change({ relatedTo: "<A-编号>" }) 新建关联变更。',
     source: 'FR-16 · 03 §3.7',
     builtin: true,
   },
@@ -56,7 +56,7 @@ export const BUILTIN_RULES: Rule[] = [
     decision: 'deny',
     why: '先定"做什么"再动代码：需求和计划获批之前不写源码、测试或配置（S0–S3 只能写本变更的产物）。',
     unlock:
-      '完成当前阶段产物并调用 flow_submit({ gate: "<当前门>" })；确需立即修改，请负责人执行 /flow allow-once R-STAGE-SRC <理由>。',
+      '完成当前阶段产物并调用 flow_submit({ gate: "<当前门>" })；确需立即修改，等待负责人在授权卡片上单次放行（R-STAGE-SRC）。',
     source: 'OpenSpec——proposal 获批前不写代码 · FR-4.1',
     builtin: true,
   },
@@ -65,7 +65,7 @@ export const BUILTIN_RULES: Rule[] = [
     when: { action: ['push', 'shell'] },
     decision: 'deny',
     why: '推送会把未验证的提交发布出去，必须在 G5 验证、G6 交付确认之后；agent 不能自行发布。',
-    unlock: '先通过 G5、G6；推送由负责人在 G6 之后手动执行或确认（/flow 命令或面板按钮）。',
+    unlock: '先通过 G5、G6；推送由负责人在 G6 之后手动执行或在面板/授权卡片上确认。',
     source: '03 §8.2 推送触发器 · FR-7',
     builtin: true,
   },

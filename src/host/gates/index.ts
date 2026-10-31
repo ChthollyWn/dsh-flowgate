@@ -37,7 +37,7 @@ export async function notifyAgent(runtime: HostRuntime, text: string, agent?: Ds
 export function installGates(runtime: HostRuntime): void {
   runtime.registerGateAwaitingHook((changeId, gate) => {
     const text = isHumanGate(gate)
-      ? `变更 ${changeId} 的 ${gate} 检查全部通过，正在等待负责人批准。下一步：负责人运行 /flow approve ${gate}（或 /flow reject <意见>）。`
+      ? `变更 ${changeId} 的 ${gate} 检查全部通过，正在等待负责人批准。下一步：等待负责人在授权卡片上批准或退回（退回需写理由）。`
       : `变更 ${changeId} 的 ${gate} 需要负责人确认。`
     void notifyAgent(runtime, text)
   })
@@ -74,7 +74,7 @@ export async function rejectCurrentGate(runtime: HostRuntime, agent: DshAgent | 
   if (!gate) throw new HostError('当前没有等待批准的门', '运行 /flow 查看当前门禁状态')
   const result = await engine.rejectGate(gate, reason)
   runtime.emit()
-  await notifyAgent(runtime, `负责人退回了 ${gate}，意见：${reason}。请按意见修改后重新 flow_submit 或 /flow approve 前先改产物。`, agent)
+  await notifyAgent(runtime, `负责人退回了 ${gate}，意见：${reason}。请按意见修改产物后重新 flow_submit。`, agent)
   return result.message || `已退回 ${gate}。`
 }
 

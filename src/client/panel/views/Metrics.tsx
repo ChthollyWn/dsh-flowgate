@@ -1,8 +1,11 @@
 /**
  * Metrics view (FR-10.2 / T5.1): this change + cumulative M-1..M-18, with CSV /
- * JSON export. Missing values stay "未知" (never 0, FR-10.4). Export tries the
- * browser download first; if that is unavailable the host remote / `/flow
- * metrics --csv` fallback is used.
+ * JSON export. Missing values stay "未知" (never 0, FR-10.4).
+ *
+ * v0.2 interaction contract: export is a button action. If the browser download
+ * is unavailable the click submits `/flow metrics --csv` through the host
+ * command remote (`performAction` → `bridge.runCommand`) — nothing is typed into
+ * the composer, so the view renders no command hint.
  */
 import React from 'react'
 import type { ViewProps } from '../view-types'
@@ -56,7 +59,7 @@ export function MetricsView({ model, t, onAction }: ViewProps): React.ReactEleme
           </span>
         }
       >
-        {empty ? <EmptyState text={t('metrics.empty')} hint={t('metrics.exportHint')} /> : null}
+        {empty ? <EmptyState text={t('metrics.empty')} /> : null}
         <div style={{ overflowX: 'auto' }}>
           <table
             style={{
@@ -118,7 +121,6 @@ export function MetricsView({ model, t, onAction }: ViewProps): React.ReactEleme
           </table>
         </div>
       </Section>
-      <div style={{ fontSize: 10.5, color: COLORS.faint }}>{t('metrics.exportHint')}</div>
     </div>
   )
 }

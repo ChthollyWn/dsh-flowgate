@@ -2,6 +2,10 @@
  * Ledger view (FR-8.2 / T3.7): every change and analysis task with level,
  * stage, state, last session and activity time. Per-row human actions:
  * continue / take over / pause / report / board.
+ *
+ * v0.2 interaction contract: these are card/button actions only — a click runs
+ * `performAction` → `bridge.runCommand` and the owner never types a `/flow ...`
+ * command (the ledger shows no command hint).
  */
 import React from 'react'
 import type { ViewProps } from '../view-types'
@@ -9,6 +13,11 @@ import { ActionButton, Badge, DataTable, EmptyState, Section } from '../Common'
 import { COLORS, MONO_FONT } from '../../theme'
 import { shortTime } from '../../model'
 
+/**
+ * Command behind the "continue" button. Kept for callers/tests that need the
+ * wire form; the UI itself only exposes the button (and a click submits this
+ * line through the host command remote).
+ */
 export function ledgerResumeCommand(changeId: string, takeover = false): string {
   return `/flow resume ${changeId}${takeover ? ' --takeover' : ''}`
 }
@@ -99,7 +108,6 @@ export function LedgerView({ model, t, onAction }: ViewProps): React.ReactElemen
           rows={dataRows}
         />
       </Section>
-      <div style={{ marginTop: 8, fontSize: 10.5, color: COLORS.faint }}>{t('gate.actionOnlyHuman')}</div>
     </div>
   )
 }

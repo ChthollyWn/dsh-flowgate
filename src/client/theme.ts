@@ -46,6 +46,47 @@ export const COLORS = {
   purpleBg: 'rgba(124, 58, 237, 0.12)',
 } as const
 
+/**
+ * Host-native design tokens (docs/impl/ui-interaction-redesign.md §1.4).
+ *
+ * Every colour the graphical surfaces use goes through these `--dsw-*` custom
+ * properties with neutral fallbacks, so the plugin follows the DSH light / dark
+ * theme instead of hard-coding its own palette. Values mirror the real shell
+ * tokens (`@deepseek-ai/dsh-client-ui-theme` + primitive Button CSS).
+ */
+export const NATIVE = {
+  /** Card / input surface (`--dsw-specific-input-major`). */
+  card: 'var(--dsw-specific-input-major, #ffffff)',
+  /** Layer background used for subtle sections. */
+  layer: 'var(--dsw-alias-bg-layer-2, #ffffff)',
+  labelPrimary: 'var(--dsw-alias-label-primary, #0f1115)',
+  labelSecondary: 'var(--dsw-alias-label-secondary, #61666b)',
+  labelTertiary: 'var(--dsw-alias-label-tertiary, #81858c)',
+  labelDimmed: 'var(--dsw-alias-label-dimmed, #e1e5ee)',
+  labelCaption: 'var(--dsw-alias-label-caption, #adb2b8)',
+  labelForeground: 'var(--dsw-alias-label-primary-foreground, #ffffff)',
+  borderL1: 'var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.04))',
+  borderL2: 'var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1))',
+  borderL3: 'var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))',
+  borderL4: 'var(--dsw-alias-border-l4, rgba(0, 0, 0, 0.16))',
+  overlay: 'var(--dsw-alias-bg-overlay, #e9ecf2)',
+  hover: 'var(--dsw-alias-interactive-bg-hover, rgba(38, 49, 72, 0.06))',
+  hoverDanger: 'var(--dsw-alias-interactive-bg-hover-danger, rgba(236, 19, 19, 0.05))',
+  stateSuccess: 'var(--dsw-alias-state-success-primary, #22c55e)',
+  stateWarn: 'var(--dsw-alias-state-warn-primary, #f59e0b)',
+  stateWarnLabel: 'var(--dsw-alias-state-warn-label, #dd8629)',
+  stateWarnTertiary: 'var(--dsw-alias-state-warn-tertiary, #fef5e7)',
+  stateError: 'var(--dsw-alias-state-error-primary, #ec1313)',
+  stateBusiness: 'var(--dsw-alias-state-business-primary, #4176e6)',
+  stateBusinessTertiary: 'var(--dsw-alias-state-business-tertiary, #e4edfd)',
+  buttonPrimaryFill: 'var(--dsw-alias-button-primary-fill, var(--dsw-alias-label-primary, #0f1115))',
+  buttonPrimaryHover: 'var(--dsw-alias-button-primary-hover, #43454a)',
+  radiusSm: 'var(--dsw-radius-sm, 8px)',
+  radiusMd: 'var(--dsw-radius-md, 12px)',
+  radiusLg: 'var(--dsw-radius-lg, 16px)',
+  radiusXl: 'var(--dsw-radius-xl, 20px)',
+} as const
+
 /** Base monospace stack for ids / commands. */
 export const MONO_FONT =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
@@ -95,21 +136,25 @@ export function taskTone(status: string | undefined): Tone {
   }
 }
 
+/**
+ * Task-status colour: neutral label tokens, semantic colour reserved for the
+ * review / blocked accents (contract §1.4 — no self-painted palette).
+ */
 export function taskColor(status: string | undefined): string {
   switch (status) {
     case 'done':
-      return COLORS.pass
+      return NATIVE.labelSecondary
     case 'running':
     case 'queued':
-      return COLORS.info
+      return NATIVE.labelPrimary
     case 'review':
-      return COLORS.warn
+      return NATIVE.stateWarn
     case 'blocked':
     case 'failed':
     case 'interrupted':
-      return COLORS.fail
+      return NATIVE.stateError
     default:
-      return COLORS.dim
+      return NATIVE.labelTertiary
   }
 }
 

@@ -38,10 +38,10 @@ describe('change status persistence', () => {
     await expect(readChangeStatus(fs, '', 'C-999')).resolves.toBeNull()
   })
 
-  it('JSON 损坏时抛错并提示 /flow repair', async () => {
+  it('JSON 损坏时抛错并提示授权卡片修复（不再要求手输命令）', async () => {
     const fs = new MemoryFileSystem({ '.flowgate/changes/C-001/status.json': '{"id": "C-001", broken' })
     await expect(readChangeStatus(fs, '', 'C-001')).rejects.toThrowError(/status\.json.*损坏|损坏.*status\.json/)
-    await expect(readChangeStatus(fs, '', 'C-001')).rejects.toThrowError(/\/flow repair/)
+    await expect(readChangeStatus(fs, '', 'C-001')).rejects.toThrowError(/授权卡片上修复/)
   })
 
   it('JSON 有效但缺少 id 时抛错', async () => {

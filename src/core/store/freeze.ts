@@ -175,7 +175,7 @@ export function assertNotFrozen(change: ChangeStatus, path: string): { frozen: b
   const at = frozen[key]!.at
   return {
     frozen: true,
-    hint: `「${key}」已在 ${at} 冻结：这是本次变更已批准的产物，不能直接修改。确需变更请走返工流程（/flow rework …）或新建变更。`,
+    hint: `「${key}」已在 ${at} 冻结：这是本次变更已批准的产物，不能直接修改。确需变更请先调用 flow_declare_rework 走返工流程，或新建变更。`,
   }
 }
 

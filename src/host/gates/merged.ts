@@ -65,7 +65,7 @@ export function toGatePanelConfirm(card: MergedConfirmCard): NonNullable<GatePan
   }
 }
 
-/** 渲染成 /flow 命令的纯文本卡片（人类可读）。 */
+/** 渲染成人类可读的纯文本确认卡（与面板/输入区授权卡片同源数据）。 */
 export function renderConfirmCardText(card: MergedConfirmCard): string {
   const lines: string[] = ['方案确认卡（低复杂度：批准后同时通过 G1 与 G3）', `目标：${card.goal || '（未填写）'}`]
   if (card.acceptance.length > 0) lines.push(`验收场景：\n${card.acceptance.map((item) => `  - ${item}`).join('\n')}`)
@@ -80,8 +80,8 @@ export function renderConfirmCardText(card: MergedConfirmCard): string {
   if (card.rollback !== undefined) lines.push(`回滚方案：${card.rollback}`)
   lines.push(
     card.requireConfirmation === true
-      ? `处理：高风险需逐项确认：/flow approve G3 --confirm-risks；/flow reject <意见> 退回。`
-      : '处理：/flow approve G3 批准（同时通过 G1）；/flow reject <意见> 退回。',
+      ? '处理：高风险需逐项确认：在授权卡片上点「确认并推进」逐项确认风险与回滚方案，或退回（需写理由）。'
+      : '处理：在授权卡片上点「确认并推进」批准（同时通过 G1），或退回（需写理由）。',
   )
   return lines.join('\n')
 }

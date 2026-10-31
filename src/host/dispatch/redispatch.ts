@@ -153,7 +153,7 @@ async function createSafetyPending(
     return await engine.reportRisk({
       category: safetyCategory(taskId),
       description: `重新派发中断任务 ${taskId} 前无法确认旧子 agent 已停止/资源已释放：${reason}`,
-      proposal: `旧子 agent：${candidates.join('、') || '未记录 id'}。确认其在宿主中已停止且资源已释放后，运行 /flow risk approve <RK-id> 授权重新派发；无法确认时运行 /flow risk reject 并手动处理该任务。`,
+      proposal: `旧子 agent：${candidates.join('、') || '未记录 id'}。确认其在宿主中已停止且资源已释放后，等待负责人在授权卡片上批准重新派发（RK-id）；无法确认时退回该待处理项并手动处理任务。`,
     })
   } catch (error) {
     runtime.noteFeature('dispatch', `中断任务 ${taskId} 的待处理项生成失败：${toAgentError(error).error}`)
@@ -175,7 +175,7 @@ export async function checkInterruptedRedispatch(runtime: HostRuntime, engine: E
       problems: [],
       pending: [],
       message: `无法读取当前变更状态：${toAgentError(error).error}`,
-      hint: '运行 /flow status 或 /flow doctor 诊断后再派发',
+      hint: '在 FlowGate 面板查看状态，或运行 /flow doctor 诊断后再派发',
     }
   }
   if (!change) return { ok: true, problems: [], pending: [] }
@@ -225,7 +225,7 @@ export async function checkInterruptedRedispatch(runtime: HostRuntime, engine: E
     message: `不能重新派发中断任务：${detail}`,
     hint:
       ids.length > 0
-        ? `已记录为待处理项 ${ids.join('、')}；确认旧子 agent 已停止且资源已释放后，由负责人运行 /flow risk approve ${ids[0]} 授权重新派发（或 /flow risk reject 手动处理）`
-        : '先确认旧子 agent 已停止、资源已释放；无法确认时运行 /flow status 查看待处理项并人工处理',
+        ? `已记录为待处理项 ${ids.join('、')}；确认旧子 agent 已停止且资源已释放后，等待负责人在授权卡片上批准重新派发（${ids[0]}）或退回后手动处理`
+        : '先确认旧子 agent 已停止、资源已释放；无法确认时在 FlowGate 面板查看待处理项并人工处理',
   }
 }

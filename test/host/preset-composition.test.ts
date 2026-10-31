@@ -33,30 +33,37 @@ describe('cordis.patch.yml preset 组成', () => {
     expect(Object.keys(presets).sort()).toEqual(['preset-flowgate', 'preset-flowgate-executor', 'preset-flowgate-reviewer'])
   })
 
-  it('工程模式：人设 + 文件工具集 + 搜索 + 技能；人设含计划模式引导', () => {
+  it('工程模式：人设 + 文件工具集 + 搜索 + 技能 + 原生提问卡；人设含计划模式引导', () => {
     const preset = loadPresets()['preset-flowgate']
     const names = pluginNames(preset)
     expect(names).toContain('@deepseek-ai/dsh-persona')
     expect(names).toContain('@deepseek-ai/dsh-tool-fs')
     expect(names).toContain('@deepseek-ai/dsh-tool-fs-search')
     expect(names).toContain('@deepseek-ai/dsh-tool-skill')
+    // ui-interaction-redesign §0 规则 2：澄清/选择必须走原生 ask_user_question 提问卡。
+    expect(names).toContain('@deepseek-ai/dsh-tool-ask-user')
+    // 位置约束：提问工具排在技能工具之后（契约 §5.1）。
+    expect(names.indexOf('@deepseek-ai/dsh-tool-ask-user')).toBeGreaterThan(names.indexOf('@deepseek-ai/dsh-tool-skill'))
     const persona = (preset?.plugins ?? []).find((plugin) => plugin.name === '@deepseek-ai/dsh-persona')
     expect(String(persona?.config?.prefix ?? '')).toContain('先计划再执行')
   })
 
-  it('执行者：有文件读写、搜索和 shell，没有委派工具', () => {
+  it('执行者：有文件读写、搜索和 shell，没有委派工具与提问卡', () => {
     const names = pluginNames(loadPresets()['preset-flowgate-executor'])
     for (const expected of ['@deepseek-ai/dsh-tool-fs', '@deepseek-ai/dsh-tool-fs-search', '@deepseek-ai/dsh-tool-bash']) {
       expect(names).toContain(expected)
     }
     expect(names.some((name) => /subagent|workflow/.test(name))).toBe(false)
+    // 执行者是子 agent：宿主不允许其提问，提问只加在主会话 preset。
+    expect(names).not.toContain('@deepseek-ai/dsh-tool-ask-user')
   })
 
-  it('只读取证：文件工具只读，没有 shell', () => {
+  it('只读取证：文件工具只读，没有 shell 与提问卡', () => {
     const preset = loadPresets()['preset-flowgate-reviewer']
     const names = pluginNames(preset)
     expect(names).toContain('@deepseek-ai/dsh-tool-fs')
     expect(names).not.toContain('@deepseek-ai/dsh-tool-bash')
+    expect(names).not.toContain('@deepseek-ai/dsh-tool-ask-user')
     const fsConfig = (preset?.plugins ?? []).find((plugin) => plugin.name === '@deepseek-ai/dsh-tool-fs')?.config
     expect(fsConfig).toMatchObject({ read: true, write: false, edit: false })
   })

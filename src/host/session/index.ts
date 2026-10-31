@@ -5,7 +5,7 @@
  * 在会话销毁时触发。engine.load() 已内置"唯一活动变更自动附着"逻辑
  * （core/engine.ts autoAttach），host 这里只做：
  * 1. 绑定主会话 → 初始化引擎（runtime.bindMainAgent）；
- * 2. 引擎就绪后：若还没附着，尝试 engine.attachSession()（多个活动变更时给出 /flow resume 提示）；
+ * 2. 引擎就绪后：若还没附着，尝试 engine.attachSession()（多个活动变更时给出面板接续提示）；
  * 3. 注入交接摘要/系统通知（不唤醒：agent.inject 下一步生效）；
  * 4. 启动租约心跳；会话关闭时 engine.releaseSession()（把 running/review 任务标中断）。
  *
@@ -193,7 +193,7 @@ async function reinjectAfterCompact(runtime: HostRuntime, agent: DshAgent): Prom
 /** 引擎就绪后的会话初始化。 */
 export async function onEngineReady(runtime: HostRuntime, agent: DshAgent, engine: EngineLike): Promise<void> {
   if (!engine.isInitialized()) {
-    runtime.noteFeature('session', '项目未初始化：/flow init 启用（未初始化前不拦截任何操作）')
+    runtime.noteFeature('session', '项目未初始化：等待负责人在授权卡片上启用（未初始化前不拦截任何操作）')
     return
   }
   // 1) 自动附着：engine.load() 已处理唯一活动变更；这里补 attachSession 的兜底与提示。
@@ -204,13 +204,13 @@ export async function onEngineReady(runtime: HostRuntime, agent: DshAgent, engin
     } catch (error) {
       const info = toAgentError(error)
       runtime.noteFeature('session', `未自动接续：${info.error}（${info.hint}）`)
-      // 有多个活动变更时明确提示用 /flow resume。
+      // 有多个活动变更时明确提示到面板/授权卡片接续。
       try {
         await agent.inject({
           content: [
             {
               type: 'text',
-              text: `[FlowGate] 项目已启用，但没有自动接续到进行中的变更：${info.error}。下一步：${info.hint}；或 /flow new <描述> 立项。`,
+              text: `[FlowGate] 项目已启用，但没有自动接续到进行中的变更：${info.error}。下一步：${info.hint}；或用一句话描述你想做的变更，让 agent 立项。`,
             },
           ],
           source: { kind: 'runtime-context', form: 'relay' },

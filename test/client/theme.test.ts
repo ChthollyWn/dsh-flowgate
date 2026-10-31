@@ -4,6 +4,7 @@ import {
   COLORS,
   createNoiseGate,
   interceptNoiseKey,
+  NATIVE,
   NOISE_WINDOW_MS,
   severityColor,
   taskColor,
@@ -33,10 +34,11 @@ describe('palette', () => {
   })
 
   it('colors task statuses for graph nodes and board cards', () => {
-    expect(taskColor('done')).toBe(COLORS.pass)
-    expect(taskColor('running')).toBe(COLORS.info)
-    expect(taskColor('failed')).toBe(COLORS.fail)
-    expect(taskColor('review')).toBe(COLORS.warn)
+    // v0.2.1 native tokens: neutral labels + semantic accents only where needed.
+    expect(taskColor('done')).toBe(NATIVE.labelSecondary)
+    expect(taskColor('running')).toBe(NATIVE.labelPrimary)
+    expect(taskColor('failed')).toBe(NATIVE.stateError)
+    expect(taskColor('review')).toBe(NATIVE.stateWarn)
     expect(taskTone('blocked')).toBe('blocked')
     expect(severityColor('critical')).toBe(COLORS.fail)
     expect(severityColor('major')).toBe(COLORS.warn)

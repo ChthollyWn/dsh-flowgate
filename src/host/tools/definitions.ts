@@ -49,7 +49,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
       execute: async () => {
         const engine = await requireEngine(runtime)
         if (!engine.isInitialized()) {
-          return ok('FlowGate 未启用：项目没有 .flowgate/config.yaml。下一步：由负责人运行 /flow init 启用（agent 不能初始化）。', {
+          return ok('FlowGate 未启用：项目没有 .flowgate/config.yaml。下一步：等待负责人在授权卡片上启用（agent 不能初始化）。', {
             initialized: false,
           })
         }
@@ -64,8 +64,8 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         if (snapshot.violations.length > 0) lines.push(`越界改动：${snapshot.violations.map((violation) => violation.path).join('、')}`)
         lines.push(...gateItemLines(engine))
         lines.push(`下一步：${snapshot.nextStep}`)
-        if (snapshot.off) lines.push('注意：本会话门禁已被负责人关闭（/flow off），操作不再拦截。')
-        if (snapshot.locked) lines.push('注意：处于锁定模式，写操作被拒绝；请负责人运行 /flow repair。')
+        if (snapshot.off) lines.push('注意：本会话门禁已被负责人临时关闭，操作不再拦截。')
+        if (snapshot.locked) lines.push('注意：处于锁定模式，写操作被拒绝；等待负责人在授权卡片上修复。')
         const notices = safeTakeNotices(engine)
         if (notices.length > 0) lines.push(`通知：${notices.join('；')}`)
         return ok(lines.join('\n'), {
@@ -128,7 +128,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           lines.push(`建议复杂度：${suggestion.complexity}（${suggestion.reasons.complexity.join('；') || '无'}）`)
           lines.push(`建议风险：${suggestion.risk}（${suggestion.reasons.risk.join('；') || '无'}）`)
         }
-        if (outcome.awaiting === 'owner') lines.push('等级需要负责人确认：负责人运行 /flow complexity <级别> 或直接继续。')
+        if (outcome.awaiting === 'owner') lines.push('等级需要负责人确认：等待负责人在授权卡片或面板上确认，或直接继续。')
         return ok(lines.join('\n'), { changeId: outcome.changeId, suggestion, awaiting: outcome.awaiting })
       },
     }),
@@ -139,7 +139,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     defineHostTool({
       name: 'flow_submit',
       description:
-        '提交当前阶段产物到门禁检查（GR/G0/G1/G2/G3/G5/G6）。失败会返回逐项 { item, label, hint, example }；人工门检查通过后返回 awaiting:"owner"，需要负责人 /flow approve。',
+        '提交当前阶段产物到门禁检查（GR/G0/G1/G2/G3/G5/G6）。失败会返回逐项 { item, label, hint, example }；人工门检查通过后返回 awaiting:"owner"，等待负责人在授权卡片上批准或退回。',
       parameters: {
         gate: { type: 'string', required: true, enum: ['GR', 'G0', 'G1', 'G2', 'G3', 'G5', 'G6'], description: '要提交的门' },
       },
@@ -198,7 +198,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         for (const failure of result.failures) {
           lines.push(`✗ ${failure.label}：${failure.hint ?? ''}${failure.example ? `（例：${failure.example}）` : ''}`)
         }
-        if (result.awaiting === 'owner') lines.push(`检查全部通过，等待负责人批准 ${gate}：负责人运行 /flow approve ${gate}（或 /flow reject <意见>）。本轮应结束并告知负责人。`)
+        if (result.awaiting === 'owner') lines.push(`检查全部通过，等待负责人批准 ${gate}：等待负责人在授权卡片上批准或退回（退回需写理由）。本轮应结束并告知负责人。`)
         return ok(lines.join('\n'), {
           gate: result.gate,
           passed: result.passed,
@@ -226,7 +226,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         const outcome = await engine.taskStart(String(args.taskId))
         if (outcome.ok) await captureTaskStartSnapshot(runtime, String(args.taskId))
         runtime.emit()
-        if (!outcome.ok) return fail(outcome.message, outcome.hint ?? '按执行图顺序领取任务；运行 /flow 查看可领取任务', {
+        if (!outcome.ok) return fail(outcome.message, outcome.hint ?? '按执行图顺序领取任务；在 FlowGate 面板查看可领取任务', {
           message: outcome.message,
         })
         const envelope = outcome.envelope
@@ -316,7 +316,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
   tools.push(
     defineHostTool({
       name: 'flow_request_scope_change',
-      description: 'S4 申请扩大任务范围（新增文件/目录）。生成待处理项 SC-n，由负责人 /flow scope approve 处理；批准前写入仍被拒绝。',
+      description: 'S4 申请扩大任务范围（新增文件/目录）。生成待处理项 SC-n，由负责人在授权卡片上批准或退回；批准前写入仍被拒绝。',
       parameters: {
         taskId: { type: 'string', required: true, description: '任务 id' },
         add: {
@@ -333,7 +333,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         if (add.length === 0) return fail('add 不能为空', '例：add: ["src/renewal/**"]')
         const item = await engine.requestScopeChange({ taskId: String(args.taskId), add, reason: String(args.reason) })
         runtime.emit()
-        return ok(`已生成范围变更申请 ${item.id}（${item.title}）。负责人运行 /flow scope approve ${item.id} 后生效。`, {
+        return ok(`已生成范围变更申请 ${item.id}（${item.title}）。等待负责人在授权卡片上处理后生效。`, {
           id: item.id,
           status: item.status,
         })
@@ -359,7 +359,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           proposal: String(args.proposal),
         })
         runtime.emit()
-        return ok(`已上报风险 ${item.id}（${item.title}）。负责人运行 /flow risk approve ${item.id} 处理。`, {
+        return ok(`已上报风险 ${item.id}（${item.title}）。等待负责人在授权卡片上处理。`, {
           id: item.id,
           status: item.status,
         })
@@ -461,7 +461,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         if (add.length === 0 && reorder.length === 0) return fail('add 与 reorder 至少提供一个', '例：reorder: ["T1","T3","T2"]')
         const item = await engine.requestPlanChange(request)
         runtime.emit()
-        return ok(`已生成计划修订申请 ${item.id}（${item.title}）。负责人运行 /flow plan approve ${item.id} 处理。`, {
+        return ok(`已生成计划修订申请 ${item.id}（${item.title}）。等待负责人在授权卡片上处理。`, {
           id: item.id,
           status: item.status,
         })
@@ -489,7 +489,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           scope: String(args.scope),
         })
         runtime.emit()
-        return ok(`已生成规则提议 ${item.id}（${item.title}）。负责人运行 /flow rule approve ${item.id} 处理。`, {
+        return ok(`已生成规则提议 ${item.id}（${item.title}）。等待负责人在授权卡片上处理。`, {
           id: item.id,
           status: item.status,
         })

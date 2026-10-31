@@ -24,8 +24,8 @@ export async function runInit(runtime: HostRuntime, agent?: DshAgent | null): Pr
     runtime.emit()
     return [
       result.message,
-      '提示：要更新 project.md 请直接编辑该文件，然后运行 /flow repair 重建缓存。',
-      '下一步：/flow new <描述> 立项。',
+      '提示：要更新 project.md 请直接编辑该文件，然后在授权卡片上点「修复」重建缓存。',
+      '下一步：用一句话描述你想做的变更，agent 会调用 flow_new_change 立项。',
     ].join('\n')
   }
   let result: InitResult
@@ -53,7 +53,7 @@ export async function runInit(runtime: HostRuntime, agent?: DshAgent | null): Pr
   }
   lines.push('下一步：')
   lines.push('1. 打开 .flowgate/project.md 核对技术栈、命令与可复用模块清单（agent 可以用 read 读）；')
-  lines.push('2. 新项目用 /flow new --project <描述> 进入项目级澄清与路线图；')
-  lines.push('3. 已有项目直接 /flow new <描述> 立项。')
+  lines.push('2. 新项目：用一句话描述目标，agent 会进入项目级澄清与路线图（flow_new_change({ project: true })）；')
+  lines.push('3. 已有项目：用一句话描述你想做的变更，agent 会调用 flow_new_change 立项。')
   return lines.join('\n')
 }

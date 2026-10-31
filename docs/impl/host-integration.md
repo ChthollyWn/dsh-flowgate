@@ -82,15 +82,15 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 
 在会话工作目录里（必须是有写权限的普通项目目录）：
 
-1. **未初始化**：状态条应显示 `FlowGate 未启用 · /flow init 启用`；
+1. **未初始化**：输入区 dock 应显示七阶段轨道（灰度）+「启用 FlowGate」授权卡；
    agent 调用 `flow_status` 应返回 `initialized: false` 的提示文本（不拦截任何操作）。
-2. 负责人输入 `/flow init`：
+2. 负责人点授权卡「启用 FlowGate」（等价 `/flow init`；命令仍可用）：
    - 返回探测到的技术栈/命令与 `.flowgate/project.md` 草稿路径；
    - 磁盘出现 `.flowgate/{config.yaml,project.md,ledger.jsonl,...}`（由 `engine.init()` 写，host 不重复写）；
    - `/flow`（无参数）显示阶段 S0/S1、门禁检查项、下一步。
-3. 负责人输入 `/flow new 示例变更`：
+3. 负责人直接用一句话描述变更（如「给待办列表加分享功能」），agent 调 `flow_new_change`（等价 `/flow new`）：
    - 返回变更 id（如 `C-001`）与建议复杂度/风险；
-   - 投影 `flowgate` 更新（状态条变为蓝色阶段条，revision 增长）。
+   - 投影 `flowgate` 更新（dock 轨道当前阶段开始脉冲，revision 增长）。
 4. agent 调用 `flow_status`：
    - 返回文本包含 `变更「示例变更」｜阶段 S1`、门禁检查项（✓/✗）、下一步；
    - 结构化 `data.snapshot` 含 `stage/complexity/risk/activeTaskId/pending`。
@@ -136,7 +136,7 @@ export DSH_HOME=/tmp/dsh-flowgate-dev
 
 | 现象 | 排查 |
 |---|---|
-| 状态条一直“未启用” | 会话 cwd 不在初始化过的项目里；`.flowgate/config.yaml` 是否在该目录或其祖先 |
+| dock 一直显示「启用 FlowGate」授权卡 | 会话 cwd 不在初始化过的项目里；`.flowgate/config.yaml` 是否在该目录或其祖先 |
 | `/flow` 报“引擎未就绪” | 看 `/flow doctor` 的「降级/未生效」；多为项目目录不可读或 ledger.key 无法写入 |
 | 守卫不拦截 | 确认项目已初始化、当前会话未 `/flow off`；doctor 里 `守卫心跳` 应有工具调用计数增长 |
 | 面板不更新 | doctor 里 `✗ 会话投影` 或 `✗ 自定义会话事件`：面板会降级为打开时读取；命令仍可用 |

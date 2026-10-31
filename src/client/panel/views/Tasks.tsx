@@ -6,8 +6,9 @@
  * task-detail block (status / batch / TDD / evidence / findings / scope /
  * new_files / verify groups / worktree / agent). Every owner-decidable pending
  * item (scope / risk / plan / rule / conflict / blocker) gets its approve/reject
- * (or unblock) entry here; the actual host call + `/flow` command fallback lives
- * in `../../actions`.
+ * (or unblock) entry here. v0.2 interaction contract: the buttons are the
+ * decision — `performAction` submits the equivalent host command through
+ * `bridge.runCommand` (click = authorization; the composer is never filled).
  */
 import React from 'react'
 import type { ViewProps } from '../view-types'
@@ -52,8 +53,9 @@ export function isOwnerPendingItem(item: PendingItem): boolean {
 
 /**
  * Pure mapping from one pending item + decision to the client action. Blockers
- * are cleared through `/flow unblock`; every other kind goes through the
- * `approve-pending` / `reject-pending` family mapping in `../../actions`.
+ * are cleared through the `unblock` action (wire form `/flow unblock`); every
+ * other kind goes through the `approve-pending` / `reject-pending` family
+ * mapping in `../../actions`. The click executes the wire form directly.
  */
 export function pendingDecisionAction(
   item: PendingItem,
@@ -355,7 +357,8 @@ export function TasksView({ model, t, onAction }: ViewProps): React.ReactElement
   // T5.1: selecting a node in the execution graph expands its task card below.
   const [selectedTaskId, setSelectedTaskId] = React.useState<string | undefined>(undefined)
   // Every open item an owner can decide right now (not just scope/conflict:
-  // plan/rule/risk/blocker used to be reachable only through `/flow`).
+  // plan/rule/risk/blocker used to be reachable only through typed commands;
+  // now each one is a card rendered here and a click executes it).
   const pendingDecisions = (model.snapshot?.pending ?? []).filter(isOwnerPendingItem)
 
   const openDecision = (id: string): void => {

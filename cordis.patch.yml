@@ -52,6 +52,11 @@
               sampleOverCapGlobResults: false
           - id: flowgate-tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
+          # 原生结构化提问（T3 / ui-interaction-redesign §0 规则 2、§5.1）：
+          # 澄清/选择必须走 ask_user_question 提问卡片，不能在普通文本里提问。
+          # 只加在主会话 preset：执行者/审查者是子 agent，宿主本就不允许其提问。
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
 
     # ── 执行者：flow_dispatch_next 派发的子 agent ───────────────────────────
     - id: preset-flowgate-executor

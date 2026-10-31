@@ -232,7 +232,7 @@ export function installDispatch(runtime: HostRuntime): void {
         lines.push('任务结束后会收到完成通知（摘要、任务门、集成检查点结果）；收到后再调用 flow_dispatch_next。')
         if (mainTaskLines.length > 0) lines.push(...mainTaskLines)
         if (pendingNow.length > 0) {
-          lines.push(`⚠ 仍有 ${pendingNow.length} 个待处理项需要负责人处理：${pendingNow.map((item) => item.id).join('、')}（/flow status 查看）。`)
+          lines.push(`⚠ 仍有 ${pendingNow.length} 个待处理项需要负责人处理：${pendingNow.map((item) => item.id).join('、')}（可在 FlowGate 面板查看）。`)
         }
         runtime.emit()
         return ok(lines.join('\n'), {
@@ -514,7 +514,7 @@ async function finalizeTask(
       )
     } else if (failed) {
       await engine.taskFailed(envelope.taskId, typeof summary === 'string' ? summary : `子 agent 停止原因：${result?.stopReason ?? '未知'}`)
-      lines.push('任务已标记失败，等待负责人处理（/flow 查看待处理项）。')
+      lines.push('任务已标记失败，等待负责人在授权卡片上处理（可在面板查看待处理项）。')
     } else {
       // 审查（按等级轮次要求补齐；高风险 2 轮。审查失败不消耗轮次）。
       try {
@@ -539,7 +539,7 @@ async function finalizeTask(
       const outcome = await engine.taskDone(envelope.taskId)
       lines.push(outcome.message)
       for (const failure of outcome.failures) lines.push(`✗ ${failure.label}：${failure.hint ?? ''}`)
-      if (!outcome.passed) lines.push(`任务门未通过；负责人可运行 /flow 查看，或让执行者继续修复（重新 flow_dispatch_next）。`)
+      if (!outcome.passed) lines.push('任务门未通过；等待负责人在授权卡片上处理，或让执行者继续修复（重新 flow_dispatch_next）。')
     }
   } catch (error) {
     const info = toAgentError(error)
@@ -726,7 +726,7 @@ async function prepareWorktree(
   const root = runtime.root()
   if (!root) throw new HostError('项目根未解析', '运行 /flow doctor')
   const change = engine.currentChange()
-  if (!change) throw new HostError('没有进行中的变更', '运行 /flow')
+  if (!change) throw new HostError('没有进行中的变更', '用一句话描述要做的变更，让 agent 立项；或在 FlowGate 面板查看流程')
   const relative = normalizeSlashes(`.flowgate/worktrees/${change.id}/${envelope.taskId}`)
   const absolute = nodePath.resolve(root, relative)
   await fsp.mkdir(nodePath.dirname(absolute), { recursive: true })

@@ -128,6 +128,20 @@ describe('守卫：拒绝与 fail-closed', () => {
     expect(harness.runtime.intercepts[0]?.ruleId).toBe('R-PROTECTED')
   })
 
+  it('拦截记录的 unlock 缺省回退为面板指引（不出现需要手输的 /flow 命令）', async () => {
+    harness = await setupPlugin()
+    engineState(harness.engine).evaluateActionResult = {
+      effect: 'human',
+      message: '需要负责人处理',
+      rule: { ruleId: 'R-SCOPE', decision: 'human', why: '范围外改动需要人确认' },
+    } as Decision
+    const exec = makeExec({ name: 'write', arguments: { file_path: 'src/x.ts' }, callId: 'call-unlock-fallback', agent: harness.agent })
+    await runPreExecute(harness, exec)
+    expect(harness.runtime.intercepts.length).toBe(1)
+    expect(harness.runtime.intercepts[0]?.unlock).toContain('面板')
+    expect(harness.runtime.intercepts[0]?.unlock).not.toContain('/flow')
+  })
+
   it('human 判定同样拒绝（风险转人工不走 DSH 审批）', async () => {
     harness = await setupPlugin()
     engineState(harness.engine).evaluateActionResult = {

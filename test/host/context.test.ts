@@ -7,6 +7,7 @@ import { resetHostPluginForTest } from '../../src/host/index.js'
 import {
   claimsCompletion,
   hasFreshGreen,
+  INTERACTION_CONTRACT,
   lastAssistantText,
   resetContextStateForTest,
 } from '../../src/host/context/index.js'
@@ -47,7 +48,7 @@ function makeReceipt(overrides: Partial<EvidenceReceipt> = {}): EvidenceReceipt 
 }
 
 describe('系统提示注入', () => {
-  it('systemPrompt.section 注册 flowgate:runtime，渲染 engine.buildInjection().text', async () => {
+  it('systemPrompt.section 注册 flowgate:runtime，渲染 engine.buildInjection().text + 交互契约', async () => {
     harness = await setupPlugin()
     const section = harness.prompt.state.sections.get('flowgate:runtime')
     expect(section).toBeDefined()
@@ -55,14 +56,20 @@ describe('系统提示注入', () => {
     const text = typeof section?.text === 'function' ? (section.text as (ctx: unknown) => string)({ agent: harness.agent }) : section?.text
     expect(String(text)).toContain('假注入')
     expect(String(text)).toContain('S4')
+    // 卡片优先交互契约（§0 规则 2 / §5.2）：授权卡片 + 原生提问卡，不许要求负责人手输命令。
+    expect(String(text)).toContain('交互契约：')
+    expect(String(text)).toContain('授权卡片')
+    expect(String(text)).toContain('ask_user_question')
+    expect(String(text).endsWith(INTERACTION_CONTRACT)).toBe(true)
   })
 
-  it('未初始化时注入空文本（不污染普通项目提示词）', async () => {
+  it('未初始化时注入空文本（不污染普通项目提示词，也不追加交互契约）', async () => {
     const { createFakeEngine } = await import('../../src/host/testing/fake-ctx.js')
     harness = await setupPlugin({ engine: createFakeEngine({ initialized: false }), bindAgent: false })
     const section = harness.prompt.state.sections.get('flowgate:runtime')
     const text = typeof section?.text === 'function' ? (section.text as (ctx: unknown) => string)({ agent: harness.agent }) : section?.text
     expect(String(text)).toBe('')
+    expect(String(text)).not.toContain(INTERACTION_CONTRACT)
   })
 })
 

@@ -1,7 +1,7 @@
 # 界面截图（真实 DSH 0.2.1-rc.5 Web 宿主）
 
-采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）。
-当前共 **25 张 PNG**（编号 01–10、12–26；11 号不存在）。
+采集时间：2026-10-30 20:06（Asia/Shanghai）；2026-10-31 11:19 追加"真实 Web 宿主交互走查"一轮（13–26 号，见下方分节）；2026-11-01 00:16 追加"v0.2 图形化流程 + 卡片化授权 E2E"一轮（30–33 号，见下方分节）。
+当前共 **29 张 PNG**（编号 01–10、12–26、30–33；11 与 27–29 号不存在）。
 环境：隔离 `DSH_HOME=/tmp/fg-demo-home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区是 `examples/ts-todo-api` 的副本，**没有动日常 `desktop` profile**。
 复现方式见 [../impl/host-integration.md](../impl/host-integration.md)；2026-10-31 追加轮的完整方法、逐项结论与未验证项见 [../impl/web-walkthrough.md](../impl/web-walkthrough.md)。
 
@@ -37,6 +37,23 @@
 | [24-intercepts-view-harness.png](24-intercepts-view-harness.png) | **组件级**：真实 `InterceptsView` + 真实 `actions.ts` 在 Chrome 渲染 2 条拦截记录（真实宿主零模型下无拦截记录，见走查文档 §2.5） |
 | [25-intercepts-feedback-harness.png](25-intercepts-feedback-harness.png) | 组件级：点「误判反馈」展开理由表单 |
 | [26-intercepts-allow-once-harness.png](26-intercepts-allow-once-harness.png) | 组件级：填理由后「放行一次」→ `performAction` fallback=true，`/flow allow-once R-STAGE-SRC <理由>` 写入输入框 |
+
+### 2026-11-01 追加（v0.2 图形化流程 + 卡片化授权：真实 Web 宿主 E2E）
+
+采集时间 2026-11-01 00:16–00:23（Asia/Shanghai）；**2026-11-01 01:16–01:19 在「原生风格/宽度改造」后的重建上重拍 30–33**。环境：隔离 `DSH_HOME=/tmp/fg-v2/dsh-home`、`HOME=/tmp/fg-v2/home` 的 `flowgate-dev` profile（web 模板 + `link:` 安装本仓库），工作区 `/private/tmp/fg-v2/projA`（`examples/ts-todo-api` 副本，git 基线 `78fc6a8`），宿主 `dsh --profile flowgate-dev --host 127.0.0.1 --port 7130 --no-open`（未占用 60747），浏览器为全局 playwright 1.60 + 系统 Chrome，视口 1600×1000。构建：Lead 原生风格改造重建（2026-11-01 01:14），`lib/client.js` sha256 `17b59e44…`（329.9KB）、`lib/host.js` sha256 `fbfc68f2…`（不变）；**30–33 四张均在该构建下重拍**。
+
+**宽度实测（真实宿主 1600×1000，Playwright `getBoundingClientRect`；awaiting 带卡 与 active 仅轨道两态都测）**：宿主 `--dsh-chat-content-width` 解析值 **844.8px**，`--dsh-composer-side-clearance` **16px**，可用列宽（composer hero 外框）**908.8px**。按原生 PlanReviewPanel 公式：composer 输入卡 = 可用列宽 − 2×clearance = **876.8px**（实测内容宽 877px，Δ0.2）；plan 授权卡 frame padding = clearance+16 = 32px，`max-width=var(--dsh-chat-content-width)`，故 **dock-inner == auth-card == 844.8px == var 解析值（±0px）**，比 composer 卡窄 32px = 2×clearance 属**宿主原生设计**。左右收敛：dock-inner 距可用列宽左右各内缩 **32px（= clearance+16，±0px）**；距 composer 输入卡左右边缘各内缩 **16px（= clearance，±0px）**；水平居中（inner 中点 936.49 == 列中点 936.49）。两态实测数字一致；断言 11/11（active）与 13/13（awaiting）全过，脚本 `/tmp/fg-v2/g2-measure.cjs`。
+
+**零模型请求声明**：`DEEPSEEK_API_KEY=sk-fake-unlock-only` 仅用于解锁 UI，全程没有发出任何 completion / 模型请求（本轮 0 pageerror / 0 console.error）。G3 awaiting 状态按 [web-walkthrough.md §2.4](../impl/web-walkthrough.md) **离线构造**（编辑 `.flowgate/changes/C-001/status.json` + 写 proposal/spec/tasks 产物后重启宿主，属既有披露口径）；而「点击授权卡 → 状态推进」走的是**真实宿主命令链路**（`bridge.runCommand` → 宿主命令 remote 执行 `/flow approve G3` → 宿主引擎写盘）。截图复现脚本：`/tmp/fg-v2/g-active.cjs`（30 号，12 项断言全过）与 `/tmp/fg-v2/g-awaiting.cjs`（31–33 号；44 项断言中 43 项通过，唯一未过项是旧断言 `auth-card data-tone="attention"`——原生改造后 data-tone 改为 strip 语义 `warn`，`data-kind/data-gate/data-action` 均未变，属预期契约演进）；基线脚本 `/tmp/fg-v2/baseline.cjs`。
+
+| 截图 | 内容 |
+|---|---|
+| [30-flow-dock-active.png](30-flow-dock-active.png) | 原生风格 dock（活跃态 C-001 · S1）：中性灰阶七阶段轨道（已完成/当前脉冲/门标记）+ 自然语言下一 chip「补齐需求澄清产物」，宽 844.8px 与内容列/原生 plan 卡对齐 |
+| [31-flow-auth-card.png](31-flow-auth-card.png) | 原生 PlanReviewPanel 风格授权卡（G3 awaiting）：顶部 warn 色 strip 小字（等你确认方案 · G3）+ 白色卡体（目标/验收场景/范围/验证方式/StateDot 检查项 3/3）+ 黑色实心主按钮「确认并推进」与 outline「提高复杂度 / 退回补充 / 详情」；卡宽 844.8px 与轨道左右边缘对齐 |
+| [32-flow-approved.png](32-flow-approved.png) | 点「确认并推进」后：授权卡消失、G3 通过、阶段推进到 S4（轨道 S0–S3 完成、S4 当前）、dock 提示「已执行」，**输入框始终为空**（宿主写盘 stage=S4 / G3 passed） |
+| [33-panel-flow-map.png](33-panel-flow-map.png) | 面板流程页（中性风格）：面板头轨道、hero「④ 执行 · 你在这里」+ 灰阶 4/7 进度环、七阶段纵向时间线与门状态（G0–G3 已通过）、当前节点高亮、下一步 callout「按执行图开始下一个任务」 |
+
+限制（如实披露）：原生 `ask_user_question` 提问卡与 `flow_*` 工具调用的 toolview 需要模型真正跑一轮才会出现；本轮零模型请求只验证了组合面（`preset-flowgate` 已含 `@deepseek-ai/dsh-tool-ask-user`、web 组合含 `dsh-client-ui-user-questions`），**未覆盖**原生提问卡真机渲染。目视核对（本轮）：无大色块/彩虹轨道；活动元素颜色均来自宿主语义 token（当前阶段蓝 `#4176e6`、awaiting 徽标 warn 橙、strip 为 warn tertiary 浅底、检查项 StateDot 绿），主按钮为黑底白字、退回落款为 outline + 错误色文字（无蓝/红实心按钮），符合「少用花哨颜色」。旧观察项 `flow_submit(...)` 文案已在上一轮修复，本轮 dock/面板 callout 均为自然语言。
 
 ## 说明
 

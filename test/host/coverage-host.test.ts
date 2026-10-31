@@ -321,6 +321,11 @@ describe('host/init — runInit 文本与降级', () => {
   it('已初始化 / 引擎不可用 / inert 原因', async () => {
     const already = await runInit(initRuntime({ engine: fakeEngine({ initialized: true }) }))
     expect(already).toContain('提示：要更新 project.md')
+    // 卡片优先（§0 规则 2）：init 结果也会出现在会话命令 chip 里，不能要求负责人手输 /flow。
+    expect(already).toContain('授权卡片上点「修复」')
+    expect(already).toContain('用一句话描述你想做的变更')
+    expect(already).not.toContain('/flow new')
+    expect(already).not.toContain('/flow repair')
 
     await expect(
       runInit(initRuntime({ inert: [{ message: '缺少依赖', hint: '重新安装' }] })),
@@ -358,6 +363,9 @@ describe('host/init — runInit 文本与降级', () => {
     expect(text).toContain('风险提示')
     expect(text).toContain('读取了 2 个文件')
     expect(text).toContain('不是 git 仓库')
+    // 点「启用 FlowGate」授权卡片后用户直接看到下一步：自然语言 + agent 工具，不给手输命令。
+    expect(text).toContain('用一句话描述')
+    expect(text).not.toContain('/flow new')
 
     // git 探测抛错被忽略
     const throwingGit = createFakeGit({ isRepo: async () => { throw new Error('git 坏了') } })

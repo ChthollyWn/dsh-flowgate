@@ -440,7 +440,7 @@ export async function checkChangeCreated(ctx: GateCheckContext): Promise<CheckOu
   try {
     const exists = await ctx.fs.exists(paths.dir)
     if (exists) return pass('g0.changeDir', '变更目录已创建', 'P0', [paths.dir])
-    return fail('g0.changeDir', '变更目录已创建', '变更目录不存在：用 `/flow new` 立项后重试。', 'P0', { details: [paths.dir] })
+    return fail('g0.changeDir', '变更目录已创建', '变更目录不存在：重新调用 flow_new_change 立项后重试。', 'P0', { details: [paths.dir] })
   } catch {
     return fail('g0.changeDir', '变更目录已创建', '无法访问文件系统，无法确认变更目录。', 'P0', { details: [paths.dir] })
   }
@@ -480,7 +480,7 @@ export function checkContractFrozen(ctx: GateCheckContext): CheckOutcome {
     return fail(
       'g0.contract',
       '契约已冻结',
-      '创建变更时必须冻结当时的插件版本、规则哈希和等级定义；状态损坏时重新 `/flow init` 或 `/flow repair`。',
+      '创建变更时必须冻结当时的插件版本、规则哈希和等级定义；状态损坏时等待负责人在授权卡片上修复。',
       'P0',
     )
   }
@@ -814,7 +814,7 @@ export function checkProjectCommands(ctx: GateCheckContext): CheckOutcome {
     if (skeleton) {
       return pass(item, label, 'P0', ['C0 工程骨架在交付时生成 project.md；G2 不阻塞'])
     }
-    return fail(item, label, '缺少 project.md：先执行 `/flow init` 生成项目级上下文，再进入 S2。', 'P0', {
+    return fail(item, label, '缺少 project.md：等待负责人在授权卡片上修复（生成项目级上下文）后再进入 S2。', 'P0', {
       example: '## 命令\n| 名称 | 命令 |\n|---|---|\n| test | ./mvnw -B test |\n| build | ./mvnw -B -DskipTests package |',
     })
   }
@@ -1676,7 +1676,7 @@ export function checkG6TamperCheck(ctx: GateCheckContext): CheckOutcome {
   const item = 'g6.tamper'
   const label = '篡改检测项已确认'
   if (ctx.change.lock) {
-    return fail(item, label, '状态被锁定（可能检测到篡改）：先 `/flow repair` 恢复，并由负责人确认篡改检测项。', 'P0', {
+    return fail(item, label, '状态被锁定（可能检测到篡改）：等待负责人在授权卡片上修复，并确认篡改检测项。', 'P0', {
       details: [ctx.change.lock.reason],
     })
   }
@@ -1714,7 +1714,7 @@ export function checkG6ExternalChanges(ctx: GateCheckContext): CheckOutcome {
     if (external.confirmedAt === undefined) problems.push(`未确认的非 agent 改动：${external.path}`)
   }
   if (problems.length > 0) {
-    return fail(item, label, '把工作区里出现的非 agent 改动单列给负责人确认（/flow external confirm），并处理所有未清理的越界记录。', 'P0', {
+    return fail(item, label, '等待负责人在授权卡片上确认非 agent 改动，并处理所有未清理的越界记录。', 'P0', {
       details: problems,
     })
   }

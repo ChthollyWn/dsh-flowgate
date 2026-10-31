@@ -360,12 +360,16 @@ export class FlowEngine {
     }
   }
 
-  /** 状态文件损坏的锁定原因：列出文件路径与原因，并给出诊断/修复入口（03 §14）。 */
+  /**
+   * 状态文件损坏的锁定原因：列出文件路径与原因（03 §14）。
+   * 修复入口不在这里提示命令：用户可见路径统一写「授权卡片」（§0 规则 2）；
+   * `/flow doctor` 输出由 `doctor()` 另外补上 `/flow repair` 诊断入口（help 文本）。
+   */
   private corruptionLockReason(): string {
     const files = this.stateCorruption
     const shown = files.slice(0, 3).map((file) => `${file.path}（${file.reason}）`)
     const rest = files.length > 3 ? `；另有 ${files.length - 3} 个损坏文件` : ''
-    return `状态文件损坏（${files.length} 个）：${shown.join('；')}${rest}。运行 /flow doctor 诊断，/flow repair 从账本重建。`
+    return `状态文件损坏（${files.length} 个）：${shown.join('；')}${rest}。已进入锁定模式`
   }
 
   private async rebuildCounters(): Promise<void> {
@@ -849,7 +853,7 @@ export class FlowEngine {
         detectedCommands: this.config.commands,
         risks: [],
         filesRead: existing?.readFiles ?? [],
-        message: 'FlowGate 已经初始化过；如需更新 project.md，请直接编辑后运行 /flow repair。',
+        message: 'FlowGate 已经初始化过；如需更新 project.md，请直接编辑后点授权卡片上的「修复」重建缓存。',
       }
     }
     await store.scaffold(this.fs, this.root)
@@ -907,8 +911,8 @@ export class FlowEngine {
   }
 
   async newChange(input: NewChangeInput): Promise<NewChangeOutcome> {
-    if (!this.state?.initialized) throw new FlowGateError('FlowGate 未初始化', '先运行 /flow init')
-    if (this.state.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow doctor 诊断，/flow repair 恢复')
+    if (!this.state?.initialized) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
+    if (this.state.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     // T2.7：空仓库里 `/flow new <需求>` 不应直接立一个大变更——先走项目级澄清 + 路线图。
     if (!input.project && !input.fromRoadmap && !this.roadmapApprovedByOwner() && (await this.looksLikeEmptyRepository())) {
       this.pushNotice('检测到空仓库：先进入项目级澄清与路线图（PROJECT 变更），批准 GR 后再从路线图立项。')
@@ -919,7 +923,7 @@ export class FlowEngine {
       if (active.length > 0 && this.current && this.current.lifecycle === 'active') {
         throw new FlowGateError(
           `已有进行中的变更 ${this.current.id}（${this.current.title}）`,
-          '同一工作目录同一时间只能推进一个变更；用 /flow pause 暂停它，或 /flow resume 切换',
+          '同一工作目录同一时间只能推进一个变更；在 FlowGate 面板上暂停或切换到另一个变更',
         )
       }
     }
@@ -981,7 +985,7 @@ export class FlowEngine {
 
     if (input.fromRoadmap) {
       const entry = this.roadmapDoc?.entries.find((item) => item.change === input.fromRoadmap)
-      if (!entry) throw new FlowGateError(`路线图里没有 ${input.fromRoadmap}`, '先运行 /flow roadmap 查看条目编号')
+      if (!entry) throw new FlowGateError(`路线图里没有 ${input.fromRoadmap}`, '先在 FlowGate 面板的流程页查看路线图条目编号')
       if (entry.status === '已交付') throw new FlowGateError(`${entry.change} 已交付`, '如需修改请新建关联变更')
       roadmapRef = entry.change
       title = entry.goal || input.title
@@ -1254,14 +1258,14 @@ export class FlowEngine {
 
   async submitGate(gate: GateId): Promise<GateResult> {
     const change = this.requireChange()
-    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     if (gate === 'TG' || gate === 'G4') {
       throw new FlowGateError(`${gate} 不是由 agent 提交的门`, '任务门由 flow_task_done 自动判定，G4 在全部任务完成后自动通过')
     }
     const validation = validateGateSubmission(change, gate)
-    if (!validation.ok) throw new FlowGateError(validation.message, '运行 /flow 查看当前阶段与待办')
+    if (!validation.ok) throw new FlowGateError(validation.message, '在 FlowGate 面板查看当前阶段与待办')
     if (gate === 'GR') {
-      if (change.stage !== 'roadmap') throw new FlowGateError('当前不是在项目路线图阶段', '新项目先用 /flow new --project 立项')
+      if (change.stage !== 'roadmap') throw new FlowGateError('当前不是在项目路线图阶段', '新项目先调用 flow_new_change({ project: true }) 立项')
     }
     const now = isoNow(this.clock)
     if (gate === 'G2') await this.ensureBaseline(change)
@@ -1370,10 +1374,10 @@ export class FlowEngine {
       if (gate === 'G3') this.materializePlan(change)
       await this.saveChange(change)
       this.hooks?.onAwaitingOwner?.(change, gate)
-      if (gate === 'GR') this.pushNotice('路线图检查通过，等负责人批准：/flow approve GR。')
+      if (gate === 'GR') this.pushNotice('路线图检查通过：等待负责人在授权卡片上批准。')
       else if (merged) {
         this.pushNotice('低复杂度方案确认卡已就绪：等负责人确认（同时批准 G1 与 G3）。')
-      } else this.pushNotice(`G${gate.slice(1)} 检查通过，等负责人批准：/flow approve ${gate}（或 /flow reject <意见>）。`)
+      } else this.pushNotice(`G${gate.slice(1)} 检查通过：等待负责人在授权卡片上批准或退回（退回需写理由）。`)
       return {
         gate,
         passed: true,
@@ -1401,11 +1405,11 @@ export class FlowEngine {
 
   async approveGate(gate: GateId, options: { reason?: string; confirmRisks?: boolean } = {}): Promise<GateResult> {
     const change = this.requireChange()
-    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     const record = change.gates[gate]
     const awaiting = record?.state === 'awaiting' || (gate === 'G3' && record?.state === 'passed' && change.stage === 'S3')
     if (!awaiting) {
-      throw new FlowGateError(`当前没有等待批准的 ${gate}`, '运行 /flow 查看当前等待批准的门')
+      throw new FlowGateError(`当前没有等待批准的 ${gate}`, '在授权卡片或面板查看当前等待批准的门')
     }
     const now = isoNow(this.clock)
     if (gate === 'GR') {
@@ -1438,7 +1442,7 @@ export class FlowEngine {
     if (gate === 'G3' && level.mergedGates && change.risk === 'high' && options.confirmRisks !== true) {
       throw new FlowGateError(
         '低复杂度 · 高风险的方案确认卡需要逐项确认风险和回滚方案',
-        '在面板点「确认并推进」或在输入框执行 /flow approve G3 --confirm-risks',
+        '请在授权卡片上点「确认并推进」，逐项确认风险与回滚方案',
       )
     }
     const approveG1Too = gate === 'G3' && level.mergedGates && change.gates.G1?.state === 'passed'
@@ -1894,9 +1898,9 @@ export class FlowEngine {
           ruleId: 'R-LOCKED',
           decision: 'deny',
           why: 'FlowGate 处于锁定模式：状态损坏或账本被篡改，写操作一律阻断。',
-          unlock: '运行 /flow doctor 诊断，/flow repair 从账本重建后解除。',
+          unlock: '等待负责人在授权卡片上修复（从账本重建状态后解除锁定）。',
         },
-        message: 'FlowGate 锁定：拒绝写入（R-LOCKED）。解锁：运行 /flow doctor 诊断，/flow repair 恢复。',
+        message: 'FlowGate 锁定：拒绝写入（R-LOCKED）。解除：等待负责人在授权卡片上修复。',
       }
     }
     const change = this.current
@@ -1931,7 +1935,7 @@ export class FlowEngine {
             ruleId: 'R-BUDGET',
             decision: 'deny',
             why: `本变更 token 用量 ${change.tokenUsage ?? 0} 已超过预算，已暂停并转人工（${budgetPending.id}）。`,
-            unlock: '负责人运行 /flow risk approve ' + budgetPending.id + ' 确认继续，或 /flow pause 结束本会话。',
+            unlock: '等待负责人在授权卡片上确认继续（' + budgetPending.id + '），或暂停本会话。',
           },
           message: `拒绝：token 预算已超（R-BUDGET，待处理 ${budgetPending.id}）。`,
         }
@@ -1946,8 +1950,8 @@ export class FlowEngine {
       if (target && (isUnder(target, '.flowgate') || isUnder(target, '.git'))) {
         return {
           effect: 'deny',
-          rule: { ruleId: 'R-PROTECTED', decision: 'deny', why: 'FlowGate 状态与 git 内部文件不允许 agent 直接写。', unlock: '用 flow_* 工具或 /flow 命令修改状态。' },
-          message: '拒绝：受保护路径（R-PROTECTED）。用 flow_* 工具或 /flow 命令修改状态。',
+          rule: { ruleId: 'R-PROTECTED', decision: 'deny', why: 'FlowGate 状态与 git 内部文件不允许 agent 直接写。', unlock: '用 flow_* 工具修改状态。' },
+          message: '拒绝：受保护路径（R-PROTECTED）。用 flow_* 工具修改状态。',
         }
       }
       return { effect: 'allow', message: '', notes: ['尚未立项：建议用 flow_new_change 立项'] }
@@ -2074,7 +2078,7 @@ export class FlowEngine {
       if (existing) {
         decision.notes = [
           ...(decision.notes ?? []),
-          `已存在阻断项 ${existing.id}（${existing.title}），负责人运行 /flow unblock ${existing.id} 后重试即可，不要重复申请`,
+          `已存在阻断项 ${existing.id}（${existing.title}），等待负责人在授权卡片上处理后重试即可，不要重复申请`,
         ]
         return existing
       }
@@ -2094,9 +2098,9 @@ export class FlowEngine {
           actionFingerprint: fingerprint,
         },
       })
-      item.detail = `${item.detail}\n负责人确认后运行 /flow unblock ${item.id} 解锁（只读取证与 flow_status/flow_report_risk 不受限）。`
+      item.detail = `${item.detail}\n等待负责人在授权卡片上确认后解锁（只读取证与 flow_status/flow_report_risk 不受限）。`
       await this.appendLedger('rule.human', { changeId: change.id, pendingId: item.id, ruleId: decision.rule?.ruleId })
-      this.pushNotice(`需要负责人确认：${item.id}（${item.title}）。负责人运行 /flow unblock ${item.id} 后继续。`)
+      this.pushNotice(`需要负责人确认：${item.id}（${item.title}）。等待负责人在授权卡片上处理后继续。`)
       return item
     }
 
@@ -2163,7 +2167,7 @@ export class FlowEngine {
       data: { taskId },
       scope: { changeId: change.id, taskId },
     })
-    item.detail = `${item.detail}\n负责人确认后运行 /flow unblock ${item.id} 解锁（可只读诊断、查状态、上报风险）。`
+    item.detail = `${item.detail}\n等待负责人在授权卡片上确认后解锁（可只读诊断、查状态、上报风险）。`
     await this.appendLedger('task.blocked', {
       changeId: change.id,
       taskId,
@@ -2171,7 +2175,7 @@ export class FlowEngine {
       pendingId: item.id,
     })
     this.pushNotice(
-      `任务 ${taskId} 连续 ${failureCount} 次验证失败已熔断（${item.id}）：只读动作仍放行，负责人运行 /flow unblock ${item.id} 后继续。`,
+      `任务 ${taskId} 连续 ${failureCount} 次验证失败已熔断（${item.id}）：只读动作仍放行，等待负责人在授权卡片上处理后继续。`,
     )
     return item
   }
@@ -2457,10 +2461,10 @@ export class FlowEngine {
       const item = this.createPending(change, {
         kind: 'risk',
         title: 'token 预算超支，已暂停转人工',
-        detail: `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。负责人确认后写操作恢复（/flow risk approve ${'RK-n'}），或 /flow pause 结束本会话。`,
+        detail: `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。负责人确认后写操作恢复，或暂停本会话。`,
         data: { trigger: 'token-budget', used: rounded, budget },
       })
-      item.detail = `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。运行 /flow risk approve ${item.id} 确认继续，或 /flow pause 结束本会话。`
+      item.detail = `本变更累计约 ${rounded} token，超过${complexityLabel(change.complexity)}复杂度预算 ${budget}。请在授权卡片上确认继续，或暂停本会话。`
       await this.appendLedger('budget.exceeded', { changeId: change.id, pendingId: item.id, used: rounded, budget })
       this.pushNotice(`token 预算超支：累计 ${rounded} / 预算 ${budget}。已暂停写操作，等负责人处理 ${item.id}。`)
     }
@@ -2540,7 +2544,7 @@ export class FlowEngine {
     if (change.stage !== 'S4') {
       throw new FlowGateError(`当前阶段 ${change.stage} 不能开始任务`, 'S4 执行阶段才能领取任务；先用 flow_submit 完成当前门')
     }
-    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     const tasks = this.getTasks()
     const task = tasks.find((item) => item.id === taskId)
     if (!task) throw new FlowGateError(`没有任务 ${taskId}`, `可用任务：${tasks.map((item) => item.id).join('、')}`)
@@ -2654,7 +2658,7 @@ export class FlowEngine {
     const change = this.requireChange()
     if (change.stage !== 'S4') throw new FlowGateError(`当前阶段 ${change.stage} 不能完成任务`, '只有 S4 执行阶段的任务可以提交')
     const task = this.getTask(taskId)
-    if (!task) throw new FlowGateError(`没有任务 ${taskId}`, '运行 /flow 查看任务列表')
+    if (!task) throw new FlowGateError(`没有任务 ${taskId}`, '在 FlowGate 面板查看任务列表')
     const taskState = change.tasks[taskId]
     if (!taskState) throw new FlowGateError(`任务 ${taskId} 未在执行计划中`, '重新提交 G3 后再试')
     if (taskState.status === 'done') throw new FlowGateError(`${taskId} 已经完成`, '无需重复提交')
@@ -2825,7 +2829,7 @@ export class FlowEngine {
     if (change.stage !== 'S4') {
       throw new FlowGateError(`当前阶段 ${change.stage} 不能派发任务`, '只有 S4 执行阶段可以按执行图派发')
     }
-    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     if (this.config.dispatch === 'inline') {
       throw new FlowGateError('当前是 inline 模式，不派子 agent', '用 flow_task_start 按执行图顺序领取任务；要派发请把 config.dispatch 改为 auto 或 subagent')
     }
@@ -2870,7 +2874,7 @@ export class FlowEngine {
             batchId: batch.batch,
             mode: batch.mode,
             blocked: ownerConflict,
-            message: `批次 ${batch.batch} 的集成检查点连续失败 ${attempts} 次（上限 ${limit}），已转为负责人处理（${ownerConflict.id}）。修好后由负责人执行 /flow conflict approve ${ownerConflict.id}（或面板确认），再调用 flow_dispatch_next 重试。`,
+            message: `批次 ${batch.batch} 的集成检查点连续失败 ${attempts} 次（上限 ${limit}），已转为负责人处理（${ownerConflict.id}）。修好后等待负责人在授权卡片上确认，再调用 flow_dispatch_next 重试。`,
           }
         }
         await this.appendLedger('checkpoint.retry_requested', {
@@ -3000,7 +3004,7 @@ export class FlowEngine {
       const taskState = change.tasks[nextId]
       if (!nextTask || !taskState) continue
       if (taskState.status === 'blocked') {
-        throw new FlowGateError(`任务 ${nextId} 被阻塞`, '先处理该任务的待处理项（/flow 查看）后再派发')
+        throw new FlowGateError(`任务 ${nextId} 被阻塞`, '先等待负责人在授权卡片上处理该任务的待处理项后再派发')
       }
       const runningTask = Object.values(change.tasks).find((item) => item.status === 'running')
       if (runningTask) throw new FlowGateError(`任务 ${runningTask.id} 仍在运行`, '顺序批次一次只能运行一个任务；等它结束后再调用 flow_dispatch_next')
@@ -3128,7 +3132,7 @@ export class FlowEngine {
     const change = this.requireChange()
     if (!reason.trim()) throw new FlowGateError('豁免审查必须写理由', '用法：/flow review waive <RV-n> <理由>')
     const review = change.reviews.find((item) => item.id === reviewId)
-    if (!review) throw new FlowGateError(`没有审查记录 ${reviewId}`, '运行 /flow 查看审查记录')
+    if (!review) throw new FlowGateError(`没有审查记录 ${reviewId}`, '在 FlowGate 面板查看审查记录')
     if (review.waived === true) return review
     review.waived = true
     review.waivedReason = reason
@@ -3331,7 +3335,7 @@ export class FlowEngine {
     const change = this.requireChange()
     const now = isoNow(this.clock)
     const batch = change.batches.find((item) => item.id === batchId)
-    if (!batch) throw new FlowGateError(`没有批次 ${batchId}`, '运行 /flow 查看执行图')
+    if (!batch) throw new FlowGateError(`没有批次 ${batchId}`, '在 FlowGate 面板查看执行图')
     if (batch.status === 'done') {
       // 幂等：并发/迟到的检查点回调不重复改状态（成功重放直接返回，失败回调忽略）。
       return
@@ -3610,14 +3614,14 @@ export class FlowEngine {
 
   async runVerify(request: VerifyRequest): Promise<EvidenceReceipt> {
     const change = this.requireChange()
-    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
     let command = request.command
     let inputs = request.inputs
     let groupName = request.group
     let task: TaskCard | undefined
     if (request.taskId) {
       task = this.getTask(request.taskId)
-      if (!task) throw new FlowGateError(`没有任务 ${request.taskId}`, '运行 /flow 查看任务列表')
+      if (!task) throw new FlowGateError(`没有任务 ${request.taskId}`, '在 FlowGate 面板查看任务列表')
       const group = task.verify.find((item) => item.group === request.group)
       if (!group) throw new FlowGateError(`任务 ${request.taskId} 没有验证组 ${request.group}`, `可用验证组：${task.verify.map((item) => item.group).join('、')}`)
       command = group.command
@@ -3782,7 +3786,7 @@ export class FlowEngine {
     const change = this.requireChange()
     if (change.stage !== 'S4') throw new FlowGateError('只有 S4 执行阶段可以申请范围变更', '当前阶段不需要范围变更')
     const task = this.getTask(input.taskId)
-    if (!task) throw new FlowGateError(`没有任务 ${input.taskId}`, '运行 /flow 查看任务列表')
+    if (!task) throw new FlowGateError(`没有任务 ${input.taskId}`, '在 FlowGate 面板查看任务列表')
     if (!input.add || input.add.length === 0) throw new FlowGateError('范围变更至少写一个路径', '用法：flow_request_scope_change({ taskId, add: ["src/..."], reason })')
     if (!input.reason.trim()) throw new FlowGateError('范围变更必须写理由', '说明为什么必须改这些文件')
     const limit = this.configFor(change).triggers.max_scope_new_files
@@ -3808,7 +3812,7 @@ export class FlowEngine {
     }
     await this.appendLedger('scope.requested', { changeId: change.id, pendingId: item.id, taskId: input.taskId, add: input.add })
     await this.saveChange(change)
-    this.pushNotice(`收到范围变更申请 ${item.id}，等负责人处理：/flow scope approve ${item.id} 或 /flow scope reject ${item.id} <理由>。`)
+    this.pushNotice(`收到范围变更申请 ${item.id}：等待负责人在授权卡片上批准或退回（退回需写理由）。`)
     return item
   }
 
@@ -3855,7 +3859,7 @@ export class FlowEngine {
   async decidePending(id: string, decision: 'approved' | 'rejected', reason?: string): Promise<PendingItem> {
     const change = this.requireChange()
     const item = change.pending.find((entry) => entry.id === id)
-    if (!item) throw new FlowGateError(`没有待处理项 ${id}`, '运行 /flow 查看待处理项列表')
+    if (!item) throw new FlowGateError(`没有待处理项 ${id}`, '在 FlowGate 面板查看待处理项列表')
     if (item.status !== 'open') throw new FlowGateError(`${id} 已经处理过（${item.status}）`, '不能重复处理')
     const now = isoNow(this.clock)
     item.status = decision
@@ -4203,7 +4207,7 @@ export class FlowEngine {
   async revokeException(id: string, reason?: string): Promise<void> {
     const change = this.requireChange()
     const exception = change.exceptions.find((item) => item.id === id)
-    if (!exception) throw new FlowGateError(`没有例外 ${id}`, '运行 /flow 查看例外列表')
+    if (!exception) throw new FlowGateError(`没有例外 ${id}`, '在 FlowGate 面板查看例外列表')
     exception.revokedAt = isoNow(this.clock)
     exception.revokedReason = reason
     await this.appendLedger('exception.revoked', { changeId: change.id, exceptionId: id, reason })
@@ -4392,7 +4396,7 @@ export class FlowEngine {
         change.externalChanges = [...(change.externalChanges ?? []), { path, at: now, origin: 'external' }]
       }
       await this.appendLedger('external.detected', { changeId: change.id, paths: external })
-      this.pushNotice(`接续时检测到 ${external.length} 处会话之间的非 agent 改动：${external.slice(0, 5).join('、')}。G6 前需 /flow external confirm。`)
+      this.pushNotice(`接续时检测到 ${external.length} 处会话之间的非 agent 改动：${external.slice(0, 5).join('、')}。G6 前需在授权卡片上确认。`)
     } catch {
       // 快照对比失败不阻塞接续。
     }
@@ -4444,17 +4448,17 @@ export class FlowEngine {
     if (this.stateCorruption.length > 0) {
       throw new FlowGateError(
         '状态文件损坏，不能接续变更',
-        '运行 /flow doctor 诊断，/flow repair 从账本重建后再接续',
+        '等待负责人在授权卡片上修复（从账本重建状态）后再接续',
       )
     }
     // 与 autoAttach 一致：PROJECT（路线图阶段）也允许显式接续。
     const active = (this.state?.changes ?? []).filter((change) => change.lifecycle === 'active')
-    if (active.length === 0) throw new FlowGateError('没有进行中的变更', '用 /flow new <描述> 立项')
-    if (active.length > 1) throw new FlowGateError('有多个进行中的变更', `用 /flow resume <变更编号> 选择：${active.map((change) => change.id).join('、')}`)
+    if (active.length === 0) throw new FlowGateError('没有进行中的变更', '用一句话描述要做的变更，让 agent 立项')
+    if (active.length > 1) throw new FlowGateError('有多个进行中的变更', `在 FlowGate 面板上选择要接续的变更：${active.map((change) => change.id).join('、')}`)
     const change = active[0]!
     const lease = this.state?.leases.find((item) => item.changeId === change.id)
     if (lease && lease.sessionId !== this.sessionId && !isOlderThanMinutes(lease.heartbeatAt, this.config.session.lease_minutes, this.clock.now())) {
-      throw new FlowGateError(`${change.id} 正在另一个会话中进行`, `如确认旧会话已停止，用 /flow resume ${change.id} --takeover 接管`)
+      throw new FlowGateError(`${change.id} 正在另一个会话中进行`, `如确认旧会话已停止，在 FlowGate 面板上接管 ${change.id}`)
     }
     await this.acquireLease(change)
     await this.reloadArtifacts()
@@ -4466,11 +4470,11 @@ export class FlowEngine {
     if (this.stateCorruption.length > 0) {
       throw new FlowGateError(
         '状态文件损坏，不能恢复变更',
-        '运行 /flow doctor 诊断，/flow repair 从账本重建后再恢复',
+        '等待负责人在授权卡片上修复（从账本重建状态）后再恢复',
       )
     }
     const change = this.state?.changes.find((item) => item.id === changeId)
-    if (!change) throw new FlowGateError(`没有变更 ${changeId}`, '运行 /flow 查看台账')
+    if (!change) throw new FlowGateError(`没有变更 ${changeId}`, '在 FlowGate 面板查看台账')
     if (change.lifecycle === 'archived') throw new FlowGateError(`${changeId} 已归档`, '已交付的变更不能继续；要修改请新建关联变更')
     const lease = this.state?.leases.find((item) => item.changeId === changeId)
     const now = isoNow(this.clock)
@@ -4478,7 +4482,7 @@ export class FlowEngine {
       if (!options.takeover) {
         throw new FlowGateError(
           `${changeId} 正在另一个会话中进行（心跳 ${lease.heartbeatAt}）`,
-          `确认旧会话已停止后用 /flow resume ${changeId} --takeover 接管`,
+          `确认旧会话已停止后在 FlowGate 面板上接管 ${changeId}`,
         )
       }
       await this.appendLedger('session.takeover', { changeId, from: lease.sessionId, to: this.sessionId })
@@ -4744,16 +4748,16 @@ export class FlowEngine {
       coverage: this.coverageReport ?? undefined,
       hostCapabilities: {},
       message: !this.isInitialized()
-        ? 'FlowGate 未启用：项目没有 .flowgate/config.yaml。运行 /flow init 启用。'
+        ? 'FlowGate 未启用：项目没有 .flowgate/config.yaml。在授权卡片上启用（或 /flow init）。'
         : this.state?.locked
-          ? `锁定模式：${this.state.locked.reason}`
+          ? `锁定模式：${this.state.locked.reason}。修复入口：/flow repair。`
           : 'FlowGate 运行正常。',
     }
     return report
   }
 
   async repair(): Promise<{ ok: boolean; message: string }> {
-    if (!this.isInitialized()) throw new FlowGateError('FlowGate 未初始化', '先运行 /flow init')
+    if (!this.isInitialized()) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
     const verification = this.ledger ? await this.ledger.verify() : { ok: false, lines: 0, failures: [{ line: 0, reason: 'ledger missing' }] }
     if (!verification.ok) {
       return {
@@ -4910,7 +4914,7 @@ export class FlowEngine {
       // 锁定模式可能由「损坏的 status.json 被跳过」导致（此时没有 current）：注入文本
       // 仍要给出锁定原因与修复入口，避免 agent 在 fail-open 错觉下继续写源码。
       if (this.state?.locked) {
-        const text = `[FlowGate] 锁定模式：${this.state.locked.reason}。写操作被拒绝，运行 /flow doctor 诊断、/flow repair 恢复。`
+        const text = `[FlowGate] 锁定模式：${this.state.locked.reason}。写操作被拒绝，等待负责人在授权卡片上修复。`
         return { text, approxTokens: approx(text) }
       }
       if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
@@ -4918,17 +4922,17 @@ export class FlowEngine {
         const text = `[FlowGate] 路线图已批准，但还没有立项变更。下一步：用 flow_new_change({ fromRoadmap: "${first}" }) 立项第一个变更（工程骨架 ${first}）；不要用无 fromRoadmap 的立项绕过路线图。`
         return { text, approxTokens: approx(text) }
       }
-      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更。下一步：用 flow_new_change 立项，或 /flow new <描述>。`
+      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更。下一步：用 flow_new_change 立项（负责人用一句话描述需求即可）。`
       return { text, approxTokens: approx(text) }
     }
     if (change.off) {
-      const text = `[FlowGate] 本会话门禁已被负责人临时关闭（/flow off），操作不再拦截；账本已记录。`
+      const text = `[FlowGate] 本会话门禁已被负责人临时关闭，操作不再拦截；账本已记录。`
       return { text, approxTokens: approx(text) }
     }
     const lines: string[] = []
     lines.push(`[FlowGate] 变更 ${change.id}「${change.title}」｜阶段 ${change.stage} ${STAGE_LABELS[change.stage] ?? ''}｜${complexityLabel(change.complexity)} · ${riskLabel(change.risk)}`)
     if (this.state?.locked) {
-      lines.push(`锁定模式：${this.state.locked.reason}。写操作被拒绝，运行 /flow doctor 诊断、/flow repair 恢复。`)
+      lines.push(`锁定模式：${this.state.locked.reason}。写操作被拒绝，等待负责人在授权卡片上修复。`)
       return { text: lines.join('\n'), approxTokens: approx(lines.join('\n')) }
     }
     const level = this.level()
@@ -4963,16 +4967,16 @@ export class FlowEngine {
     const breaker = pending.find((item) => item.kind === 'blocker')
     if (breaker) {
       lines.push(
-        `熔断阻断 ${breaker.id}：只读动作（read/grep、只读 shell）、flow_status/flow_diff/flow_report_risk 不受限，可先取证；负责人确认后运行 /flow unblock ${breaker.id}（也可 /flow unblock <任务id>）解锁。`,
+        `熔断阻断 ${breaker.id}：只读动作（read/grep、只读 shell）、flow_status/flow_diff/flow_report_risk 不受限，可先取证；等待负责人在授权卡片上确认后解锁。`,
       )
     }
     const awaiting = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')
-    if (awaiting) lines.push(`当前等待负责人批准 ${awaiting[0]}：结束本轮，告诉负责人运行 /flow approve ${awaiting[0]}。`)
+    if (awaiting) lines.push(`当前等待负责人批准 ${awaiting[0]}：结束本轮，告诉负责人到授权卡片上确认（批准或退回）。`)
     const violations = change.violations.filter((violation) => !violation.clearedAt)
     if (violations.length > 0) lines.push(`未撤销的越界改动：${violations.map((violation) => violation.path).join('、')}；撤销（git checkout -- 文件）或申请范围变更后才能继续写入。`)
     const external = (change.externalChanges ?? []).filter((item) => item.confirmedAt === undefined)
     if (external.length > 0) {
-      lines.push(`非 agent 改动待确认：${external.map((item) => item.path).join('、')}；负责人运行 /flow external confirm 确认（G6 前必须处理）。`)
+      lines.push(`非 agent 改动待确认：${external.map((item) => item.path).join('、')}；等待负责人在授权卡片上确认（G6 前必须处理）。`)
     }
     const notices = this.notices.slice(-3)
     if (notices.length > 0) lines.push(...notices)
@@ -5048,19 +5052,27 @@ export class FlowEngine {
     })
   }
 
+  /**
+   * 用户可见的「下一步」短句（ui-interaction-redesign §5.3）。
+   *
+   * 需要负责人拍板的步骤统一写成「等待负责人在授权卡片上确认/处理」，不再提示
+   * 负责人手输 `/flow ...`：授权卡片走客户端 `bridge.runCommand` 直接执行命令
+   * （§0 规则 1）。`/flow` 命令本身保留给高级用户；agent 工具名（flow_submit 等）
+   * 属于模型动作，可以出现在这里。
+   */
   private nextStepText(change: ChangeStatus | null, level: LevelProfile | null): string {
-    if (!this.isInitialized()) return '运行 /flow init 启用 FlowGate'
-    if (this.state?.locked) return '运行 /flow doctor 诊断，/flow repair 恢复'
+    if (!this.isInitialized()) return 'FlowGate 未启用：在授权卡片上启用后继续'
+    if (this.state?.locked) return 'FlowGate 已锁定：等待负责人在授权卡片上修复'
     if (!change) {
       if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
         const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
         return `用 flow_new_change({ fromRoadmap: "${first}" }) 从已批准路线图立项（第一个变更必须是工程骨架 ${first}）`
       }
-      return '用 /flow new <描述> 立项'
+      return '用一句话描述你想做的变更，由 agent 立项'
     }
-    if (change.off) return '门禁已关闭（/flow on 恢复）'
+    if (change.off) return '门禁已关闭：可在授权卡片上恢复'
     const awaiting = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')?.[0]
-    if (awaiting) return `等待负责人：/flow approve ${awaiting}`
+    if (awaiting) return `等待负责人在授权卡片上确认（${awaiting}）`
     switch (change.stage) {
       case 'roadmap':
         return '写路线图后 flow_submit({gate:"GR"})'
@@ -5079,7 +5091,7 @@ export class FlowEngine {
         const openBreaker = change.pending.find((item) => item.status === 'open' && item.kind === 'blocker')
         if (blocked || openBreaker) {
           const target = openBreaker?.id ?? blocked?.id ?? ''
-          return `等待负责人 /flow unblock ${target}（连续失败已熔断；只读动作仍可执行）`
+          return `等待负责人在授权卡片上处理 ${target}（连续失败已熔断；只读动作仍可执行）`
         }
         if (change.batches.some((batch) => batch.status === 'checkpoint')) return '执行集成检查点（合并 + 全量测试）'
         return '按执行图开始下一个任务'
@@ -5097,7 +5109,7 @@ export class FlowEngine {
     const snap = this.snapshot()
     const lines: string[] = []
     lines.push(`${snap.statusLine}`)
-    if (!snap.initialized) return 'FlowGate 未启用 · 运行 /flow init 启用'
+    if (!snap.initialized) return 'FlowGate 未启用 · 在授权卡片上启用'
     if (snap.locked) lines.push(`⚠ 锁定模式：${this.state?.locked?.reason ?? ''}`)
     if (snap.changeId) {
       lines.push(`变更 ${snap.changeId}「${snap.title}」｜${complexityLabel(snap.complexity ?? 'medium')} · ${riskLabel(snap.risk ?? 'normal')}｜阶段 ${snap.stage} ${STAGE_LABELS[snap.stage ?? 'S0']}`)
@@ -5111,7 +5123,7 @@ export class FlowEngine {
       }
       if (snap.pending.length > 0) lines.push(`待处理：${snap.pending.map((item) => `${item.id} ${item.title}`).join('；')}`)
       const breaker = snap.pending.find((item) => item.kind === 'blocker')
-      if (breaker) lines.push(`熔断阻断 ${breaker.id}：负责人运行 /flow unblock ${breaker.id} 解锁（只读动作不受限）`)
+      if (breaker) lines.push(`熔断阻断 ${breaker.id}：等待负责人在授权卡片上处理后解锁（只读动作不受限）`)
       if (snap.violations.length > 0) lines.push(`越界：${snap.violations.map((item) => item.path).join('、')}`)
       lines.push(`下一步：${snap.nextStep}`)
     }
@@ -5129,7 +5141,7 @@ export class FlowEngine {
   // ------------------------------------------------------------------
 
   private requireChange(): ChangeStatus {
-    if (!this.current) throw new FlowGateError('当前没有进行中的变更', '用 /flow new <描述> 立项，或 /flow resume <变更编号> 继续')
+    if (!this.current) throw new FlowGateError('当前没有进行中的变更', '用一句话描述要做的变更，让 agent 立项；或在面板接续已有变更')
     return this.current
   }
 
@@ -5283,8 +5295,8 @@ export function extractMentionedPaths(text: string): string[] {
 }
 
 export function buildStatusLine(snapshot: RuntimeSnapshot): string {
-  if (!snapshot.initialized) return '◆ FlowGate 未启用 · /flow init 启用'
-  if (snapshot.locked) return '◆ FlowGate 锁定 · /flow doctor 诊断'
+  if (!snapshot.initialized) return '◆ FlowGate 未启用 · 在授权卡片上启用'
+  if (snapshot.locked) return '◆ FlowGate 锁定 · 等待负责人在授权卡片上修复'
   const parts: string[] = ['◆ FlowGate']
   if (snapshot.changeId && snapshot.changeId !== 'PROJECT') {
     parts.push(snapshot.changeId)

@@ -2,8 +2,12 @@
  * Intercepts view (FR-8.2 / FR-9.3 / T5.1): intercept log, per-rule stats,
  * coverage self-check, rule dry-run and false-positive feedback
  * (allow-once / add exception / copy evidence). Readable and usable without a
- * remote: the dry-run falls back to a conservative local heuristic and the
- * feedback buttons fall back to `/flow` commands.
+ * remote: the dry-run falls back to a conservative local heuristic.
+ *
+ * v0.2 interaction contract: false-positive feedback is a card action — the
+ * buttons run `performAction` → `bridge.runCommand`; host rule data that still
+ * embeds a literal `/flow ...` command in its `unlock` hint is not shown to the
+ * owner (the card's buttons are the unlock).
  */
 import React from 'react'
 import type { ViewProps } from '../view-types'
@@ -20,6 +24,18 @@ const TABS: { id: Tab; labelKey: 'intercepts.tab.log' | 'intercepts.tab.stats' |
   { id: 'coverage', labelKey: 'intercepts.tab.coverage' },
   { id: 'trial', labelKey: 'intercepts.tab.trial' },
 ]
+
+/**
+ * Host rule rows historically carry an `unlock` hint that may be a literal
+ * `/flow ...` command. The v0.2 interaction contract forbids showing commands
+ * the owner must type, so command-shaped hints are omitted: the feedback card's
+ * buttons are the unlock action (a click executes it).
+ */
+function visibleUnlock(unlock: string | undefined): string | null {
+  const text = (unlock ?? '').trim()
+  if (text === '' || text.includes('/flow')) return null
+  return text
+}
 
 function interceptEvidence(row: InterceptRow): string {
   return JSON.stringify(
@@ -51,6 +67,7 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
 
   const rows = model.intercepts
   const selected = feedbackFor !== undefined ? rows[feedbackFor] : undefined
+  const selectedUnlock = selected !== undefined ? visibleUnlock(selected.unlock) : null
   const trial =
     trialDone && model.rules.length > 0
       ? trialRuleLocal(
@@ -180,9 +197,11 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
                     <Mono>{selected.ruleId}</Mono>
                     <span style={{ color: COLORS.dim }}>{selected.why}</span>
                   </div>
-                  <div style={{ color: COLORS.faint, fontSize: 10.5 }}>
-                    {t('intercepts.unlock')}：{selected.unlock}
-                  </div>
+                  {selectedUnlock !== null ? (
+                    <div style={{ color: COLORS.faint, fontSize: 10.5 }} data-flowgate="intercept-unlock">
+                      {t('intercepts.unlock')}：{selectedUnlock}
+                    </div>
+                  ) : null}
                   <label style={{ fontSize: 11, color: COLORS.dim }} htmlFor="flowgate-intercepts-reason">
                     {t('common.reason')}
                   </label>

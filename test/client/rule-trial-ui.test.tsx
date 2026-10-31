@@ -4,7 +4,7 @@
  *
  *  - it honours `snapshot.off` (allow) and `snapshot.locked` (deny);
  *  - it honours active `snapshot.exceptions` (allow the matched rule);
- *  - it always states "本地近似试跑：精确判定以宿主 /flow trial 为准" and lists
+ *  - it always states "本地近似试跑：精确判定以宿主规则引擎为准" and lists
  *    project-defined rules the browser cannot evaluate.
  *
  * Interaction runs through `hook-harness` (node environment, no jsdom).
@@ -50,7 +50,7 @@ describe('intercepts view — rule trial card (T5.1)', () => {
     expect(view.html).toContain('data-basis="rule"')
     expect(view.html).toContain('data-approximate="true"')
     expect(view.html).toContain('命中 R-STAGE-SRC')
-    expect(view.html).toContain('本地近似试跑：精确判定以宿主 /flow trial 为准')
+    expect(view.html).toContain('本地近似试跑：精确判定以宿主规则引擎为准')
     expect(view.html).not.toContain('data-flowgate="trial-uncovered"')
   })
 
@@ -68,7 +68,7 @@ describe('intercepts view — rule trial card (T5.1)', () => {
     const view = mountTrial(project)
     expect(view.html).toContain('data-flowgate="trial-uncovered"')
     expect(view.html).toContain('R-CUSTOM')
-    expect(view.html).toContain('精确判定以宿主 /flow trial 为准')
+    expect(view.html).toContain('精确判定以宿主规则引擎为准')
   })
 
   it('respects snapshot.off by allowing the action', () => {
@@ -142,7 +142,7 @@ describe('intercepts view — rule trial card (T5.1)', () => {
 
   it('localizes the disclaimer in English', () => {
     const view = mountTrial(makeProjection(), en)
-    expect(view.html).toContain('the host /flow trial is authoritative')
+    expect(view.html).toContain('the host rule engine is authoritative')
     expect(view.html).not.toMatch(/intercepts\.[a-zA-Z]/)
   })
 })

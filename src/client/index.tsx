@@ -32,8 +32,10 @@ import { DOCK_ID, LOCALE_NS, TAB_ID, TAB_KIND } from './types'
 import { DICTS, fallbackTranslator } from './i18n'
 import type { TFn } from './i18n'
 import { createHostBridge } from './bridge'
+import { installFlowgateStyles } from './styles'
 import { StatusBar } from './dock/StatusBar'
 import { Panel } from './panel/Panel'
+import { registerFlowToolViews } from './toolviews'
 
 export const name = 'dsh-flowgate'
 
@@ -220,6 +222,14 @@ function registerSidebarPanel(ctx: ClientContext, t: TFn, bridge: ReturnType<typ
 export function apply(ctx: ClientContext): void {
   const t = bindTranslator(ctx)
   const bridge = createHostBridge(ctx)
+  // One stylesheet for the whole graphical surface (rail / auth card / flow
+  // map / animations). Idempotent and SSR-safe; a no-op when `document` is
+  // missing (server rendering / verification hosts).
+  try {
+    installFlowgateStyles()
+  } catch (error) {
+    safeWarn(ctx, 'style injection failed', error)
+  }
   try {
     const dispose = bridge.wire()
     if (typeof ctx.effect === 'function') ctx.effect(() => dispose, 'flowgate: host bridge')
@@ -228,6 +238,29 @@ export function apply(ctx: ClientContext): void {
   }
   const dockRegistered = registerDock(ctx, t, bridge)
   registerSidebarPanel(ctx, t, bridge)
+  // Conversation tool rows: flow_* calls render as a mini seven-stage rail
+  // instead of the generic tool card. Ownership lives in apply() so the
+  // disposers are tied to the plugin fiber; a missing host slot degrades to a
+  // no-op inside the registration (never throws).
+  try {
+    const toolViewDisposers = registerFlowToolViews(ctx)
+    if (typeof ctx.effect === 'function') {
+      ctx.effect(
+        () => () => {
+          for (const dispose of toolViewDisposers) {
+            try {
+              dispose()
+            } catch {
+              /* best-effort */
+            }
+          }
+        },
+        'flowgate: tool views',
+      )
+    }
+  } catch (error) {
+    safeWarn(ctx, 'tool view registration failed', error)
+  }
   // Diagnostics (host doctor / e2e): proves the browser half actually applied.
   try {
     ;(globalThis as { __FLOWGATE_CLIENT__?: unknown }).__FLOWGATE_CLIENT__ = {

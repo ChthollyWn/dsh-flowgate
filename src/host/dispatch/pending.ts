@@ -56,23 +56,23 @@ export function blockingPendingItems(engine: EngineLike): PendingItem[] {
   return openOwnerPending(engine, BLOCKING_PENDING_KINDS)
 }
 
-/** 待处理项 → 负责人可执行的命令提示（scope/plan/risk/rule 与 /flow 子命令一一对应）。 */
+/** 待处理项 → 负责人可处理方式提示（卡片/面板导向；/flow 命令只保留在 help 文本）。 */
 export function pendingHint(item: PendingItem): string {
   switch (item.kind) {
     case 'scope':
-      return `/flow scope approve ${item.id} 或 /flow scope reject ${item.id} <理由>`
+      return `等待负责人在授权卡片上批准或退回（${item.id}；退回需写理由）`
     case 'plan':
-      return `/flow plan approve ${item.id} 或 /flow plan reject ${item.id} <理由>`
+      return `等待负责人在授权卡片上批准或退回（${item.id}；退回需写理由）`
     case 'risk':
-      return `/flow risk approve ${item.id} 或 /flow risk reject ${item.id} <理由>`
+      return `等待负责人在授权卡片上批准或退回（${item.id}；退回需写理由）`
     case 'rule':
-      return `/flow rule approve ${item.id} 或 /flow rule reject ${item.id} <理由>`
+      return `等待负责人在授权卡片上批准或退回（${item.id}；退回需写理由）`
     case 'conflict':
-      return `/flow conflict approve ${item.id}（确认冲突/失败已修好并重试检查点）或 /flow conflict reject ${item.id} <理由>（放弃自动重试）`
+      return `等待负责人在授权卡片上确认冲突/失败已修好（${item.id}）并重试检查点，或退回并放弃自动重试`
     case 'blocker':
-      return '任务失败/中断：决定重试或调整执行计划；详情见 /flow status'
+      return '任务失败/中断：等待负责人在授权卡片上决定重试或调整执行计划；详情见面板'
     default:
-      return '运行 /flow 查看待处理项并决定如何处理'
+      return '等待负责人在授权卡片或面板上处理待处理项'
   }
 }
 

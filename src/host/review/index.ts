@@ -185,7 +185,7 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
   const change = engine.currentChange()
   const task = engine.getTask(taskId)
   if (!change || !task) {
-    throw new HostError(`没有任务 ${taskId}`, '运行 /flow 查看执行图')
+    throw new HostError(`没有任务 ${taskId}`, '在 FlowGate 面板查看执行图')
   }
   const { diff, files } = await collectDiff(runtime, taskId)
   const diffFingerprint = sha256Hex(diff)
@@ -393,7 +393,7 @@ export async function runFinalReview(runtime: HostRuntime): Promise<HostReviewOu
   if (!parent) return { ok: false, verdict: 'changes-required', findings: [], coverageOk: false, message: '主会话未绑定' }
   const engine = runtime.requireEngine()
   const change = engine.currentChange()
-  if (!change) throw new HostError('没有进行中的变更', '运行 /flow 查看')
+  if (!change) throw new HostError('没有进行中的变更', '在 FlowGate 面板查看当前变更状态')
   const subagents = runtime.getService<DshSubagentRuntime>('subagents')
   if (!subagents) return { ok: false, verdict: 'changes-required', findings: [], coverageOk: false, message: '子 agent 服务消失' }
   const ports = runtime.ports()
@@ -888,7 +888,7 @@ export async function enforceChildReadOnly(runtime: HostRuntime, childId: string
 /** flow_diff 工具主体：只读返回任务 diff。 */
 export async function readTaskDiff(runtime: HostRuntime, taskId?: string): Promise<{ diff: string; files: string[] }> {
   const { diff, files } = await collectDiff(runtime, taskId)
-  if (diff === '') throw new HostError('没有可审查的 diff（工作区干净）', '确认任务改动已保存；或运行 /flow 查看执行图')
+  if (diff === '') throw new HostError('没有可审查的 diff（工作区干净）', '确认任务改动已保存；或在 FlowGate 面板查看执行图')
   const maxLength = 30_000
   const text = diff.length > maxLength ? `${diff.slice(0, maxLength)}\n…（diff 超过 ${maxLength} 字符，已截断）` : diff
   return { diff: text, files }

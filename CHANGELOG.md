@@ -6,6 +6,38 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.2 开发线：图形化流程 + 卡片化授权，2026-11-01）
+
+> 未发版：本节记录工作区已完成、尚未发布到 npm 的变更。设计契约见 [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md)。
+
+### Added
+
+- **输入区图形化 dock（取代旧的一行文字状态条）**：七阶段动画轨道（当前阶段呼吸脉冲、已完成实线、未完成流动虚线、人工/自动门标记）+ 下一步 chip + 按状态出现的图形化卡片；8 态状态机（demo / locked / off / idle / active / awaiting / pending / blocked）；点击轨道/面板按钮打开右侧栏。DOM 契约（`data-flowgate="flow-dock"` / `flow-rail` / `rail-node` / `dock-next` / `auth-card` 等）与动效规范见设计文档。
+- **点击即授权的授权卡片**：人工门（GR/G1/G3/G6）、待处理项（SC/RK/PC/RL/TM/CF/BL）、非 agent 改动确认、启用/修复/恢复门禁，全部渲染为可点击卡片（含内联退回理由）；点击经 `ctx.remote.commands.execute(sessionId, '/flow …', [])` 由宿主直接执行（`sessions.binding().session.command` 兜底），**不再把命令写进输入框**，用户无需回车确认任何命令。`performAction` 新顺序：remote → executeCommand → 旧 composer/剪贴板降级。
+- **原生提问卡片**：`preset-flowgate` 组合 `@deepseek-ai/dsh-tool-ask-user`，澄清/选择走原生 `ask_user_question` 提问卡（DSH `ui-user-questions` 渲染）；新增 systemPrompt「交互契约」（仅已初始化项目追加）：人工拍板走授权卡、提问必须用 `ask_user_question`（带 options）。
+- **面板图形流程页**：面板头新增 `panel-rail`；Pipeline 改为 hero 进度环 + 纵向 FlowMap 时间线（人工/自动门徽标、产物 chips、「你在这里」、下一步 callout）+ 默认折叠的学习卡；ExecutionGraph 运行中节点加呼吸光效。
+- **会话内工具可视化**：为 16 个 `flow_*` 工具注册 `tool.call.toolview`，聊天里每次 FlowGate 工具调用渲染迷你七阶段轨道 + 当前阶段/门状态/工具生命周期状态（防御式降级，无投影时退回一行文本）。
+- **动效与可访问性**：统一 `src/client/styles.ts`（幂等注入、SSR 安全）；只动画 transform/opacity/stroke-dashoffset；`prefers-reduced-motion: reduce` 下全部关闭。
+- 工作流/文档：并行实现契约 [docs/impl/ui-interaction-redesign.md](docs/impl/ui-interaction-redesign.md)、[host-client-contract](docs/impl/host-client-contract.md) §2 更新、v0.2 真实宿主截图 30–33 与 [screenshots README](docs/screenshots/README.md) 分节。
+
+### Changed
+
+- 用户可见文案全面去命令化（host/core 三批清理，task-3/7/8）：`nextStep` / `pushNotice` / 工具结果 / 门禁 hint / 规则 unlock / 派发提示 / init 输出 / 会话接续提示等统一改为「等待负责人在授权卡片上确认/处理」；仅保留 `/flow help`、命令用法错误、doctor/repair 诊断、agent 工具名。`/flow` 命令保留给高级用户，与卡片等价。
+- 客户端 i18n 447 keys（zh/en parity）；新增 `dock.*`、`viz.*`、`pipeline.*` 等 key，清理 trial/learning 文案里的 `/flow` 提示。
+- 旧「面板按钮 → 填命令到输入框」的兜底仅作为无命令 remote 的旧宿主降级保留（正常 Web 宿主不触发，`ActionOutcome.fallback=false`）。
+
+### Changed（native style iteration, 2026-11-01）
+
+- **负责人反馈后第二轮视觉对齐**：授权卡/dock 宽度与 DSH 原生 plan 审批卡一致（照抄官方 `PlanReviewPanel.module.css` 的 frame/card/strip/summary/footer：`padding:6px calc(var(--dsh-composer-side-clearance)+16px) 10px`、`max-width:var(--dsh-chat-content-width)`、`background:var(--dsw-specific-input-major)`、`border-radius:var(--dsw-radius-xl)`、`box-shadow:var(--dsw-elevation-panel)`）；新增 `data-flowgate="flow-dock-inner"` 测量锚点。
+- **去花哨配色**：删除整卡橙底/大橙进度环/彩色渐变/蓝红实心按钮；授权卡改为原生 plan 三段式（warn-tertiary strip + 小状态点 + 白卡 + 黑白主按钮 + outline 次按钮），rail/next chip/change id/面板 FlowRail/FlowMap/Pipeline hero/Gates 卡/ExecutionGraph 全部切换 `--dsw-*` 中性 token（语义色只用于小状态点/小图标/细线），暗色主题实测无写死白底黑字。
+- 真实宿主实测（1600×1000）：`--dsh-chat-content-width=844.8px`，`flow-dock-inner`=授权卡=844.8px（±0px），dock 外框=composer hero 外框=908.8px（±0px）；composer 白卡内容宽 877px = var + 2×clearance 属宿主 token 设计（原生 plan 卡同样比 composer 窄 32px），已在 docs 披露。
+
+### Verification
+
+- `pnpm lint`（lint-layers + tsc）绿；`npx vitest run` **116 files / 1642 tests** 全绿；`pnpm coverage` 通过 thresholds（合计 86.39 / 76.24 / 86.93 / 89.47）；`pnpm build`（host ≈1.21MB / client 346.6KB）；`verify:package` 39 文件 / 1065.3KB；`verify:client` 通过（18 个插槽：dock + toolview×16 + sidebar tab）。
+- 真实 DSH 0.2.1-rc.5 Web 宿主（隔离 `DSH_HOME`、**零模型请求**）E2E **35/35 断言通过**；原生风格改造后复验：active 12/12、awaiting 43/44（唯一旧断言 data-tone=attention 因 strip 语义改为 warn，data-kind/data-gate/data-action 不变）：awaiting 授权卡 → 点击「确认并推进」→ 1 次真实 `POST /api/commands/execute` 返回「已批准 G3（与 G1 合并确认），进入 S4」→ 卡片消失、阶段推进、宿主写盘 `stage=S4/G3=passed`；**composer 点击前/中/后全程为空**；面板 flow-map/you-are-here/next-step-callout；8 个 tab 无 `/flow` 手输文案；0 pageerror / 0 console.error；reduced-motion 下 0 动画。截图见 [docs/screenshots](docs/screenshots/README.md) 30–33。
+- 限制（如实）：原生提问卡与 toolview 需模型真跑一轮，零模型 E2E 只验证组合面（工具行 + UI 插件在组合中）；awaiting 状态沿用既有离线构造口径，点击→执行→推进为真实链路。
+
 ## [0.1.0] - 2026-10-31
 
 ### Added

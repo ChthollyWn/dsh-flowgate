@@ -134,7 +134,7 @@ export const TRIGGER_RULES: Rule[] = [
     when: {},
     decision: 'human',
     why: '目标路径位于敏感区域（鉴权、支付、迁移、基础设施、CI、生产配置）：按内置触发器转人工确认。',
-    unlock: '让负责人在面板确认本次修改（/flow risk approve <RK-n>）；确认后只对该动作和路径单次放行。',
+    unlock: '等待负责人在授权卡片上确认本次修改（RK-n）；确认后只对该动作和路径单次放行。',
     source: '03 §8.2 敏感路径触发器 · FR-6.2',
     builtin: true,
   },
@@ -143,7 +143,7 @@ export const TRIGGER_RULES: Rule[] = [
     when: {},
     decision: 'human',
     why: '依赖清单/锁文件变更涉及供应链安全与许可证合规，按内置触发器转人工确认。',
-    unlock: '让负责人在面板确认依赖变更（/flow risk approve <RK-n>），只对该次修改单次放行。',
+    unlock: '等待负责人在授权卡片上确认依赖变更（RK-n），只对该次修改单次放行。',
     source: '03 §8.2 依赖变更触发器 · FR-6.2',
     builtin: true,
   },
@@ -179,7 +179,7 @@ export const TRIGGER_RULES: Rule[] = [
     when: {},
     decision: 'human',
     why: '同一任务验证连续失败达到上限（默认 3 次）：先停下按"复现 → 定位根因 → 修复 → 回归"排障。',
-    unlock: '负责人确认后运行 /flow unblock <BL-n> 解锁（只读诊断与 flow_status/flow_report_risk 不受限）；先写清失败现象与根因假设。',
+    unlock: '等待负责人在授权卡片上确认后解锁（BL-n；只读诊断与 flow_status/flow_report_risk 不受限）；先写清失败现象与根因假设。',
     source: '03 §8.2 连续失败触发器 · FR-4.8',
     builtin: true,
   },
@@ -647,8 +647,8 @@ export function matchRiskTriggers(input: RuleEvaluationInput): TriggerHit[] {
         title: '连续验证失败',
         detail: `任务 ${failing.map((task) => `${task.id}（失败 ${task.failureCount} 次）`).join('、')} 达到连续失败上限 ${limit}，暂停并转人工。只读动作（read/grep、只读 shell、flow_status/flow_diff/flow_report_risk）已放行，可先取证；${
           existing
-            ? `已有阻断项 ${existing.id}，负责人确认后运行 /flow unblock ${existing.id} 解锁。`
-            : '负责人确认后运行 /flow unblock <BL-n> 解锁。'
+            ? `已有阻断项 ${existing.id}，等待负责人在授权卡片上确认后解锁。`
+            : '等待负责人在授权卡片上确认后解锁（BL-n）。'
         }`,
       })
     }

@@ -136,7 +136,18 @@ type FlowgateAction =
   | { type: 'open-board' }
 ```
 
-**兜底（必须实现）**：Remote 不可用或 action 返回错误时，客户端把等价的 `/flow ...` 命令写入输入框草稿并聚焦，由负责人回车执行。批准/退回等人工动作只有人能触发，agent 工具里没有对应能力。
+**主路径（2026-11-01 起，授权卡片）**：人工确认/待处理动作由会话输入区上方的授权卡（`conversation.input.dock`）或面板按钮触发。点击后客户端经
+`ctx.remote.commands.execute(sessionId, '/flow ...', [])`（`src/client/bridge.ts` 的 `bridge.runCommand`，
+与官方 slash-command UI 同源）由宿主执行等价命令；**不写输入框、不需要用户回车**。点击即为人授权，
+agent 工具里仍然没有批准/退回能力。`performAction` 的 ports 顺序为
+`remote.flowgate.action` → `executeCommand` → 旧 composer draft → 剪贴板。
+
+**旧兜底（仅旧宿主降级）**：Remote 与命令 Remote 都不可用时，客户端才把等价的 `/flow ...` 命令写入输入框草稿并聚焦，
+由负责人回车执行；或用剪贴板。正常 Web 宿主不会走到这条路径（`ActionOutcome.fallback=false`）。
+
+**提问路径（2026-11-01 起）**：需要用户回答的问题由 agent 调用原生 `ask_user_question`
+（FlowGate 工程模式 preset 组合 `@deepseek-ai/dsh-tool-ask-user`），由 `@deepseek-ai/dsh-client-ui-user-questions`
+渲染原生提问卡片；FlowGate 不自绘提问卡。
 
 ## 3. 客户端注册（slot）
 

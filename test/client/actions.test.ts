@@ -1,6 +1,13 @@
 /**
- * Action mapping + fallback tests (T2.6 acceptance: approve → remote call, or
- * `/flow approve G1` written into the input box; H10 degradation path).
+ * Action mapping + fallback tests.
+ *
+ * v0.2 interaction contract (docs/impl/ui-interaction-redesign.md §0/§4):
+ *  - click-to-execute: the button click submits the equivalent `/flow ...` line
+ *    through the host command remote (`ports.executeCommand`), the outcome is
+ *    `fallback=false` and the composer draft is NEVER written;
+ *  - legacy degradation (host without the command remote): composer draft, then
+ *    clipboard (`fallback=true`);
+ *  - everything failing: `actions.executeFailed`, never a raw command hint.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -63,6 +70,10 @@ describe('commandFor', () => {
       [{ kind: 'confirm-external' }, '/flow external confirm all'],
       [{ kind: 'confirm-external', path: 'src/manual.ts' }, '/flow external confirm src/manual.ts'],
       [{ kind: 'raise-complexity', reason: '范围变大' }, '/flow complexity high 范围变大'],
+      // Dock authorization cards for non-project states (demo / locked / off).
+      [{ kind: 'enable' }, '/flow init'],
+      [{ kind: 'repair' }, '/flow repair'],
+      [{ kind: 'gates-on' }, '/flow on'],
       [{ kind: 'resume', changeId: 'C-003' }, '/flow resume C-003'],
       [{ kind: 'resume', changeId: 'C-003', takeover: true }, '/flow resume C-003 --takeover'],
       [{ kind: 'pause' }, '/flow pause'],
@@ -82,6 +93,9 @@ describe('commandFor', () => {
     expect(needsReason({ kind: 'allow-once', ruleId: 'R', reason: 'x' })).toBe(true)
     expect(needsReason({ kind: 'approve', gate: 'G1' })).toBe(false)
     expect(needsReason({ kind: 'pause' })).toBe(false)
+    expect(needsReason({ kind: 'enable' })).toBe(false)
+    expect(needsReason({ kind: 'repair' })).toBe(false)
+    expect(needsReason({ kind: 'gates-on' })).toBe(false)
   })
 
   it('maps UI actions to the host remote payload from the contract', () => {
@@ -120,7 +134,107 @@ describe('performAction', () => {
     expect(calls).toEqual([{ type: 'approve', gate: 'G3' }])
   })
 
-  it('T2.6: approve G1 calls the remote, or falls back to /flow approve G1 in the input box', async () => {
+  it('T2.6 click-to-execute: approve G1 runs through the command remote and never fills the composer', async () => {
+    const executed: string[] = []
+    const drafts: string[] = []
+    const outcome = await performAction(
+      { kind: 'approve', gate: 'G1' },
+      ports({
+        executeCommand: (command) => {
+          executed.push(command)
+          return true
+        },
+        fillCommand: (command) => {
+          drafts.push(command)
+          return true
+        },
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    expect(outcome.fallback).toBe(false)
+    expect(outcome.message).toBe('已执行')
+    expect(outcome.command).toBe('/flow approve G1')
+    expect(executed).toEqual(['/flow approve G1'])
+    // The click is the human authorization: the input box stays empty.
+    expect(drafts).toEqual([])
+  })
+
+  it('accepts an async command remote and still skips the composer draft', async () => {
+    const drafts: string[] = []
+    const outcome = await performAction(
+      { kind: 'approve-pending', id: 'RK-2', reason: '接受风险' },
+      ports({
+        executeCommand: async (command) => command === '/flow risk approve RK-2 接受风险',
+        fillCommand: (command) => {
+          drafts.push(command)
+          return true
+        },
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    expect(outcome.fallback).toBe(false)
+    expect(outcome.command).toBe('/flow risk approve RK-2 接受风险')
+    expect(drafts).toEqual([])
+  })
+
+  it('prefers click-to-execute over the composer when the host remote fails', async () => {
+    const { remote } = recordingRemote({ ok: false, message: '无权调用' })
+    const executed: string[] = []
+    const drafts: string[] = []
+    const outcome = await performAction(
+      { kind: 'approve', gate: 'G3' },
+      ports({
+        remote,
+        executeCommand: (command) => {
+          executed.push(command)
+          return true
+        },
+        fillCommand: (command) => {
+          drafts.push(command)
+          return true
+        },
+      }),
+    )
+    expect(outcome.ok).toBe(true)
+    expect(outcome.fallback).toBe(false)
+    expect(executed).toEqual(['/flow approve G3'])
+    expect(drafts).toEqual([])
+  })
+
+  it('degrades to the composer draft when the command remote rejects or throws', async () => {
+    const drafts: string[] = []
+    const rejected = await performAction(
+      { kind: 'approve', gate: 'G3' },
+      ports({
+        executeCommand: () => false,
+        fillCommand: (command) => {
+          drafts.push(command)
+          return true
+        },
+      }),
+    )
+    expect(rejected.ok).toBe(true)
+    expect(rejected.fallback).toBe(true)
+    expect(drafts).toEqual(['/flow approve G3'])
+
+    const thrown = await performAction(
+      { kind: 'approve', gate: 'G3' },
+      ports({
+        executeCommand: () => {
+          throw new Error('command remote crashed')
+        },
+        fillCommand: (command) => {
+          drafts.push(command)
+          return true
+        },
+      }),
+    )
+    expect(thrown.ok).toBe(true)
+    expect(thrown.fallback).toBe(true)
+    expect(drafts).toEqual(['/flow approve G3', '/flow approve G3'])
+  })
+
+  it('falls back to the composer draft on older hosts without the command remote', async () => {
     const filled: string[] = []
     const outcome = await performAction(
       { kind: 'approve', gate: 'G1' },
@@ -130,6 +244,27 @@ describe('performAction', () => {
     expect(outcome.fallback).toBe(true)
     expect(filled).toEqual(['/flow approve G1'])
     expect(outcome.command).toBe('/flow approve G1')
+  })
+
+  it('never executes a command for pending or invalid actions that need no command', async () => {
+    const executed: string[] = []
+    const executeCommand = (command: string): boolean => {
+      executed.push(command)
+      return true
+    }
+    const opened = await performAction(
+      { kind: 'open-panel' },
+      ports({ executeCommand, openPanel: () => true }),
+    )
+    expect(opened.ok).toBe(true)
+    expect(executed).toEqual([])
+    const noReason = await performAction(
+      { kind: 'reject', gate: 'G3', reason: '   ' },
+      ports({ executeCommand }),
+    )
+    expect(noReason.ok).toBe(false)
+    expect(noReason.needsReason).toBe(true)
+    expect(executed).toEqual([])
   })
 
   it('falls back to the composer draft when the remote returns an error', async () => {
@@ -216,10 +351,40 @@ describe('performAction', () => {
     expect(filled).toEqual(['/flow metrics --csv'])
   })
 
-  it('returns a fallback failure message when nothing can be done', async () => {
-    const outcome = await performAction({ kind: 'report' }, ports())
+  it('click-to-execute covers the dock state cards (enable / repair / gates-on)', async () => {
+    const executed: string[] = []
+    const drafts: string[] = []
+    const actionPorts = ports({
+      executeCommand: (command) => {
+        executed.push(command)
+        return true
+      },
+      fillCommand: (command) => {
+        drafts.push(command)
+        return true
+      },
+    })
+    const messages: string[] = []
+    for (const action of [{ kind: 'enable' }, { kind: 'repair' }, { kind: 'gates-on' }] as const) {
+      const outcome = await performAction(action, actionPorts)
+      expect(outcome.ok).toBe(true)
+      expect(outcome.fallback).toBe(false)
+      messages.push(outcome.message)
+    }
+    expect(executed).toEqual(['/flow init', '/flow repair', '/flow on'])
+    expect(messages).toEqual(['已执行', '已执行', '已执行'])
+    expect(drafts).toEqual([])
+  })
+
+  it('reports actions.executeFailed when every path fails (never a raw command hint)', async () => {
+    const outcome = await performAction(
+      { kind: 'report' },
+      ports({ executeCommand: () => false, fillCommand: () => false, copyText: () => false }),
+    )
     expect(outcome.ok).toBe(false)
     expect(outcome.fallback).toBe(true)
-    expect(outcome.message).toContain('/flow report')
+    expect(outcome.message).toBe('未能执行，请稍后重试或打开面板查看')
+    expect(outcome.message).not.toContain('/flow')
+    expect(outcome.command).toBe('/flow report')
   })
 })

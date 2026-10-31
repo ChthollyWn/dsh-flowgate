@@ -320,5 +320,8 @@ describe('上下文压缩后重注入（H3）', () => {
     await flush(20)
     expect(injectedTexts(compacted)).toEqual([])
     expect(h.runtime.featureNotes.session?.join('；')).toContain('上下文压缩后跳过重注入：引擎未就绪')
+    // 未初始化时也走卡片启用，不再提示 /flow init。
+    expect(h.runtime.featureNotes.session?.join('；')).toContain('等待负责人在授权卡片上启用')
+    expect(h.runtime.featureNotes.session?.join('；')).not.toContain('/flow init')
   })
 })

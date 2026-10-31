@@ -136,7 +136,7 @@ export function validateGateSubmission(
   if (change.lifecycle === 'locked') {
     return {
       ok: false,
-      message: `变更 ${change.id} 处于锁定模式（${change.lock?.reason ?? '状态损坏或被篡改'}），不能提交门禁；请负责人执行 /flow repair 后再试。`,
+      message: `变更 ${change.id} 处于锁定模式（${change.lock?.reason ?? '状态损坏或被篡改'}），不能提交门禁；等待负责人在授权卡片上修复后再试。`,
     }
   }
   if (change.stage === 'archived') {

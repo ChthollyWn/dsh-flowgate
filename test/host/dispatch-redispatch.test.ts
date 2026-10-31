@@ -198,10 +198,12 @@ describe('中断任务重新派发：无法确认旧子 agent 状态时保持阻
     expect(value.summary).toContain('没有记录旧子 agent id')
     expect(dispatchCalls.count).toBe(0)
     expect(subagents.state.started).toHaveLength(0)
-    // 生成待处理项：category 带 taskId 标记，负责人可用 /flow risk approve 授权。
+    // 生成待处理项：category 带 taskId 标记，负责人可在授权卡片上批准重新派发。
     expect(risk.calls).toHaveLength(1)
     expect(risk.calls[0]?.category).toBe(`${DISPATCH_SAFETY_CATEGORY}:T1`)
-    expect(String(value.data?.hint)).toContain('/flow risk approve RK-1')
+    expect(String(value.data?.hint)).toContain('授权卡片')
+    expect(String(value.data?.hint)).toContain('RK-1')
+    expect(String(value.data?.hint)).not.toContain('/flow risk approve')
     expect(value.data?.pending).toEqual([expect.objectContaining({ id: 'RK-1', kind: 'risk', status: 'open' })])
     expect(value.data?.tasks).toEqual([expect.objectContaining({ taskId: 'T1' })])
   })
@@ -217,7 +219,7 @@ describe('中断任务重新派发：无法确认旧子 agent 状态时保持阻
     expect(value.summary).toContain('宿主未提供 agents 服务')
     expect(dispatchCalls.count).toBe(0)
     expect(risk.calls).toHaveLength(1)
-    expect(String(value.data?.hint)).toContain('/flow risk approve')
+    expect(String(value.data?.hint)).toContain('授权卡片')
   })
 
   it('旧子 agent 仍在运行（宿主注册表 status=running）时阻塞', async () => {

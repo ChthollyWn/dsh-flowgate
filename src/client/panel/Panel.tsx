@@ -10,11 +10,21 @@ import type { FlowgateProjection, LearningMode, SlotPropRecord } from '../types'
 import type { HostBridge } from '../bridge'
 import { sessionIdOf } from '../bridge'
 import type { PanelModel } from '../model'
-import { buildPanelModel, complexityLabel, normalizeProjection, readProjection, riskLabel, stageIndex, stageLabel } from '../model'
+import {
+  buildPanelModel,
+  complexityLabel,
+  normalizeProjection,
+  placeholderStageNodes,
+  readProjection,
+  riskLabel,
+  stageIndex,
+  stageLabel,
+} from '../model'
 import type { ClientAction } from '../actions'
 import { performAction } from '../actions'
 import { Notice } from './Common'
 import { COLORS, MONO_FONT, TONES, UI_FONT } from '../theme'
+import { FlowRail } from '../visual/FlowRail'
 import { LedgerView } from './views/Ledger'
 import { PipelineView } from './views/Pipeline'
 import { GatesView } from './views/Gates'
@@ -81,6 +91,20 @@ export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
           ) : null}
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Compact seven-stage rail: current stage is visible from every tab. */}
+          <div
+            data-flowgate="panel-rail"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: '1 1 220px' }}
+          >
+            <FlowRail
+              nodes={model.pipeline.length > 0 ? model.pipeline : placeholderStageNodes(t)}
+              state={model.flowState}
+              t={t}
+              size="md"
+              onSelectStage={() => onTabChange('pipeline')}
+              {...(model.gate.awaitingOwner && model.gate.gate !== null ? { awaitingGate: model.gate.gate } : {})}
+            />
+          </div>
           {model.complexity !== undefined ? (
             <span style={{ fontSize: 11, color: COLORS.dim }} data-flowgate="panel-level">
               {t('panel.complexityRisk', {
@@ -232,6 +256,10 @@ export function Panel({ props, t, bridge }: PanelProps): React.ReactElement {
         ...(bridge !== undefined ? { remote: bridge.remote() } : {}),
         ...(bridge !== undefined
           ? {
+              // Click-to-execute: the panel button click is the authorization.
+              // The equivalent /flow line is submitted through the host command
+              // remote, so the composer draft never receives a command.
+              executeCommand: (command: string) => bridge.runCommand(command, sessionId),
               fillCommand: (command: string) => bridge.fillCommand(command, sessionId),
               copyText: (text: string) => bridge.copyText(text),
               openPanel: () => bridge.openPanel(),

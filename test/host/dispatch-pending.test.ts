@@ -232,11 +232,12 @@ describe('子 agent 生成待处理项后的通知（T4.6）', () => {
     expect(dispatchBusy()).toBe(false)
     const notice = lastNotice(h)
     expect(notice).toContain('任务 T1 的子 agent 已结束')
-    // 通知里必须出现待处理项 id、标题与负责人可执行的命令，而不是只留内存状态。
+    // 通知里必须出现待处理项 id、标题与卡片处理方式，而不是只留内存状态。
     expect(notice).toContain('待处理项')
     expect(notice).toContain('SC-1')
     expect(notice).toContain('T1 申请扩大范围')
-    expect(notice).toContain('/flow scope approve SC-1')
+    expect(notice).toContain('授权卡片')
+    expect(notice).not.toContain('/flow scope approve')
     // 单条 inject 同时包含完成摘要与待处理项通知。
     expect(completionNotices(h)).toHaveLength(1)
   })
@@ -325,7 +326,9 @@ describe('派发前的待处理项复核（T4.6）', () => {
       const id = kind === 'scope' ? 'SC-1' : kind === 'plan' ? 'PC-1' : 'RK-1'
       expect(value.ok).toBe(false)
       expect(value.summary).toContain('未审批的待处理项')
-      expect(String(value.data?.hint)).toContain(`/flow ${kind} approve ${id}`)
+      expect(String(value.data?.hint)).toContain('授权卡片')
+      expect(String(value.data?.hint)).toContain(id)
+      expect(String(value.data?.hint)).not.toContain(`/flow ${kind} approve`)
       expect(value.data?.pending).toEqual([expect.objectContaining({ id, kind, status: 'open' })])
       expect(dispatchCalls.count).toBe(0)
       expect(subagents.state.started).toHaveLength(0)

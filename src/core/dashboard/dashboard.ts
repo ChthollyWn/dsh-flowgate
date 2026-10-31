@@ -218,7 +218,7 @@ function pipelineSection(input: DashboardInput): string {
       <div class="stages">${stages}</div>
       <div class="chips">${gates || '<span class="empty">（暂无门禁记录）</span>'}</div>
       ${change.lock ? `<p class="bad">锁定：${escapeDashboardHtml(clip(change.lock.reason, 200))} @ ${formatDate(change.lock.at)}</p>` : ''}
-      ${change.off ? '<p class="warn">该变更已临时关闭拦截（/flow off）</p>' : ''}
+      ${change.off ? '<p class="warn">该变更已临时关闭拦截（负责人操作）</p>' : ''}
     </div>`
   })
   return card('pipeline', '阶段流水线', blocks.join(''))
@@ -406,7 +406,7 @@ export function renderDashboard(input: DashboardInput): string {
   <nav>${nav}</nav>
 </header>
 <main>
-<p class="note">本看板由 FlowGate 在每次状态变化后重新生成，单文件、断网可打开。它只展示、不能操作：批准与放行请回到 DSH 用 <code>/flow</code> 命令或右侧栏面板完成。</p>
+<p class="note">本看板由 FlowGate 在每次状态变化后重新生成，单文件、断网可打开。它只展示、不能操作：批准与放行请回到 DSH 右侧栏面板或输入区授权卡片完成。</p>
 ${sections}
 </main>
 <footer>FlowGate · 硬约束开发流程门禁 · 跨会话离线看板</footer>

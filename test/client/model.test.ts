@@ -1,16 +1,19 @@
 /** Pure view-model tests (SSR-testable mapping, T1.6 / T2.9 / T10 metrics). */
 import { describe, expect, it } from 'vitest'
 import {
+  buildDockModel,
   buildExecutionGraph,
   buildLedgerRows,
   buildMetricRows,
   buildPanelModel,
-  buildStatusLine,
+  dockStateOf,
   groupTasksByStatus,
   metricsCsv,
   metricsJson,
+  nextStepForPanel,
   normalizeProjection,
   readProjection,
+  sanitizeNextStep,
   toneOf,
   trialRuleLocal,
   truncateChars,
@@ -18,7 +21,18 @@ import {
 import { createTranslator } from '../../src/client/i18n'
 import type { RuleRow } from '../../src/client/types'
 import type { ExceptionRecord, TaskState } from '../../src/core/types'
-import { makeEmptyProjection, makeProjection, makeSnapshot } from './mock'
+import {
+  makeActiveProjection,
+  makeBlockedProjection,
+  makeEmptyProjection,
+  makeIdleProjection,
+  makeLockedProjection,
+  makeLowComplexityProjection,
+  makeOffProjection,
+  makePendingProjection,
+  makeProjection,
+  makeSnapshot,
+} from './mock'
 
 const zh = createTranslator('zh')
 
@@ -65,21 +79,169 @@ describe('normalizeProjection', () => {
   })
 })
 
-describe('status line / tone', () => {
-  it('maps waiting G1 to the requirements approval wording', () => {
-    const text = buildStatusLine(makeSnapshot({ awaitingGate: 'G1', stage: 'S1', pending: [] }), zh)
-    expect(text).toContain('① 需求澄清')
-    expect(text).toContain('等你批准需求')
+describe('dock state machine / model (contract §2)', () => {
+  it('maps every snapshot to exactly one dock state', () => {
+    expect(dockStateOf(null)).toBe('demo')
+    expect(dockStateOf(makeEmptyProjection().snapshot)).toBe('demo')
+    expect(dockStateOf(makeLockedProjection().snapshot)).toBe('locked')
+    expect(dockStateOf(makeOffProjection().snapshot)).toBe('off')
+    expect(dockStateOf(makeBlockedProjection().snapshot)).toBe('blocked')
+    expect(dockStateOf(makeProjection().snapshot)).toBe('awaiting')
+    expect(dockStateOf(makePendingProjection().snapshot)).toBe('pending')
+    expect(dockStateOf(makeIdleProjection().snapshot)).toBe('idle')
+    expect(dockStateOf(makeActiveProjection().snapshot)).toBe('active')
   })
 
-  it('toneOf classifies disabled / blocked / attention / active', () => {
+  it('keeps the legacy toneOf classification for shared theme consumers', () => {
     expect(toneOf(null)).toBe('disabled')
     expect(toneOf(makeEmptyProjection().snapshot)).toBe('disabled')
     expect(toneOf(makeSnapshot({ locked: true }))).toBe('blocked')
     expect(toneOf(makeSnapshot({ off: true }))).toBe('blocked')
     expect(toneOf(makeSnapshot({ awaitingGate: undefined, pending: [] }))).toBe('active')
-    const idle = makeSnapshot({ awaitingGate: undefined, pending: [], lifecycle: undefined, changeId: 'C-9' })
-    expect(toneOf(idle)).toBe('active')
+  })
+
+  it('builds the awaiting gate card with checks, progress and approve/reject', () => {
+    const model = buildDockModel(makeProjection(), zh)
+    expect(model.state).toBe('awaiting')
+    expect(model.tone).toBe('attention')
+    expect(model.nodes).toHaveLength(7)
+    expect(model.nodes.find((node) => node.isCurrent)?.stage).toBe('S3')
+    expect(model.progress).toEqual({ done: 3, total: 7 })
+    expect(model.stage).toBe('S3')
+    const card = model.card
+    expect(card?.kind).toBe('gate')
+    expect(card?.gate).toBe('G3')
+    expect(card?.target).toEqual({ externalCount: 0, gate: 'G3' })
+    expect(card?.checks).toEqual({ passed: 2, total: 3 })
+    expect(card?.items.filter((item) => !item.passed)).toHaveLength(1)
+    expect(card?.strip).toContain('等你批准')
+    expect(card?.stripTone).toBe('warn')
+    // Native footer order: secondary / ghost actions first, primary last.
+    expect(card?.actions.map((action) => action.dataAction)).toEqual([
+      'auth-open-panel',
+      'auth-reject',
+      'auth-approve',
+    ])
+  })
+
+  it('builds the low-complexity merged confirmation card with raise complexity', () => {
+    const card = buildDockModel(makeLowComplexityProjection(), zh).card
+    expect(card?.kind).toBe('gate')
+    expect(card?.merged?.goal).toContain('把首页按钮文案改成')
+    expect(card?.title).toBe('把首页按钮文案改成「马上抢购」')
+    expect(card?.strip).toContain('等你确认方案')
+    expect(card?.chips.map((chip) => chip.label)).toEqual(['范围', '验证方式'])
+    expect(card?.actions.map((action) => action.dataAction)).toEqual([
+      'auth-open-panel',
+      'auth-raise',
+      'auth-reject',
+      'auth-approve',
+    ])
+  })
+
+  it('builds the pending card from the first open decision and folds the rest', () => {
+    const card = buildDockModel(makePendingProjection(), zh).card
+    expect(card?.kind).toBe('pending')
+    expect(card?.target.pendingId).toBe('RK-1')
+    expect(card?.extraCount).toBe(1)
+    expect(card?.stripTone).toBe('warn')
+    expect(card?.strip).toContain('风险接管')
+    expect(card?.title).toBe('新增支付依赖')
+    expect(card?.actions.map((action) => action.label)).toContain('确认风险接管')
+  })
+
+  it('builds demo / locked / off / blocked cards', () => {
+    const demoCard = buildDockModel(makeEmptyProjection(), zh).card
+    expect(demoCard?.kind).toBe('enable')
+    expect(demoCard?.stripTone).toBe('neutral')
+    const lockedCard = buildDockModel(makeLockedProjection(), zh).card
+    expect(lockedCard?.kind).toBe('repair')
+    expect(lockedCard?.stripTone).toBe('error')
+    const offCard = buildDockModel(makeOffProjection(), zh).card
+    expect(offCard?.kind).toBe('reconnect')
+    expect(offCard?.stripTone).toBe('error')
+    const blocked = buildDockModel(makeBlockedProjection(), zh)
+    expect(blocked.card?.kind).toBe('external')
+    expect(blocked.card?.target.externalCount).toBe(1)
+    expect(blocked.card?.actions.map((action) => action.dataAction)).toContain('auth-confirm')
+    // Active / idle states never show a card.
+    expect(buildDockModel(makeActiveProjection(), zh).card).toBeUndefined()
+    expect(buildDockModel(makeIdleProjection(), zh).card).toBeUndefined()
+  })
+
+  it('sanitizes command-style host next steps and falls back to a natural phrase', () => {
+    expect(sanitizeNextStep('/flow approve G3')).toBe('')
+    expect(sanitizeNextStep('继续实现 T2')).toBe('继续实现 T2')
+    expect(sanitizeNextStep('等待负责人批准 /flow approve G3 后继续')).not.toContain('/flow')
+    const model = buildDockModel(
+      makeProjection({
+        snapshot: { awaitingGate: undefined, pendingGate: undefined, pending: [], nextStep: '/flow approve G3' },
+        panel: { gate: undefined },
+      }),
+      zh,
+    )
+    expect(model.state).toBe('active')
+    expect(model.next?.text).not.toContain('/flow')
+    expect(model.next?.text).toBe('准备设计、风险与任务清单') // S3 mock stage → human stage phrase
+
+    // Model-facing tool syntax is replaced by the stage-level human phrase.
+    const modelFacing = buildDockModel(
+      makeProjection({
+        snapshot: {
+          awaitingGate: undefined,
+          pendingGate: undefined,
+          pending: [],
+          nextStep: '写澄清/需求产物后 flow_submit({gate:"G1"})',
+        },
+        panel: { gate: undefined },
+      }),
+      zh,
+    )
+    expect(modelFacing.state).toBe('active')
+    expect(modelFacing.next?.text).not.toContain('flow_')
+    expect(modelFacing.next?.text).not.toContain('{')
+    expect(modelFacing.next?.text).toBe('准备设计、风险与任务清单')
+  })
+
+  it('builds the panel next-step callout in natural language', () => {
+    const awaiting = nextStepForPanel(buildPanelModel(makeProjection(), zh), zh)
+    expect(awaiting.kind).toBe('human')
+    expect(awaiting.text).toContain('授权卡')
+    expect(awaiting.text).not.toContain('/flow')
+
+    const active = nextStepForPanel(buildPanelModel(makeActiveProjection(), zh), zh)
+    expect(active.kind).toBe('auto')
+    expect(active.text).toBe('继续实现 T2，然后补证据并进入 S4')
+
+    // The panel callout never exposes model-facing tool syntax either.
+    const modelFacing = nextStepForPanel(
+      buildPanelModel(
+        makeProjection({
+          snapshot: {
+            awaitingGate: undefined,
+            pendingGate: undefined,
+            pending: [],
+            stage: 'S1',
+            nextStep: '写澄清/需求产物后 flow_submit({gate:"G1"})',
+          },
+          panel: { gate: undefined },
+        }),
+        zh,
+      ),
+      zh,
+    )
+    expect(modelFacing.text).not.toContain('flow_')
+    expect(modelFacing.text).toBe('补齐需求澄清产物')
+
+    const setup = nextStepForPanel(buildPanelModel(makeEmptyProjection(), zh), zh)
+    expect(setup.kind).toBe('setup')
+    expect(setup.text).toContain('一句话')
+  })
+
+  it('exposes flowState on the panel model for the header rail', () => {
+    expect(buildPanelModel(makeProjection(), zh).flowState).toBe('awaiting')
+    expect(buildPanelModel(makeActiveProjection(), zh).flowState).toBe('active')
+    expect(buildPanelModel(makeEmptyProjection(), zh).flowState).toBe('demo')
   })
 })
 

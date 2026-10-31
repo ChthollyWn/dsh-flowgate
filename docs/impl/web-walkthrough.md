@@ -5,6 +5,8 @@
 > 约束：隔离 `DSH_HOME`、**不发任何模型请求**、不碰日常 `~/.dsh`；会话内所有命令通过真实 UI 输入框执行。
 > 走查时间：2026-10-31 10:54–11:47（Asia/Shanghai）。
 
+> **2026-11-01 v0.2 追加**：输入区状态条已被图形化 dock 取代、面板按钮改为「点击即授权」（经官方命令 remote 直接执行，不填输入框），并新增原生提问卡组合；新的真实宿主 E2E（35/35 断言、截图 30–33）见 [screenshots README](../screenshots/README.md) 2026-11-01 分节与 [ui-interaction-redesign.md](ui-interaction-redesign.md)。本文件下半部分的旧走查结论保留为历史记录。
+
 ## 0. 结论速览
 
 | # | 验证项 | 结论 | 证据 |

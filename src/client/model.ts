@@ -364,20 +364,101 @@ export function readProjection(props: { useProjection?: (key: string) => unknown
 }
 
 // ---------------------------------------------------------------------------
-// Status bar (FR-8.1, T1.6)
+// Input dock (contract §2): seven-stage rail + next-step chip + auth card
 // ---------------------------------------------------------------------------
 
-export interface StatusBarModel {
+/** Dock state machine (docs/impl/ui-interaction-redesign.md §2). */
+export type DockState = 'demo' | 'locked' | 'off' | 'idle' | 'active' | 'awaiting' | 'pending' | 'blocked'
+
+/** `data-kind` of the next-step chip: an icon + phrase, never a command. */
+export type DockNextKind = 'question' | 'action' | 'auto' | 'wait'
+
+export interface DockNextModel {
+  kind: DockNextKind
   text: string
+}
+
+/** `data-kind` of the authorization card (contract §1.2). */
+export type AuthCardKind = 'gate' | 'pending' | 'external' | 'enable' | 'repair' | 'reconnect'
+
+export type AuthActionKind = 'approve' | 'reject' | 'raise' | 'confirm' | 'open-panel' | 'enable' | 'repair' | 'gates-on'
+
+/** Button anchors fixed by the DOM contract (`data-action`). */
+export type AuthDataAction =
+  | 'auth-approve'
+  | 'auth-reject'
+  | 'auth-reject-submit'
+  | 'auth-raise'
+  | 'auth-confirm'
+  | 'auth-open-panel'
+  | 'auth-enable'
+  | 'auth-repair'
+
+export interface AuthActionModel {
+  kind: AuthActionKind
+  dataAction: AuthDataAction
+  label: string
+  tone: 'primary' | 'danger' | 'neutral'
+  /** Render the inline reason textarea before submitting (contract §2). */
+  needsReason?: boolean
+}
+
+/** The decision a card button maps back to (read by the dock container). */
+export interface AuthTargetModel {
+  gate?: string
+  pendingId?: string
+  blocker?: boolean
+  externalCount: number
+}
+
+export type AuthStripTone = 'warn' | 'error' | 'business' | 'neutral'
+
+export interface AuthCardModel {
+  kind: AuthCardKind
+  /** Human gate id (GR/G1/G3/G6) for gate cards. */
+  gate?: string
+  /** Native plan-card strip text (long state sentence). */
+  strip: string
+  /** Strip accent: warn = owner decision, error = blocked/locked, business = enable. */
+  stripTone: AuthStripTone
+  title: string
+  subtitle?: string
+  chips: { label: string; value: string }[]
+  items: { label: string; passed: boolean }[]
+  checks: { passed: number; total: number }
+  actions: AuthActionModel[]
+  target: AuthTargetModel
+  /** Further open pending items folded behind “+n 查看全部”. */
+  extraCount: number
+  merged?: MergedConfirm
+}
+
+export interface DockModel {
+  state: DockState
   tone: Tone
   initialized: boolean
   changeId?: string
   stage?: string
   awaitingGate?: string
-  interceptCount: number
-  pendingCount: number
-  /** Full aria label (the visible text may be truncated). */
-  ariaLabel: string
+  /** Seven stages, never empty (placeholders while FlowGate is not enabled). */
+  nodes: StageNodeModel[]
+  progress: { done: number; total: number }
+  next?: DockNextModel
+  card?: AuthCardModel
+  /** Natural-language summary used for the aria label. */
+  phrase: string
+}
+
+/** State → theme tone mapping for the dock root (`data-tone`). */
+export const DOCK_TONES: Record<DockState, Tone> = {
+  demo: 'disabled',
+  locked: 'blocked',
+  off: 'blocked',
+  idle: 'idle',
+  active: 'active',
+  awaiting: 'attention',
+  pending: 'attention',
+  blocked: 'blocked',
 }
 
 export function awaitingText(gate: string | undefined, t: TFn): string {
@@ -404,66 +485,412 @@ export function interceptTotal(snapshot: RuntimeSnapshot | null | undefined): nu
   return total
 }
 
-/** Compose the one-line status text; always ≤ 120 characters (T1.6). */
-export function buildStatusLine(snapshot: RuntimeSnapshot | null | undefined, t: TFn): string {
-  if (snapshot === null || snapshot === undefined || snapshot.initialized !== true) {
-    return truncateChars(t('status.demo'))
-  }
-  if (snapshot.locked === true) return truncateChars(t('status.locked'))
-  if (snapshot.off === true) return truncateChars(t('status.off'))
-  if (snapshot.changeId === undefined || snapshot.changeId === '') {
-    return truncateChars(`${t('status.idle')} │ ${t('status.noChange')}`)
-  }
-
-  const stage = normalizeStage(snapshot.stage)
-  const parts: string[] = []
-  parts.push(
-    `◆ FlowGate ${snapshot.changeId} ${complexityLabel(snapshot.complexity, t)} · ${riskLabel(snapshot.risk, t)}`,
-  )
-  let phase = `${stageIndex(stage, t)} ${stageLabel(stage, t)}`
-  if (snapshot.awaitingGate !== undefined) {
-    phase += ` ▸ ${awaitingText(snapshot.awaitingGate, t)}`
-  } else if (snapshot.pending !== undefined && snapshot.pending.length > 0) {
-    phase += ` ▸ ${t('status.awaiting.generic')}`
-  }
-  parts.push(phase)
-
-  const counts: string[] = []
-  const intercepts = interceptTotal(snapshot)
-  if (intercepts > 0 || snapshot.awaitingGate !== undefined) {
-    counts.push(t('status.intercepts', { n: intercepts }))
-  }
-  const pendingCount = Array.isArray(snapshot.pending) ? snapshot.pending.length : 0
-  if (pendingCount > 0 || snapshot.awaitingGate !== undefined) {
-    counts.push(t('status.pending', { n: pendingCount }))
-  }
-  if (counts.length > 0) parts.push(counts.join(' · '))
-
-  const next = snapshot.nextStep !== undefined ? snapshot.nextStep.trim() : ''
-  if (next !== '') parts.push(t('status.next', { next }))
-
-  // Optional host-provided context ratio (not part of the frozen snapshot; degrade silently).
-  const contextPct = (snapshot as unknown as Record<string, unknown>).contextPct
-  if (typeof contextPct === 'number' && contextPct >= 60) {
-    parts.push(t('status.context', { pct: Math.round(contextPct) }))
-  }
-
-  return truncateChars(parts.join(' │ '))
+/** Seven gray placeholder nodes shown before FlowGate is enabled. */
+export function placeholderStageNodes(t: TFn): StageNodeModel[] {
+  return STAGE_ORDER.map((stage) => ({
+    stage,
+    label: t(`stage.${stage}`),
+    index: t(`stage.idx.${stage}`),
+    status: 'pending' as const,
+    isCurrent: false,
+  }))
 }
 
-export function buildStatusBarModel(proj: FlowgateProjection | null, t: TFn): StatusBarModel {
+/** Open pending decisions (a decided item no longer needs the owner). */
+export function openPendingItems(snapshot: RuntimeSnapshot | null | undefined): PendingItem[] {
+  if (snapshot === null || snapshot === undefined) return []
+  return (snapshot.pending ?? []).filter((item) => item.status === undefined || item.status === 'open')
+}
+
+/** Total dock state machine (contract §2); pure and defensive. */
+export function dockStateOf(snapshot: RuntimeSnapshot | null | undefined): DockState {
+  if (snapshot === null || snapshot === undefined || snapshot.initialized !== true) return 'demo'
+  if (snapshot.locked === true) return 'locked'
+  if (snapshot.off === true) return 'off'
+  if ((snapshot.violations ?? []).length > 0) return 'blocked'
+  if (snapshot.awaitingGate !== undefined) return 'awaiting'
+  if (openPendingItems(snapshot).length > 0) return 'pending'
+  if (snapshot.changeId === undefined || snapshot.changeId === '') return 'idle'
+  return 'active'
+}
+
+/** Human gates need an explicit owner approval (contract §2: GR/G1/G3/G6). */
+export function isHumanGate(gate: string | null | undefined): boolean {
+  return gate === 'GR' || gate === 'G1' || gate === 'G3' || gate === 'G6'
+}
+
+/** Pending id prefix → decision family (`RK-1` → risk). */
+const PENDING_FAMILY: Record<string, 'risk' | 'scope' | 'plan' | 'rule' | 'blocker' | 'conflict'> = {
+  RK: 'risk',
+  SC: 'scope',
+  PC: 'plan',
+  RL: 'rule',
+  BL: 'blocker',
+  CF: 'conflict',
+}
+
+type PendingFamily = 'risk' | 'scope' | 'plan' | 'rule' | 'blocker' | 'conflict' | 'generic'
+
+function pendingFamilyOf(id: string): PendingFamily {
+  const prefix = id.split('-')[0]?.toUpperCase() ?? ''
+  return PENDING_FAMILY[prefix] ?? 'generic'
+}
+
+/** “范围变更 / 风险接管 …” label for one pending decision. */
+export function pendingFamilyLabel(id: string, t: TFn): string {
+  switch (pendingFamilyOf(id)) {
+    case 'risk':
+      return t('dock.pendingFamily.risk')
+    case 'scope':
+      return t('dock.pendingFamily.scope')
+    case 'plan':
+      return t('dock.pendingFamily.plan')
+    case 'rule':
+      return t('dock.pendingFamily.rule')
+    case 'blocker':
+      return t('dock.pendingFamily.blocker')
+    case 'conflict':
+      return t('dock.pendingFamily.conflict')
+    default:
+      return t('dock.pendingFamily.generic')
+  }
+}
+
+function pendingApproveLabel(id: string, t: TFn): string {
+  switch (pendingFamilyOf(id)) {
+    case 'risk':
+      return t('dock.pendingAction.risk')
+    case 'scope':
+      return t('dock.pendingAction.scope')
+    case 'plan':
+      return t('dock.pendingAction.plan')
+    case 'rule':
+      return t('dock.pendingAction.rule')
+    case 'blocker':
+      return t('tasks.unblock')
+    case 'conflict':
+      return t('dock.pendingAction.conflict')
+    default:
+      return t('dock.pendingAction.generic')
+  }
+}
+
+const FLOW_COMMAND_PATTERN = /\/flow(?:\s+[^\s·。；;，,、]+)*/g
+/** Model-facing next-step syntax (tool names / object literals) never belongs in the UI. */
+const MODEL_FACING_PATTERN = /\bflow_[a-z0-9_]+\b|[{}]/
+
+/**
+ * Strip `/flow ...` fragments from host-provided copy. The dock and the panel
+ * only ever present natural-language next steps; commands stay available to
+ * power users through `/flow help` but are never shown as an instruction.
+ */
+export function sanitizeNextStep(text: string | undefined): string {
+  if (text === undefined || text === '') return ''
+  return text
+    .replace(FLOW_COMMAND_PATTERN, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s·:：,，;；\-—→>]+/, '')
+    .replace(/[\s·:：,，;；\-—→>]+$/, '')
+    .trim()
+}
+
+/**
+ * Human-facing next step for the owner (dock chip / panel callout).
+ *
+ * The host's `snapshot.nextStep` is model-facing for most stages
+ * (`flow_submit({gate:"G1"})`, `flow_verify → flow_task_done`, …). Showing that
+ * to the owner is noise, so anything matching model-facing syntax is replaced
+ * with a stage-level natural-language phrase; only genuinely human copy is
+ * passed through (after command sanitizing).
+ */
+export function humanNextStep(snapshot: RuntimeSnapshot | null | undefined, t: TFn): string {
+  const raw = sanitizeNextStep(snapshot?.nextStep)
+  const stage = snapshot?.stage !== undefined ? normalizeStage(snapshot.stage) : ''
+  let friendly = t('dock.next.active')
+  if ((STAGE_ORDER as string[]).includes(stage)) {
+    friendly = t(`dock.next.stage.${stage as PipelineStageId}`)
+  } else if (stage === 'roadmap') {
+    friendly = t('dock.next.stage.roadmap')
+  }
+  if (raw === '' || MODEL_FACING_PATTERN.test(raw)) return friendly
+  return raw
+}
+
+function buildDockNext(
+  state: DockState,
+  snapshot: RuntimeSnapshot | null,
+  pendingCount: number,
+  t: TFn,
+): DockNextModel {
+  switch (state) {
+    case 'demo':
+      return { kind: 'question', text: t('dock.next.demo') }
+    case 'locked':
+      return { kind: 'action', text: t('dock.next.locked') }
+    case 'off':
+      return { kind: 'action', text: t('dock.next.off') }
+    case 'idle':
+      return { kind: 'question', text: t('dock.next.idle') }
+    case 'awaiting':
+      return { kind: 'action', text: awaitingText(snapshot?.awaitingGate, t) }
+    case 'pending':
+      return { kind: 'action', text: t('dock.next.pending', { n: pendingCount }) }
+    case 'blocked':
+      return { kind: 'action', text: t('dock.next.blocked') }
+    case 'active':
+    default: {
+      // Model-facing host copy (tool names / object literals) is replaced by a
+      // stage-level natural phrase; human copy passes through sanitized.
+      return { kind: 'auto', text: humanNextStep(snapshot, t) }
+    }
+  }
+}
+
+function openExternalChanges(snapshot: RuntimeSnapshot | null): NonNullable<RuntimeSnapshot['externalChanges']> {
+  return (snapshot?.externalChanges ?? []).filter((entry) => entry.confirmedAt === undefined)
+}
+
+/** Gate panel items for the awaiting gate (empty when the host sends none). */
+function gatePanelFor(
+  proj: FlowgateProjection | null,
+  gate: string | undefined,
+): { items: { label: string; passed: boolean }[]; merged?: MergedConfirm } {
+  const panelGate = proj?.panel?.gate
+  if (panelGate === undefined) return { items: [] }
+  if (gate !== undefined && panelGate.gate !== null && panelGate.gate !== gate) return { items: [] }
+  const items = Array.isArray(panelGate.items)
+    ? panelGate.items.map((item) => ({ label: item.label, passed: item.passed === true }))
+    : []
+  return panelGate.mergedConfirm !== undefined ? { items, merged: panelGate.mergedConfirm } : { items }
+}
+
+/**
+ * Build the authorization card for one dock state. Cards are pure view data:
+ * the container turns a clicked action back into `ClientAction` / `performAction`.
+ */
+function changeHeadline(snapshot: RuntimeSnapshot): string {
+  return [snapshot.changeId ?? '', snapshot.title ?? ''].filter((part) => part !== '').join(' · ')
+}
+
+/**
+ * Build the authorization card for one dock state (native plan-card structure:
+ * strip → body → footer). Pure view data: the container turns a clicked action
+ * back into `ClientAction` / `performAction`.
+ */
+function buildAuthCard(proj: FlowgateProjection | null, state: DockState, t: TFn): AuthCardModel | undefined {
   const snapshot = proj?.snapshot ?? null
-  const text = buildStatusLine(snapshot, t)
+  if (snapshot === null) return undefined
+  const external = openExternalChanges(snapshot)
+  const target: AuthTargetModel = { externalCount: external.length }
+  const detailAction: AuthActionModel = {
+    kind: 'open-panel',
+    dataAction: 'auth-open-panel',
+    label: t('dock.auth.detail'),
+    tone: 'neutral',
+  }
+  switch (state) {
+    case 'demo':
+      return {
+        kind: 'enable',
+        strip: t('dock.strip.enable'),
+        stripTone: 'neutral',
+        title: t('dock.auth.enableTitle'),
+        subtitle: t('dock.auth.enableBody'),
+        chips: [],
+        items: [],
+        checks: { passed: 0, total: 0 },
+        actions: [
+          detailAction,
+          { kind: 'enable', dataAction: 'auth-enable', label: t('dock.auth.enableAction'), tone: 'primary' },
+        ],
+        target,
+        extraCount: 0,
+      }
+    case 'locked':
+      return {
+        kind: 'repair',
+        strip: t('dock.strip.locked'),
+        stripTone: 'error',
+        title: t('dock.auth.repairTitle'),
+        subtitle: t('dock.auth.repairBody'),
+        chips: [],
+        items: [],
+        checks: { passed: 0, total: 0 },
+        actions: [
+          detailAction,
+          { kind: 'repair', dataAction: 'auth-repair', label: t('dock.auth.repairAction'), tone: 'primary' },
+        ],
+        target,
+        extraCount: 0,
+      }
+    case 'off':
+      return {
+        kind: 'reconnect',
+        strip: t('dock.strip.off'),
+        stripTone: 'error',
+        title: t('dock.auth.offTitle'),
+        subtitle: t('dock.auth.offBody'),
+        chips: [],
+        items: [],
+        checks: { passed: 0, total: 0 },
+        actions: [
+          detailAction,
+          { kind: 'gates-on', dataAction: 'auth-enable', label: t('dock.auth.offAction'), tone: 'primary' },
+        ],
+        target,
+        extraCount: 0,
+      }
+    case 'blocked': {
+      const violations = snapshot.violations ?? []
+      const chips = external.slice(0, 3).map((entry) => ({ label: t('dock.auth.externalPath'), value: entry.path }))
+      const actions: AuthActionModel[] = [detailAction]
+      if (external.length > 0) {
+        actions.push({ kind: 'confirm', dataAction: 'auth-confirm', label: t('dock.auth.confirmExternal'), tone: 'primary' })
+      }
+      return {
+        kind: 'external',
+        strip: t('dock.strip.blocked'),
+        stripTone: 'error',
+        title: t('dock.auth.blockedTitle'),
+        subtitle: t('dock.auth.blockedBody', { n: violations.length }),
+        chips,
+        items: [],
+        checks: { passed: 0, total: violations.length },
+        actions,
+        target,
+        extraCount: 0,
+      }
+    }
+    case 'awaiting': {
+      const gate = snapshot.awaitingGate ?? proj?.panel?.gate?.gate ?? undefined
+      if (gate === undefined || gate === null) return undefined
+      const gatePanel = gatePanelFor(proj, gate)
+      const merged = gatePanel.merged
+      const items = gatePanel.items
+      const passed = items.filter((item) => item.passed).length
+      const stage = snapshot.stage !== undefined ? normalizeStage(snapshot.stage) : undefined
+      const headline = changeHeadline(snapshot)
+      const actions: AuthActionModel[] = [detailAction]
+      let title: string
+      let subtitle: string | undefined
+      const chips: { label: string; value: string }[] = []
+      if (merged !== undefined) {
+        title = merged.goal !== '' ? merged.goal : t('dock.auth.mergedTitle')
+        subtitle = merged.acceptance.length > 0 ? merged.acceptance.join(' · ') : undefined
+        if (merged.scope.length > 0) chips.push({ label: t('gate.planConfirm.scope'), value: merged.scope.join(' · ') })
+        if (merged.verify !== '') chips.push({ label: t('gate.planConfirm.verify'), value: merged.verify })
+        actions.push({ kind: 'raise', dataAction: 'auth-raise', label: t('gate.planConfirm.raise'), tone: 'neutral' })
+        actions.push({
+          kind: 'reject',
+          dataAction: 'auth-reject',
+          label: t('gate.planConfirm.reject'),
+          tone: 'danger',
+          needsReason: true,
+        })
+        actions.push({ kind: 'approve', dataAction: 'auth-approve', label: t('gate.planConfirm.approve'), tone: 'primary' })
+      } else {
+        title =
+          headline !== ''
+            ? headline
+            : t('dock.auth.gateTitle', { gate, stage: stage !== undefined ? stageLabel(stage, t) : '' })
+        subtitle = t('dock.auth.gateBody', { passed, total: items.length })
+        actions.push({ kind: 'reject', dataAction: 'auth-reject', label: t('gate.reject'), tone: 'danger', needsReason: true })
+        actions.push({ kind: 'approve', dataAction: 'auth-approve', label: t('dock.auth.approve'), tone: 'primary' })
+      }
+      return {
+        kind: 'gate',
+        gate,
+        strip: merged !== undefined ? t('dock.strip.merged', { gate }) : t('dock.strip.gate', { gate }),
+        stripTone: 'warn',
+        title,
+        subtitle,
+        chips,
+        items,
+        checks: { passed, total: items.length },
+        actions,
+        target: { ...target, gate },
+        extraCount: 0,
+        merged,
+      }
+    }
+    case 'pending': {
+      const pending = openPendingItems(snapshot)
+      const first = pending[0]
+      if (first === undefined) return undefined
+      const blocker = pendingFamilyOf(first.id) === 'blocker'
+      const family = pendingFamilyLabel(first.id, t)
+      const chips: { label: string; value: string }[] = []
+      if (snapshot.changeId !== undefined && snapshot.changeId !== '') {
+        chips.push({ label: t('dock.auth.change'), value: snapshot.changeId })
+      }
+      if (snapshot.stage !== undefined) {
+        chips.push({ label: t('dock.auth.stage'), value: stageLabel(normalizeStage(snapshot.stage), t) })
+      }
+      const actions: AuthActionModel[] = [detailAction]
+      if (blocker) {
+        actions.push({ kind: 'approve', dataAction: 'auth-approve', label: t('tasks.unblock'), tone: 'primary' })
+      } else {
+        actions.push({
+          kind: 'reject',
+          dataAction: 'auth-reject',
+          label: t('dock.auth.rejectPending'),
+          tone: 'danger',
+          needsReason: true,
+        })
+        actions.push({
+          kind: 'approve',
+          dataAction: 'auth-approve',
+          label: pendingApproveLabel(first.id, t),
+          tone: 'primary',
+        })
+      }
+      return {
+        kind: 'pending',
+        strip: t('dock.strip.pending', { family }),
+        stripTone: 'warn',
+        title: first.title !== '' ? first.title : t('dock.pending.title', { family }),
+        subtitle: first.detail !== '' ? first.detail : undefined,
+        chips,
+        items: [],
+        checks: { passed: 0, total: 0 },
+        actions,
+        target: { ...target, pendingId: first.id, blocker },
+        extraCount: pending.length - 1,
+      }
+    }
+    case 'active':
+    case 'idle':
+    default:
+      return undefined
+  }
+}
+
+/** Build the whole input-dock model (pure; used by SSR tests and the slot). */
+export function buildDockModel(proj: FlowgateProjection | null, t: TFn): DockModel {
+  const snapshot = proj?.snapshot ?? null
+  const state = dockStateOf(snapshot)
+  const built = buildPipelineNodes(snapshot, t)
+  const nodes = built.length > 0 ? built : placeholderStageNodes(t)
+  const done = built.filter((node) => node.status === 'done').length
+  const stage =
+    snapshot !== null && snapshot.initialized === true && snapshot.stage !== undefined
+      ? normalizeStage(snapshot.stage)
+      : undefined
+  const pending = openPendingItems(snapshot)
+  const next = buildDockNext(state, snapshot, pending.length, t)
+  const card = buildAuthCard(proj, state, t)
   return {
-    text,
-    tone: toneOf(snapshot),
+    state,
+    tone: DOCK_TONES[state],
     initialized: snapshot?.initialized === true,
     changeId: snapshot?.changeId,
-    stage: snapshot?.stage !== undefined ? normalizeStage(snapshot.stage) : undefined,
+    stage,
     awaitingGate: snapshot?.awaitingGate,
-    interceptCount: interceptTotal(snapshot),
-    pendingCount: Array.isArray(snapshot?.pending) ? snapshot.pending.length : 0,
-    ariaLabel: t('status.aria', { text }),
+    nodes,
+    progress: { done, total: nodes.length },
+    next,
+    card,
+    phrase: next.text,
   }
 }
 
@@ -607,6 +1034,8 @@ export interface PanelModel {
   risk?: string
   stage?: string
   lifecycle?: string
+  /** Input-dock state (also drives the panel header rail). */
+  flowState: DockState
   learning: LearningMode
   pipeline: StageNodeModel[]
   roadmap?: RoadmapSummary
@@ -1196,6 +1625,7 @@ export function buildPanelModel(proj: FlowgateProjection | null, t: TFn): PanelM
     risk: snapshot?.risk,
     stage: snapshot?.stage !== undefined ? normalizeStage(snapshot.stage) : undefined,
     lifecycle: snapshot?.lifecycle,
+    flowState: dockStateOf(snapshot),
     learning: proj?.learning ?? 'detail',
     pipeline: buildPipelineNodes(snapshot, t),
     roadmap: panel.roadmap,
@@ -1219,6 +1649,26 @@ export function buildPanelModel(proj: FlowgateProjection | null, t: TFn): PanelM
     off: snapshot?.off === true,
     locked: snapshot?.locked === true,
   }
+}
+
+/** Natural-language “next step” for the pipeline callout (never a command). */
+export interface PanelNextStep {
+  kind: 'human' | 'auto' | 'setup'
+  text: string
+}
+
+export function nextStepForPanel(model: PanelModel, t: TFn): PanelNextStep {
+  const snapshot = model.snapshot
+  if (model.stage === undefined) return { kind: 'setup', text: t('viz.next.start') }
+  if (model.gate.awaitingOwner && model.gate.gate !== null) {
+    return { kind: 'human', text: t('viz.next.awaiting', { gate: model.gate.gate }) }
+  }
+  const pending = openPendingItems(snapshot)
+  if (pending.length > 0) return { kind: 'human', text: t('viz.next.pending', { n: pending.length }) }
+  if (model.externalChanges.length > 0) {
+    return { kind: 'human', text: t('viz.next.external', { n: model.externalChanges.length }) }
+  }
+  return { kind: 'auto', text: humanNextStep(snapshot, t) }
 }
 
 // ---------------------------------------------------------------------------

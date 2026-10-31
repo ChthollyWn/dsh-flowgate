@@ -157,8 +157,10 @@ export function emptySnapshot(now: string): RuntimeSnapshot {
     off: false,
     locked: false,
     interceptCounts: {},
-    nextStep: 'FlowGate 未启用：在项目里运行 /flow init 启用',
-    statusLine: 'FlowGate 未启用 · /flow init 启用',
+    // 卡片优先（ui-interaction-redesign §0 规则 2）：初值也不要求负责人手输命令，
+    // dock/面板的启用入口由授权卡片（auth-enable → bridge.runCommand）承担。
+    nextStep: 'FlowGate 未启用：在授权卡片上点「启用 FlowGate」',
+    statusLine: 'FlowGate 未启用 · 点授权卡片启用',
     updatedAt: now,
   }
 }

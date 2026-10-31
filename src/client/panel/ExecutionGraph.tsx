@@ -14,7 +14,7 @@ import React from 'react'
 import type { TFn } from '../i18n'
 import type { ExecutionGraphModel, ExecutionNodeModel } from '../model'
 import { taskStatusLabel } from '../model'
-import { COLORS, MONO_FONT, UI_FONT, taskColor } from '../theme'
+import { COLORS, MONO_FONT, NATIVE, UI_FONT, taskColor } from '../theme'
 
 export interface ExecutionGraphProps {
   graph: ExecutionGraphModel
@@ -45,16 +45,16 @@ function edgePath(x1: number, y1: number, x2: number, y2: number, elbow: boolean
 function batchStatusColor(status: string): string {
   switch (status) {
     case 'done':
-      return COLORS.pass
+      return NATIVE.labelSecondary
     case 'running':
-      return COLORS.info
+      return NATIVE.labelPrimary
     case 'checkpoint':
-      return COLORS.warn
+      return NATIVE.stateWarn
     case 'failed':
     case 'blocked':
-      return COLORS.fail
+      return NATIVE.stateError
     default:
-      return COLORS.dim
+      return NATIVE.labelTertiary
   }
 }
 
@@ -138,7 +138,7 @@ export function ExecutionGraph({
           {/* Edges. */}
           {graph.edges.map((edge) => {
             const isCheckpoint = edge.kind === 'checkpoint'
-            const color = edge.kind === 'parallel' ? COLORS.info : isCheckpoint ? COLORS.warn : COLORS.dim
+            const color = edge.kind === 'parallel' ? NATIVE.labelTertiary : isCheckpoint ? NATIVE.stateWarn : NATIVE.labelCaption
             return (
               <path
                 key={`edge-${edge.id}`}
@@ -237,6 +237,21 @@ function TaskNode({
         : {})}
       style={{ cursor: interactive ? 'pointer' : 'default' }}
     >
+      {/*
+        Running nodes get a soft halo behind the card; styles.ts animates only
+        its opacity (`fg-halo`) and disables it under prefers-reduced-motion.
+      */}
+      {node.status === 'running' || node.status === 'queued' ? (
+        <circle
+          data-node-halo="true"
+          className="fg-halo"
+          cx={node.x + node.width / 2}
+          cy={node.y + node.height / 2}
+          r={Math.max(node.height / 2 + 4, 12)}
+          fill={color}
+          opacity={0.18}
+        />
+      ) : null}
       {selected ? (
         <rect
           data-node-selection-ring="true"
@@ -273,11 +288,11 @@ function TaskNode({
 
 function GraphLegend({ t }: { t: TFn }): React.ReactElement {
   const items: { label: string; color: string }[] = [
-    { label: t('tasks.status.pending'), color: COLORS.dim },
-    { label: t('tasks.status.running'), color: COLORS.info },
-    { label: t('tasks.status.done'), color: COLORS.pass },
-    { label: t('tasks.status.blocked'), color: COLORS.fail },
-    { label: t('tasks.checkpoint'), color: COLORS.warn },
+    { label: t('tasks.status.pending'), color: NATIVE.labelTertiary },
+    { label: t('tasks.status.running'), color: NATIVE.labelPrimary },
+    { label: t('tasks.status.done'), color: NATIVE.labelSecondary },
+    { label: t('tasks.status.blocked'), color: NATIVE.stateError },
+    { label: t('tasks.checkpoint'), color: NATIVE.stateWarn },
   ]
   return (
     <div

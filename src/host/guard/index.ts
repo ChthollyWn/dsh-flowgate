@@ -202,7 +202,7 @@ async function evaluatePreExecute(
         target: actionTarget(normalized),
         effect: decision.effect,
         why: decision.rule?.why ?? decision.message,
-        unlock: decision.rule?.unlock ?? '查看 /flow 的待处理项',
+        unlock: decision.rule?.unlock ?? '在 FlowGate 面板查看待处理项',
         source: decision.rule?.source,
       }),
     )
