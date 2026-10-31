@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "FlowGate: a hard-constraint development process gate plugin for DeepSeek Harness. Seven-stage pipeline, explainable blocking, cross-session state, measurable process.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChthollyWn/dsh-flowgate.git"
+  },
+  "homepage": "https://github.com/ChthollyWn/dsh-flowgate#readme",
+  "bugs": {
+    "url": "https://github.com/ChthollyWn/dsh-flowgate/issues"
+  },
   "type": "module",
   "main": "./lib/host.js",
   "exports": {

@@ -205,5 +205,24 @@ sed -n '150,170p'    src/host/guard/index.ts      # engine 缺失时放行（fai
 [acceptance-gap-audit-2026-10-31.md](acceptance-gap-audit-2026-10-31.md)。
 
 - 修复提交：`8963a92`（P0 批次）、`b22dedc`、`58e8381`、`84b942e`、`535842b`（P1 批次）、`6e3bd24`（runtime 守卫修复）。
-- 最终数字：107 files / 1459 tests 全绿；coverage 86.19/75.84/86.60/89.30；compat 13/13；startup +15.8ms；uninstall 通过。
+- 最终数字：107 files / 1459 tests 全绿；coverage 86.19/75.84/86.60/89.29；compat 13/13；startup +15.8ms；uninstall 通过。
 - 仍开放：环境受限验证（13 项）、发布（负责人暂缓）、自举（负责人决策）、T2.1 样本形式差异。
+
+> 第六轮独立复验推翻本节"已全部修复"的结论，新发现 7 项 P1 接线缺口并已修复，见 §10。
+
+## 10. 第六轮：清理复验发现的接线缺口（2026-10-31）
+
+第五轮后独立只读复验推翻"功能缺口全部闭环"结论，又发现 **7 项 P1 接线缺口**并修复（代码提交 `cea85dd`，均补回归测试）：
+
+1. T4.9 并行 worktree 执行根：`flow_verify`/输入哈希/自动提交改用任务 worktree（`src/core/evidence/run.ts`、`src/core/engine.ts`）。
+2. 派发双结算：`engine.taskFailed` 对 done 早退 + host dispatch finalize 先查状态（`src/host/dispatch/index.ts`）。
+3. T4.2 S5 全量测试改走 `runFullSuite`：regressions 写入回执，G5 可判回归、M-12 有数据源。
+4. T4.8 上下文压缩：交接摘要进每步注入 + `agent/created source='compact'` 防御式重注入（rc.5 实测事件不可达）。
+5. T3.7/T4.8 跨会话：`releaseSession` 生成 handoff；新会话注入最近 interrupted 任务卡；状态条 S4 显示「任务 RED/GREEN」。
+6. T2.2 澄清占位符：`（待补充）`/`（未记录）` 不再通过 G1；`clarifyRounds` 回写（M-7 数据源）。
+7. T2.8 低复杂度快车道：G3 任务数上限=1（其它等级仍用配置/默认 12）。
+
+P2/证据口径修正 8 项：T2.3 `test: none` 真实基线回执、M-16 数据源（`roadmap.progress`）、T5.1 执行图节点/任务详情（snapshot `taskCards`）、规则试跑本地近似标注、T2.4 技能重复加载短提示、taskDone 审查提示修正、skills 同步、文档/物料修正（46→52、M-6=42.9% 补来源等）。
+
+- 第六轮数字：**112 files / 1522 tests** 全绿（+5 文件 / +63 用例）；lint/typecheck 通过；coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）；compat 13/13；startup +16.2ms；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` 39 文件 / 1032.8KB（docs 修改后重跑实测，含 README）。CI 待推送后重跑（最后绿灯 `b671ef9`）。
+- 仍开放（四分类，详见 [acceptance-gap-audit §7.3](acceptance-gap-audit-2026-10-31.md) 与 [implementation-status §4](implementation-status.md)）：环境/人工受限验证；可离线补做（projection epoch/截图）；需负责人决策（发布、自举、T2.1 字面口径）；后续 P2/产品决策（C0 骨架 TDD 死锁、`run:auto` size 路由未实现、Remote 非降级 v0.1 不做、M-17/dispatch 摘要/worktree 归因/T4.4 引导、T5.2 学习模式抽查）。

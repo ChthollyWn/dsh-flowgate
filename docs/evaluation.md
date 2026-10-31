@@ -191,7 +191,7 @@ DEEPSEEK_API_KEY=... node scripts/run-evaluation.mjs --repo greenfield-members -
 
 1. **换宿主重跑 18 组**：需要可执行 sandbox、PATH 上有 pytest、`~/.m2` 可写（否则 G2/G5 与 build/run 证据必然失败）。
 2. **扩展自动 owner 或改真人值守**：`--owner auto` 自动批准 G1/G3/G6；`--auto-pending` 默认自动处理 `blocker,plan,rule`（BL/PC/RL），可显式加 `risk,scope,conflict`（risk/scope 会掩盖流程信号，脚本会打警告）。默认仍把 `RK-1`（风险单次放行）、scope（范围变更）、conflict 留人工，可改用 `--owner manual` 记录真实人工负担，或按场景显式放开；否则 B 组会被这些门禁卡住。
-3. **先修基准矛盾再重跑**：`ts-todo-api/risk` 的既有测试硬编码 100000 而隐藏需求要求 600000；`py-csv-cli/risk` 的既有测试断言"导出保留原手机号"而任务要求脱敏。"既有断言不能改"与隐藏需求冲突，需先改基准。
+3. ~~先修基准矛盾再重跑~~ **已在第四轮修复（P1-9，见 implementation-status §3.10）**：`ts-todo-api/risk` 的 PBKDF2 断言改为只断言存储格式契约（迭代次数下限，不写死 100000），`py-csv-cli/risk` 的导出断言改为契约断言（表头/行数/字段数/非手机号列，不写死待脱敏原值）；R3 的正确实现无需修改既有断言即可通过。因此重跑不再需要先改基准，只差可执行 sandbox（见 [examples/README.md](../examples/README.md)）。
 4. ~~补做从 0 开发演练与并行（inline vs auto）对照~~ **已补跑（2026-10-31 第二轮）**：7 组附加 run（greenfield 4 次迭代 + java 派发 `auto` 2 次），见 §6.6/§6.7；仍缺可执行 sandbox 下的统计样本（每条件 ≥3）与 B 组全部 metrics 收集（当前只有 pilot run 有 `metrics/C-001.json`）。
 5. **主观指标改双人独立评分**并报告一致性，再更新 §6.2/§6.5 结论。
 

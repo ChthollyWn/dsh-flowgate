@@ -12,7 +12,7 @@
 - Host: DeepSeek Harness (DSH) `>=0.2.1-rc.5 <0.3.0` (Desktop / Web)
 - Package: `dsh-flowgate`, MIT licensed
 - Repository: <https://github.com/ChthollyWn/dsh-flowgate>
-- Status: **v0.1 in development** (feature status table below; anything not done is marked as planned — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md) for actual status and known gaps)
+- Status: **v0.1 feature-complete, not yet published** (after the sixth-round cleanup, functionality and docs are consistent; feature status table below; anything not done is marked as planned — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md) for actual status and remaining items, and [docs/release/v0.1.0.md](docs/release/v0.1.0.md) for the release decision)
 
 ---
 
@@ -60,7 +60,7 @@ Process level has two independent dimensions: **complexity** (low / medium / hig
 
 ## Quick start (isolated profile)
 
-Do not install into your daily `desktop` profile before M6. Create an isolated development profile first:
+During development and trial installs, use an isolated profile — do not install into your daily `desktop` profile. Create an isolated development profile first:
 
 ```bash
 # Use the CLI bundled with the desktop app (a global dsh may be outdated)
@@ -199,7 +199,7 @@ docs/              requirements, technical design, execution plan, implementatio
 
 Every skill ships a `SKILL.md` (when to use, executable steps, what code enforces, what is guidance only, anti-patterns, good/bad examples, artifact paths) and a `learn.md` learning card (what / why / acceptance criteria / upstream practice / anti-patterns / good / bad). Upstream versions and per-skill provenance are tracked in [docs/method-sources.md](docs/method-sources.md); third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Feature status (v0.1, checked 2026-10-31)
+## Feature status (v0.1, sixth-round check 2026-10-31)
 
 > Honest status: ✅ implemented with automated/offline verification; 🟡 implemented, pending real-host end-to-end confirmation; 🗓 planned. Evidence: [docs/impl/implementation-status.md](docs/impl/implementation-status.md).
 
@@ -208,16 +208,16 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | 15 built-in skills (30 SKILL/learn files), method-source table, third-party notices | ✅ done |
 | Three benchmark repos (TS / Java / Python, independently buildable/testable) | ✅ done and executed ([examples/](examples/README.md)) |
 | State machine + level matrix, rules engine + shell tokenizer, scope control | ✅ done (core unit tests + engine integration tests) |
-| Artifact parsers, 46 gate checks (GR/G0–G3/G5/G6), task cards, execution plan/graph | ✅ done (positive + negative per check) |
+| Artifact parsers, 52 gate checks (GR/G0–G3/G5/G6), task cards, execution plan/graph | ✅ done (positive + negative per check) |
 | `.flowgate/`, change ledger, hash-chained + HMAC audit ledger, cross-session leases, locked mode and `/flow repair` | ✅ done (tamper located by line; strict rebuild round-trip) |
 | Verification receipts, input-hash freshness, risk engine, rework invalidation, verifiable citations | ✅ done |
 | Review subagent, execution-graph dispatch, worktree parallelism, integration checkpoints | 🟡 wired + dedicated unit tests (slot refill, checkpoint repair/retry, `run: main` routing, line-level read coverage, same-diff dedupe, three final conclusions, checkpoint task verification + full tests); a real headless host verified worktree creation, executor subagents, task gates and review, and **sequential dispatch settled all the way to S5** (3 batches done, G4 passed); parallel batches really start but the one-shot run exits before the integration-checkpoint merge, so an interactive/long-lived host is still needed |
-| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ walked through in a real DSH web host: status bar, 8 views, in-session preset switch, panel-button Remote fallback, low-complexity confirmation card (25 screenshots; `13-`–`26-` added this round); intercept-view misjudgement feedback verified at component level |
+| Input-dock status bar, 8-view right sidebar panel, stage cards, learning modes | ✅ walked through in a real DSH web host: status bar, 8 views, in-session preset switch, panel-button Remote fallback, low-complexity confirmation card (25 screenshots; `13-`–`26-` added this round); execution-graph nodes are clickable with a task-detail panel (scope / verify groups / covers); rule trial is a client-side approximation (respects off/locked/effective rule decisions/exceptions) explicitly labelled "host decision is authoritative", and custom project rules it cannot evaluate locally are listed; intercept-view misjudgement feedback verified at component level |
 | HTML delivery report, cross-session dashboard | ✅ done (single-file, offline, samples in test/fixtures) |
 | Metrics M-1..M-18, export, rule capture, read-only analysis tasks | ✅ done (missing data is reported as "unknown", never 0) |
 | With / without plugin evaluation report | ✅ **18/18 runs done + manual scoring of all 4 subjective metrics 18/18** (9 tasks × A/B, real model + headless); this round also adds the from-scratch and dispatch (inline vs auto) comparisons ([§6.5–§6.7](docs/evaluation.md)). Honest conclusion: B did not win on requirement coverage (most B runs were blocked by environment/human gates); its real gains are zero false completions and auditable process — small sample, not generalizable |
 
-**Verification boundary**: `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (**107 files / 1459 tests**); `pnpm coverage` passes thresholds (80/80/80/70; core/host details in implementation-status §2; CI also runs coverage); a real DSH 0.2.1-rc.5 process composes and imports this plugin via `--dump-config`, and `verify:compat` reruns **13/13** in an isolated profile (6 offline structural checks included; `--dump-config-schema` also fails on rc.5 for the host's own preset rows, so it is not used as evidence — see [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs plus subjective scoring, with counterexamples/blockers and sandbox caveats in [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md). The fifth-round acceptance-gap audit and the remaining items are in [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md).
+**Verification boundary** (locally measured in the sixth round, 2026-10-31): `pnpm lint && pnpm test && pnpm build && pnpm verify:package && pnpm verify:client` are green (**112 files / 1522 tests**; fifth round 107/1459, i.e. +5 files / +63 tests); `pnpm coverage` passes thresholds (80/80/80/70; total 86.40 / 76.25 / 86.92 / 89.46, core/host details in implementation-status §2); the npm package is about **39 files / ~1.03MB** (exact value in implementation-status §2 and the release notes); a real DSH 0.2.1-rc.5 process composes and imports this plugin via `--dump-config`, and `verify:compat` reruns **13/13** in an isolated profile (sixth round used a fresh build in `/tmp/fg-audit-env`, dump-config 1314 lines; `--dump-config-schema` also fails on rc.5 for the host's own preset rows, so it is not used as evidence — see [docs/compat/0.2.1-rc.5.md](docs/compat/0.2.1-rc.5.md)); startup overhead **+16.2ms** and uninstall cleanliness pass; real web-host UI and a real-model S0→S6 run have been exercised; the controlled evaluation has completed all 18 runs plus subjective scoring, with counterexamples/blockers and sandbox caveats in [docs/evaluation.md](docs/evaluation.md) and [docs/impl/implementation-status.md](docs/impl/implementation-status.md). **The independent sixth-round re-verification drove fixes for 7 P1 wiring gaps** (parallel worktree execution root, dispatch double-settlement, S5 regression verdict, compaction/cross-session re-injection, clarify placeholders, low-complexity task limit; see implementation-status §3.12), and local gates are all green; **the sixth-round commit has not been pushed yet, so CI must be rerun after push** (last green: `b671ef9`). Fifth-round acceptance and sixth-round re-verification records are in [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md).
 
 ## Screenshots
 
@@ -273,7 +273,7 @@ pnpm verify:uninstall # isolated-profile install/uninstall cleanliness (never th
 pnpm measure:startup  # host entry module-load overhead (T6.2, target <200ms)
 ```
 
-During development use the isolated profile (see Quick start); do not install into the daily profile before M6. See [examples/README.md](examples/README.md) for how to run the three benchmark repos.
+During development and trial installs use an isolated profile (see Quick start); verify in the isolated profile before regular use. See [examples/README.md](examples/README.md) for how to run the three benchmark repos.
 
 ## Documentation
 

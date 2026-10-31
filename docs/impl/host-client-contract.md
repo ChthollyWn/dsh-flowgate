@@ -43,6 +43,15 @@ host 从 DSH `@deepseek-ai/dsh-token-meter` 的 `contextPressure` 会话投影�
 - 刷新：token-meter 每次用量样本后 `onChanged` → 延后一帧 `emit()`；普通 emit 也会重读；
 - 实现：`src/host/projection/context.ts`、`src/host/runtime.ts`（`setContextPctSource`/`snapshotWithContext`），测试 `test/host/context-pct.test.ts`。
 
+### 1.2 任务卡详情（taskCards，可选，第六轮新增）
+
+`RuntimeSnapshot.taskCards?: Record<string, TaskCard>`：host 把当前变更的解析后任务卡随投影快照下发，供面板"执行图节点 → 任务详情"展示；客户端必须对缺失字段降级（不显示详情），不得抛错。
+
+- 主要字段：`id` / `title` / `covers` / `scope` / `tests` / `new_files` / `depends_on` / `tdd` / `verify`（验证组）/ `run` / `run_reason` / `size` / `risk`（完整定义见 `src/core/types.ts` 的 `TaskCard`）。
+- 数据来源：`FlowEngine.getTasks()`（仅当前变更）；无 `tasks.md`、解析失败或旧快照时为**字段缺失**（不是空对象）。
+- 客户端适配：`src/client/model.ts` 优先使用 `snapshot.taskCards[id]`，缺失时任务详情降级；测试 `test/client/task-detail.test.tsx`。
+- 该字段是**可选增量**，不改变既有 wire 契约；引入于第六轮（§3.12 / `cea85dd`）。
+
 ### PanelExtras
 
 ```ts

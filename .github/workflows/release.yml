@@ -1,7 +1,7 @@
 # FlowGate 发布 workflow
 #
 # 触发：推送 tag `v*`（例如 `git push origin v0.1.0`）。
-# 顺序：前置校验 → pnpm install --frozen-lockfile → lint → test → build →
+# 顺序：前置校验 → pnpm install --frozen-lockfile → lint → test → coverage → build →
 #       verify:package → verify:client → npm publish → 创建 GitHub Release。
 #
 # 关键假设（详见 docs/release/v0.1.0.md 的「发布前检查清单」）：
@@ -135,6 +135,10 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # NFR-5：覆盖率阈值（vitest.config.ts 的 coverage.thresholds）只在 --coverage 下生效，
+      # 发布前与 CI 一样显式跑一次 pnpm coverage，避免把低于阈值的版本发出去。
+      - run: pnpm coverage
 
       - name: Build
         run: pnpm build

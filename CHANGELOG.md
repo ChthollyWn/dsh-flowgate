@@ -3,11 +3,19 @@
 FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 > **发布状态（2026-10-31）**：npm 上尚无此包（registry 404）、GitHub 尚无 Release；仓库 tag `v0.1.0` 指向 `f53d5f1`，落后于本轮开发后的本地 HEAD（未发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
+> 第六轮（独立复验后的接线修复，代码提交 `cea85dd`）改动**尚未推送**，CI 待推送后重跑（最后绿灯 `b671ef9`）。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；正式发布时请按实际发布日期回填本文的时间与链接。
 
 ## [Unreleased]
 
 ### Added
+
+- **第六轮：清理复验发现的接线缺口（2026-10-31，代码提交 `cea85dd`）**：
+  - 背景：独立只读复验推翻第五轮"功能缺口全部闭环"结论，新发现 **7 项 P1 接线缺口**（均补回归测试）：T4.9 并行 worktree 执行根（`flow_verify`/输入哈希/自动提交以任务 worktree 为根）；派发双结算（`taskFailed` 对 done 早退 + host finalize 先查状态）；T4.2 S5 全量测试改走 `runFullSuite`（regressions 写入回执，G5 可判回归、M-12 有数据源）；T4.8 压缩后交接摘要重注入（含 `agent/created source='compact'` 防御式路径，DSH rc.5 实测该事件不可达）；T3.7/T4.8 跨会话注入最近 interrupted 任务卡与「任务 RED/GREEN」状态；T2.2 澄清「改变说明」占位符（`（待补充）`/`（未记录）`）不再通过 G1（并回写 `clarifyRounds`）；T2.8 低复杂度 G3 任务数上限=1。
+  - P2/证据修正：T2.3 `test: none` 时 G2 前真实运行 build/lint/typecheck 基线并落回执；M-16 数据源（`roadmap.approved`/`roadmap.progress` 写 total/delivered）；T5.1 执行图节点可点击/键盘选择 + 任务详情（snapshot 可选 `taskCards`）；规则试跑改为客户端本地近似并固定标注「精确判定以宿主为准」；T2.4 技能重复加载给出「本会话已加载」短提示；taskDone 审查提示不再引用不存在的 `flow_request_review`。
+  - 技能/文档/物料：skills 同步（dispatch auto 未按 size 路由、低复杂度 1 张卡、澄清占位符、test:none 基线）；文档与发布物料清理（门禁 46→52 项、面试 M-6=42.9% 补原始数据、真实故事拆两条、README.en 状态、compat/startup 头注、evaluation §194、compat"无网络"、CI 状态表述、todo-audit 89.29、release.yml 加 coverage、package.json repository/homepage/bugs、tag 推送说明、截图可离线补做、vitest 注释、构建体积）。
+  - 数字：**112 files / 1522 tests** 全绿（第五轮 107/1459，+5 文件 / +63 用例）；typecheck/lint 通过（130 源文件）；coverage thresholds 通过（合计 **86.40 / 76.25 / 86.92 / 89.46**）；compat **13/13**；startup **+16.2ms**；uninstall 通过；build host ≈1.21MB / client ≈219KB；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测，含 README）。**CI 尚未推送本轮提交、待推送后重跑**（最后绿灯 `b671ef9`）。
+  - 仍开放（四分类）：环境/人工受限验证；可离线补做（projection epoch 复验/自动接续与 doctor 截图）；需负责人决策（发布 tag 方案、自举 §9、T2.1 字面口径）；后续 P2/产品决策（C0 骨架 TDD 死锁、`run:auto` size 路由未实现、Remote 非降级 v0.1 不做、M-17/dispatch 摘要/worktree 归因/T4.4 引导、T5.2 学习模式抽查）。详见 [implementation-status §4](docs/impl/implementation-status.md) 与 [acceptance-gap-audit §7](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
 - **第五轮：执行方案验收缺口修复（2026-10-31，提交 `8963a92`…`535842b`、`6e3bd24`）**：
   - 冻结/守卫：契约判定快照（改 config 只影响新变更）、门后产物哈希冻结 + `R-FROZEN-ARTIFACT`、越界撤销自动解除、非 agent 改动进入面板与 G6、接管后旧会话写拒绝（`R-LEASE`）与接续快照对比。
@@ -17,7 +25,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
   - 评测/加固：compat 13/13（含 6 项离线结构检查）、浏览器包缺失故障注入、`review.model` 接线。
   - 最终数字：**107 files / 1459 tests**；coverage 86.19/75.84/86.60/89.29；package 39 文件/1015.9KB；startup +15.8ms；uninstall 通过。详见 [acceptance-gap-audit](docs/impl/acceptance-gap-audit-2026-10-31.md)。
 
-- 发布工程：本 `CHANGELOG.md`、发布说明草稿 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)、tag 推送触发的发布 workflow `.github/workflows/release.yml`（校验后发布 npm 并创建 GitHub Release；截至本文件提交时尚未触发执行）。
+- 发布工程：本 `CHANGELOG.md`、发布说明草稿 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)、tag 推送触发的发布 workflow `.github/workflows/release.yml`（依次 lint / test / coverage / build / verify:package / verify:client 后发布 npm 并创建 GitHub Release；截至本文件提交时尚未触发执行）。
   - 这些文件属于发布流程本身，不是插件功能变更。若发布时把 `v0.1.0` tag 前移到包含这些提交的 HEAD，请把本节并入 `[0.1.0]` 的「Documentation」一节。
 - host 层单测补齐：`test/host/dispatch.test.ts`（11 例：注册、engine 未就绪、无 subagents/provider 降级、顺序/并行派发、worktree 落点、创建失败降级、互斥、失败结算）与 `test/host/review.test.ts`（14 例：开关、provider 降级、findings 归一化与 diff 指纹、重试 1 次、sessionQuery 读取覆盖、调查任务）。
 - **并行执行者范围判定用错任务卡**（C-005 真机发现）：两个执行者同时活跃时 `evaluateAction` 用全局 `activeTask` 判定范围，T2 写自己 `new_files` 的文件被 T1 的 scope 拒绝；已改为优先取 `caller.dispatch.taskId`，并新增 engine 集成回归测试。
@@ -80,6 +88,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 
 ### Tests
 
+- 第六轮实测：**112 files / 1522 tests** 全绿（第五轮 107/1459，+5 文件 / +63 用例）；coverage thresholds 通过（合计 86.40/76.25/86.92/89.46）；lint/typecheck 通过（130 源文件）；compat 13/13、startup +16.2ms、uninstall 通过。
 - 测试规模（本轮最终提交实测）：**90 个测试文件 / 1289 个用例**全绿（约 3.5s），较 43d18e5 的 69 files / 995 tests 新增 21 files / 294 tests；新增覆盖：派发并行 27、熔断恢复 18、状态损坏 14、unittest 解析 25、覆盖率补缺 158、投影 epoch 6、PROJECT 接续 4、依赖内容判定 35、路线图首个变更 4 等。
 - 故障注入 **7/7 通过**：新增 3 例（`status.json` 截断 → 宿主启动 + 锁定 + doctor 路径 + repair；`ledger.jsonl` 末行截断 → 锁定 + 行号 + repair 拒绝静默重写；`config.yaml` 语义非法 → ConfigError + 启动不受影响 + fail-closed）。
 - 覆盖率（`pnpm coverage` 通过 thresholds）：core 语句 90.34% / 分支 80.16% / 函数 90.77%；host（新纳入口径）语句 74.14% / 分支 61.01%；core+host 合计 语句 86.40 / 分支 75.97 / 函数 85.96 / 行 89.53。
@@ -104,7 +113,7 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 - **7 阶段硬约束流程内核**：S0 立项/路线图 → S1 需求澄清 → S2 上下文 → S3 设计拆解 → S4 执行 → S5 验证 → S6 交付；状态机与复杂度（低/中/高/超高）× 风险（普通/高）等级矩阵；迁移表数据驱动测试；`/flow` 命令族与阶段状态条。
 - **规则引擎与守卫**：数据驱动规则（`R-STAGE-SRC`、`R-SCOPE`、`R-PROTECTED`、`R-DEP` 等，可在 `.flowgate/config.yaml` 覆盖）；工具调用参数与 shell 命令分词；风险触发器（敏感路径、依赖变更、危险命令、疑似密钥、成本、范围膨胀、连续失败）；`tools/pre-execute` 异步判定 + `ctx.tools.guard` 同步缓存双保险；单次放行 `OV-n`、例外与误判反馈闭环。
 - **账本与跨会话状态**：`.flowgate/` 项目目录、状态与配置；账本哈希链 + HMAC（篡改可定位到行）；会话租约与接管、交接摘要、锁定模式与 `/flow repair` 从账本和产物重建。
-- **规格层**：变更目录产物（`clarify.md` / `proposal.md` / `specs/` / `context.md` / `design.md` / `risk.md` / `tasks.md`）、GR/G0–G3/G5/G6 共 46 项门禁检查（每项正反例）、任务卡检查、技术栈探测、项目路线图、mermaid 执行图、可核验源码引用。
+- **规格层**：变更目录产物（`clarify.md` / `proposal.md` / `specs/` / `context.md` / `design.md` / `risk.md` / `tasks.md`）、GR/G0–G3/G5/G6 共 46 项门禁检查（每项正反例；v0.1.0 发布时统计为 46，第五轮后 `GATE_CHECKS` 实为 52）、任务卡检查、技术栈探测、项目路线图、mermaid 执行图、可核验源码引用。
 - **执行纪律**：`flow_task_start` 领取任务卡并注入上下文；范围事前控制 + shell 事后检测；TDD RED/GREEN 证据回执与输入哈希过期判定；按执行图派发（inline / subagent / auto）、git worktree 并行、集成检查点；返工失效范围；审查子 agent（宿主提供 subagents 时）。
 - **交付闭环**：S5/S6 验证证据汇总、单文件离线 HTML 交付报告、跨会话 HTML 看板、M-1～M-18 指标自动计算与 CSV 导出、规则沉淀、只读分析任务与 `flow_submit_analysis`。
 - **模型工具**：15 个 `flow_*` 工具（`/flow doctor` 的 `14/14` 是 tools 模块清单口径，`flow_dispatch_next` 由派发模块单独注册）；没有批准 / 放行 / 降低等级类工具——人工专属动作只能由负责人执行。
