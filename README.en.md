@@ -12,7 +12,7 @@
 - Host: DeepSeek Harness (DSH) `>=0.2.1-rc.5 <0.3.0` (Desktop / Web)
 - Package: `dsh-flowgate`, MIT licensed
 - Repository: <https://github.com/ChthollyWn/dsh-flowgate>
-- Status: **v0.1 feature-complete, not yet published** (after the sixth-round cleanup, functionality and docs are consistent; feature status table below; anything not done is marked as planned — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md) for actual status and remaining items, and [docs/release/v0.1.0.md](docs/release/v0.1.0.md) for the release decision)
+- Status: **v0.1.0 published to npm (2026-10-31)** ([npm](https://www.npmjs.com/package/dsh-flowgate); after the sixth-round cleanup, functionality and docs are consistent; feature status table below; anything not done is marked as planned — see [docs/impl/implementation-status.md](docs/impl/implementation-status.md) for actual status and remaining items, and [docs/release/v0.1.0.md](docs/release/v0.1.0.md) for release notes)
 
 ---
 
@@ -69,9 +69,11 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 # 1. Create an isolated web profile (first time only; re-running overwrites that profile)
 "$DSH" flowgate-dev --from-default-profile web
 
-# 2. Install the plugin: link: during development, npm package name for releases
+# 2a. Install the published version from npm (recommended)
+"$DSH" plugin --profile flowgate-dev add dsh-flowgate@0.1.0
+
+# 2b. Or link: a source checkout during development (run pnpm install && pnpm build first)
 "$DSH" plugin --profile flowgate-dev add link:/path/to/dsh-flowgate
-# after release: "$DSH" plugin --profile flowgate-dev add dsh-flowgate
 
 # 3. Confirm the plugin line exists in the composition tree
 "$DSH" --profile flowgate-dev --dump-config | grep -i flowgate

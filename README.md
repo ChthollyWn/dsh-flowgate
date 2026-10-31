@@ -12,7 +12,7 @@
 - 宿主：DeepSeek Harness（DSH）≥ `0.2.1-rc.5 < 0.3.0`（Desktop / Web）
 - 包名：`dsh-flowgate`，MIT 许可
 - 仓库：<https://github.com/ChthollyWn/dsh-flowgate>
-- 状态：**v0.1 功能完成、未发布（第六轮清理后功能与文档一致）**（功能状态见下表；实现状态、已知缺口与剩余项见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)，发布决策见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）
+- 状态：**v0.1.0 已发布到 npm（2026-10-31）**（[npm](https://www.npmjs.com/package/dsh-flowgate)；第六轮清理后功能与文档一致；功能状态见下表；实现状态、已知缺口与剩余项见 [docs/impl/implementation-status.md](docs/impl/implementation-status.md)，发布说明见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）
 
 ---
 
@@ -69,9 +69,11 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 # 1. 从官方 web 模板建一个隔离 profile（只在第一次执行；重复执行会覆盖该 profile）
 "$DSH" flowgate-dev --from-default-profile web
 
-# 2. 安装插件：开发中用 link:，正式用 npm 包名
+# 2a. 从 npm 安装已发布版本（推荐）
+"$DSH" plugin --profile flowgate-dev add dsh-flowgate@0.1.0
+
+# 2b. 或开发中用 link: 指向源码仓库（需先在仓库里 pnpm install && pnpm build）
 "$DSH" plugin --profile flowgate-dev add link:/path/to/dsh-flowgate
-# 发布后也可以： "$DSH" plugin --profile flowgate-dev add dsh-flowgate
 
 # 3. 确认组合树里有 FlowGate 的插件行
 "$DSH" --profile flowgate-dev --dump-config | grep -i flowgate

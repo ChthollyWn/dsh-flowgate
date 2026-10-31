@@ -90,10 +90,9 @@ Remote 非降级路径 → **v0.1 决策不做**（Typert Remote 需构建期生
 逐项阻塞原因/复现命令/验收标准见 [todo-audit §3.1](todo-audit-2026-10-31.md) 与
 [implementation-status §4](implementation-status.md)（第六轮已按四类重写）。
 
-### 5.2 发布（负责人决策，此前明确暂缓）
+### 5.2 发布（2026-10-31 已完成）
 
-npm publish、GitHub Release、tag `v0.1.0` 前移/版本 bump、awesome-dsh-plugin 收录、V2EX/即刻反馈、
-demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已就绪；第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint/test/coverage/build/verify；上一轮绿灯为 `60a82dc` 的 run 41190320744）；发布只差负责人决定 tag/版本方案（远程 tag `v0.1.0` 已指向 `f53d5f1`，前移需 force-move 或 bump 新版本，见 [release notes §8](../release/v0.1.0.md)）。
+npm publish 与 tag `v0.1.0` 前移已于 **2026-10-31 完成**（方案 A：前移 tag、保持版本 0.1.0；GitHub Release 见仓库 Releases）。仍待办：awesome-dsh-plugin 收录、V2EX/即刻反馈、demo 动图、干净机器 10 分钟快速开始验收。
 
 ### 5.3 自举（04 §9，负责人决策项）
 
@@ -116,7 +115,7 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 
 > **第六轮本地门禁（2026-10-31，代码提交 `cea85dd` + 本轮文档）**：`pnpm test` **112 files / 1522 tests** 全绿；lint/typecheck 通过（130 源文件）；
 > `pnpm coverage` thresholds 通过（合计 86.40 / 76.25 / 86.92 / 89.46）；build host 1,210,648 B（≈1.21MB）/ client 223,830 B（≈219KB）；
-> `verify:package` 39 文件 / 1032.8KB（docs 修改后重跑实测，含 README）；`verify:client` 通过；`verify:compat` 13/13（隔离 `DSH_HOME=/tmp/fg-audit-env`，dump-config 1314 行）；
+> `verify:package` 39 文件 / 1032.9KB（docs 修改后重跑实测，含 README）；`verify:client` 通过；`verify:compat` 13/13（隔离 `DSH_HOME=/tmp/fg-audit-env`，dump-config 1314 行）；
 > `measure:startup` +16.2ms；`verify:uninstall` 通过。**CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) 已成功**（第六轮提交推送后）。
 
 ## 7. 第六轮：独立复验与接线修复（2026-10-31）
@@ -160,6 +159,6 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 
 - `pnpm lint` + `typecheck` 通过（130 源文件）；`pnpm test` **112 files / 1522 tests** 全绿（+63 用例）。
 - `pnpm coverage` thresholds 通过：合计 **86.40 / 76.25 / 86.92 / 89.46**；core 83.42 / 69.26 / 82.59 / 88.48；host 74.09 / 65.71 / 70.00 / 78.20。
-- build：`lib/host.js` 1,210,648 B（≈1.21MB）/ `lib/client.js` 223,830 B（≈219KB）；`verify:package` **39 文件 / 1032.8KB**（docs 修改后重跑实测）；`verify:client` 通过。
+- build：`lib/host.js` 1,210,648 B（≈1.21MB）/ `lib/client.js` 223,830 B（≈219KB）；`verify:package` **39 文件 / 1032.9KB**（docs 修改后重跑实测）；`verify:client` 通过。
 - `verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env`，新构建，dump-config 1314 行）；`measure:startup` **+16.2ms**（基线 16.5 / 加载 32.6）；`verify:uninstall` 通过（rc.5 `plugin remove` 不 prune node_modules 已知警告）。
 - CI：第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**（lint/test/coverage/build/verify）。

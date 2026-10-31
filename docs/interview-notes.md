@@ -41,7 +41,7 @@ FlowGate 是给 DeepSeek Harness（DSH）加「硬约束开发流程」的插件
 - 测试：**112 个测试文件 / 1522 个用例**（core / host / client / 集成 / 故障注入；第五轮 107/1459，本轮 +5 文件 / +63 用例），`pnpm test` 全绿；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42/69.26/82.59/88.48、host 74.09/65.71/70.00/78.20。
 - 真机兼容：DSH `0.2.1-rc.5`，`verify:compat` **13/13**（2026-10-31 第六轮在隔离 `DSH_HOME=/tmp/fg-audit-env` 用新构建复跑，dump-config 1314 行；第五轮 13/13 含 6 项离线结构检查；见 [compat/](compat/)）；真实 Web 宿主走查截图 25 张（其中 24–26 为组件级）+ headless 真模型完整 S0→S6（`ts-todo-api` / `java-renewal`）。
 - 加固：故障注入套件通过（含状态损坏/守卫抛错/服务缺失/配置损坏/浏览器包缺失）；启动增量 **+16.2ms**（基线 16.5 / 加载 32.6；验收线 <200ms；口径是模块加载成本，不含 Electron/UI 冷启动）；隔离 profile 安装/卸载干净度通过。
-- 包：约 **39 文件 / 约 1.03MB**（`pnpm verify:package` 精确值 1032.8KB，docs 修改后重跑实测）；构建产物 `lib/host.js` 1,210,648 B（≈1.21MB）/ `lib/client.js` 223,830 B（≈219KB）；零 `@deepseek-ai/*` 运行时依赖（只作可选 peer），不联网、无遥测。
+- 包：约 **39 文件 / 约 1.03MB**（`pnpm verify:package` 精确值 1032.9KB，docs 修改后重跑实测）；构建产物 `lib/host.js` 1,210,648 B（≈1.21MB）/ `lib/client.js` 223,830 B（≈219KB）；零 `@deepseek-ai/*` 运行时依赖（只作可选 peer），不联网、无遥测。
 - 评测：**18/18 run**（9 任务 × A/B，真实模型 + 隔离 headless）+ 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）**人工评分 18/18**（[evaluation.md](evaluation.md) §6.2/§6.5）；单点 pilot（`ts-todo-api / fix-bug` A/B 各 1 次）：两种条件回归 34/34、验收 4/4 全过，B 多 2 轮 / 约 13 倍耗时 / 3 次人工门（§6.1）；从 0 开发演练 6 次与派发对照见 §6.6/§6.7。
 - 派发真机：`java-renewal` 新功能 `dispatch=auto` 顺序派发 3 批次完整结算到 S5（外部回归 20/20）；并行批次两个执行者真实启动（worktree + 独立子 agent + 回执 + 熔断），但 headless 一次性进程在集成检查点合并前退出（[evaluation.md](evaluation.md) §6.7）。
 - 第六轮复验：独立只读复验驱动修复了 **7 项 P1 接线缺口**（并行 worktree 执行根、派发双结算、S5 全量测试回归判定、上下文压缩/跨会话重注入、澄清占位符、低复杂度任务数上限，均补回归测试，提交 `cea85dd`），并修正 T2.3/T5.1/M-16/规则试跑等 P2 与文档口径——这是"用审计反推实现接线"的真实工程故事。
