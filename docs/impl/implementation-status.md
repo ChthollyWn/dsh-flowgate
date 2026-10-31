@@ -31,7 +31,7 @@ DSH_HOME=/tmp/fg-home node scripts/verify-dsh-compat.mjs --profile flowgate --wr
 DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --dump-config
 ```
 
-最近一次结果（2026-10-31 第五轮，代码提交 `6e3bd24` + 文档提交）：lint 通过（130 个源文件）；`test` **107 files / 1459 tests** 全绿；构建产物 host 约 1.0MB / client 约 193KB；`verify:package` 通过（**39 文件 / 1015.9KB**）；`verify:client` 通过。`pnpm coverage` 通过 thresholds（80/80/80/70）；文本报告聚合：core 82.97 / 68.50 / 81.51 / 88.15、host 73.76 / 65.10 / 70.00 / 77.82、合计 86.19 / 75.84 / 86.60 / 89.30。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-final-home` 的 profile + link 安装；含 6 项离线结构检查）、`measure:startup` 中位数增量 **+15.8ms**、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。
+最近一次结果（2026-10-31 第五轮，代码提交 `6e3bd24` + 文档提交）：lint 通过（130 个源文件）；`test` **107 files / 1459 tests** 全绿；构建产物 host 约 1.0MB / client 约 193KB；`verify:package` 通过（**39 文件 / 1015.9KB**）；`verify:client` 通过。`pnpm coverage` 通过 thresholds（80/80/80/70）；文本报告聚合：core 82.97 / 68.50 / 81.51 / 88.15、host 73.76 / 65.10 / 70.00 / 77.82、合计 86.19 / 75.84 / 86.60 / 89.29。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-final-home` 的 profile + link 安装；含 6 项离线结构检查）、`measure:startup` 中位数增量 **+15.8ms**、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。
 
 > 注：`pnpm verify:package` 在 `~/.npm` 不可写的沙箱环境里会把 npm cache/logs 固定到系统临时目录（2026-10-31 修复）；`verify:compat` 的 `--dump-config-schema` 在 rc.5 上因宿主自带 preset 行同样报错，不作为本插件的兼容判据（见 [compat/0.2.1-rc.5.md](../compat/0.2.1-rc.5.md)）。
 
@@ -304,7 +304,7 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 | 4 | ~~派发/并行 host 缺口~~ → 第三轮修 `run: main`/检查点修复任务与重试/计划修订/S5 回退；**第四轮修** `max_agents` 槽位级自动补位（+`queued` 真实语义）、面板 plan/rule/blocker/conflict 审批入口、`/flow conflict approve\|reject CF-n` 闸门。剩余差距只在真机验证（并行合并结算、真实拦截反馈、preset 运行时） | 功能语义已基本对齐 03 §7.5 | 真机验证项见 §4 #1/#2/#3 与 [todo-audit](todo-audit-2026-10-31.md) §3.1 |
 | 5 | `appendPluginRecord` 属实验性 API | DSH 升级可能失效 | 每个 RC 跑 `verify:compat`；不可用时只保留内存投影 |
 | 6 | ~~主规格归档未做 ADDED/MODIFIED/REMOVED 合并~~（2026-10-30 已补：`src/core/archive/merge.ts` + 7 个单测 + `spec.merged` 账本事件，C-002 真机验证） | — | 已闭环 |
-| 7 | ~~覆盖率低于目标~~ → thresholds 入 vitest.config 并在本地/CI 通过（第五轮文本报告：core 82.97/68.50/81.51/88.15，host 73.76/65.10/70.00/77.82，合计 86.19/75.84/86.60/89.30） | 剩余：部分组合分支未覆盖（engine 编排/解析器/报告指标） | 随功能改动继续补；P1-11 已清一批零引用死代码，`rules/evaluate.ts` 待后续 |
+| 7 | ~~覆盖率低于目标~~ → thresholds 入 vitest.config 并在本地/CI 通过（第五轮文本报告：core 82.97/68.50/81.51/88.15，host 73.76/65.10/70.00/77.82，合计 86.19/75.84/86.60/89.29） | 剩余：部分组合分支未覆盖（engine 编排/解析器/报告指标） | 随功能改动继续补；P1-11 已清一批零引用死代码，`rules/evaluate.ts` 待后续 |
 | 8 | npm 未发布、无 GitHub Release；tag `v0.1.0` 落后于本轮 HEAD | 无法按 README 的 npm 安装路径使用 | 需负责人决定版本/tag 方案并配置 `NODE_AUTH_TOKEN`；物料已备（CHANGELOG、release notes、release.yml） |
 | 9 | Desktop 宿主未验证（启动耗时与卸载干净度已完成，见 §3.6） | 兼容矩阵只有 Web / headless 证据 | 桌面会话人工走查 |
 | 10 | ~~`.flowgate/state/sessions.json` 损坏时 `engine.load` 抛错 → 宿主 markInert（engine 未就绪时 guard 直接放行，仍是一条 fail-open）~~ → **2026-10-31 第三轮已修**：租约损坏汇总为 `corruptStateFiles` → 锁定模式（doctor 显示路径、写操作 `R-LOCKED`）、`/flow repair` 重建空租约并解锁；损坏态不自动改写租约。新增故障注入用例（§3.9） | — | 已闭环 |

@@ -98,7 +98,7 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 |---|---|
 | `pnpm lint` | 通过（分层规则 130 个源文件 + `tsc --noEmit`） |
 | `pnpm test` | **107 个测试文件 / 1459 个用例全绿** |
-| `pnpm coverage` | thresholds 通过：合计 86.19 / 75.84 / 86.60 / 89.30；core 82.97/68.50/81.51/88.15；host 73.76/65.10/70.00/77.82 |
+| `pnpm coverage` | thresholds 通过：合计 86.19 / 75.84 / 86.60 / 89.29；core 82.97/68.50/81.51/88.15；host 73.76/65.10/70.00/77.82 |
 | `pnpm build` + verify | build 通过；`verify:package` 39 文件 / 1015.9KB；`verify:client` 通过 |
 | `verify:compat`（隔离 profile，本机 DSH 0.2.1-rc.5） | **13/13**（含 6 项离线结构检查：host 导出、工具注册、守卫、子 agent、浏览器包、面板声明） |
 | `measure:startup` | 中位数 **+15.8ms**（验收线 <200ms） |
