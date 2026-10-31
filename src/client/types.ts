@@ -96,7 +96,11 @@ export interface InterceptRow {
   ruleId: string
   tool: string
   target?: string
-  effect: 'deny' | 'human'
+  /**
+   * 判定效果。`observe` = 观察模式（自举/维护时记录但放行，v0.6+）；
+   * 旧投影不会出现该值，客户端按 grant 降级显示。
+   */
+  effect: 'deny' | 'human' | 'observe'
   why: string
   unlock: string
   source?: string

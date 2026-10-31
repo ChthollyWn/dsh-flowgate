@@ -102,6 +102,55 @@ for (const file of files) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// host lossless JSON 边界规则（P0-1）
+// ---------------------------------------------------------------------------
+const BOUNDARY_JSON = 'src/host/boundary/json.ts'
+const TOOLS_SCHEMA = 'src/host/tools/schema.ts'
+const PROJECTION_INDEX = 'src/host/projection/index.ts'
+const LOSSLESS_HELPER_NAMES = ['toLosslessJson', 'toLosslessValue', 'isLosslessJson', 'assertLosslessJson']
+
+/** 是否在本文件"定义"了同名 helper（function 声明 / const 赋值；import 不算）。 */
+function definesLosslessHelper(source, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const definitionPatterns = [
+    new RegExp(`\\b(?:export\\s+)?(?:async\\s+)?function\\s+${escaped}\\s*[<(]`),
+    new RegExp(
+      `\\b(?:export\\s+)?(?:const|let|var)\\s+${escaped}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:\\([^)]*\\)\\s*=>|function)`,
+    ),
+  ]
+  return definitionPatterns.some((pattern) => pattern.test(source))
+}
+
+for (const file of files) {
+  const rel = relative(ROOT, file).replaceAll('\\', '/')
+  if (!rel.startsWith('src/host/')) continue
+  const source = await readFile(file, 'utf8')
+  // (a) 只有 boundary/json.ts 可以定义 lossless helper（其余模块不得各自造轮子）。
+  if (rel !== BOUNDARY_JSON && rel !== TOOLS_SCHEMA) {
+    for (const name of LOSSLESS_HELPER_NAMES) {
+      if (definesLosslessHelper(source, name)) {
+        errors.push(`${rel} 不得定义 ${name}：lossless JSON 清洗只允许在 ${BOUNDARY_JSON} 定义（P0-1）`)
+      }
+    }
+  }
+  // (b) 投影 wire.view 必须显式走 lossless 清洗 + DTO（禁止整包透传内部快照）。
+  if (rel === PROJECTION_INDEX) {
+    const wireViewPattern = /wire\s*:\s*\{[\s\S]{0,800}?view\s*:\s*\([^)]*\)\s*=>\s*[^\n]*(toLosslessJson|toWireProjection)/
+    if (!wireViewPattern.test(source)) {
+      errors.push(`${rel} 的 wire.view 必须显式经过 toLosslessJson / toWireProjection（P0-1/P0-2）`)
+    }
+  }
+  // (c) 工具 schema 不得再定义本地同名 helper（改用 boundary 的 toLosslessValue）。
+  if (rel === TOOLS_SCHEMA) {
+    for (const name of LOSSLESS_HELPER_NAMES) {
+      if (definesLosslessHelper(source, name)) {
+        errors.push(`${rel} 不得再定义 ${name}：工具结果清洗改用 ${BOUNDARY_JSON} 的 toLosslessValue（P0-1）`)
+      }
+    }
+  }
+}
+
 if (errors.length > 0) {
   console.error('分层规则检查失败：\n')
   for (const error of errors) console.error(`  ✗ ${error}`)

@@ -11,13 +11,22 @@ import type { DshAgent, DshCommandDefinition, DshCommandRuntime, DshContext } fr
 import type { EngineLike } from '../types.js'
 import type { HostRuntime } from '../runtime.js'
 import { openLocalPath } from '../open.js'
-import type { Complexity, FlowRoute, GateId, PendingItem, RiskLevel } from '../../core/types.js'
+import type { Complexity, FlowRoute, GateId, IncidentRecord, PendingItem, RepairRecord, RiskLevel } from '../../core/types.js'
 import { HostError, describeError, toAgentError } from '../errors.js'
 import { approveHumanGate, confirmCardText, rejectCurrentGate } from '../gates/index.js'
 import { formatDoctorReport, runRepair } from '../doctor/index.js'
 import { patchConfig } from '../config-patch.js'
 import { runInit } from '../init/index.js'
 import { ensureCoverage } from '../coverage/index.js'
+import {
+  abortRepair,
+  finishRepair,
+  repairProgress,
+  safeGetProjectFlags,
+  safeGetRepair,
+  safeGetTakeoverMode,
+  setProjectOff,
+} from '../engine-api.js'
 
 /** 解析后的 /flow 命令。 */
 export interface ParsedFlowCommand {
@@ -69,7 +78,11 @@ export const FLOW_COMMAND_HELP = [
   '/flow handoff — 立即生成交接摘要',
   '/flow doctor — 自检（守卫心跳、覆盖、账本、宿主能力）',
   '/flow repair — 从账本重建状态、退出锁定模式',
-  '/flow off [理由] / /flow on — 本会话关闭/恢复门禁',
+  '/flow fix — 修复通道状态（FIX-id、RED/GREEN 证据、范围、改动、下一步）',
+  '/flow fix done — 关闭修复通道（校验证据/范围/回归后落审计）',
+  '/flow fix abort <理由> — 放弃当前修复通道（写账本审计）',
+  '/flow incident — 查看未关闭的事故记录（自暂停）',
+  '/flow off [理由] / /flow on — 暂停/恢复门禁（有进行中变更=本会话；无变更=项目级暂停）',
 ].join('\n')
 
 /** 安装命令族。 */
@@ -80,7 +93,7 @@ export function installCommands(runtime: HostRuntime): void {
     const definition: DshCommandDefinition = {
       name: 'flow',
       description: 'FlowGate 流程门禁：状态、立项、门禁、放行、指标与自检',
-      input: { hint: 'init | status | new <描述> | approve <门> | unblock [BL-n] | doctor' },
+      input: { hint: 'init | status | new <描述> | approve <门> | unblock [BL-n] | fix | doctor' },
       recordInput: true,
       handler: async (invocation) => {
         try {
@@ -190,17 +203,55 @@ export async function executeFlowCommand(runtime: HostRuntime, rawInput: string,
     }
     case 'repair':
       return runRepair(runtime)
+    case 'fix':
+      return fixCommand(runtime, agent ?? null, args)
+    case 'incident':
+      return incidentCommand(runtime, agent ?? null)
     case 'off': {
       const engine = await engineFor(runtime, agent)
-      await engine.setOff(true, rest === '' ? '负责人手动关闭' : rest)
+      const reason = rest === '' ? '负责人手动关闭' : rest
+      const change = safeCurrentChange(engine)
+      if (change) {
+        // 有进行中变更：保持旧语义（本会话 off，账本记 session.off）。
+        await engine.setOff(true, reason)
+        runtime.emit()
+        return '本会话门禁已关闭（/flow off），操作不再拦截；账本已记录。恢复：/flow on。'
+      }
+      // 无进行中变更：项目级暂停（v0.5.1）。用于项目整体停用/事故止血，
+      // 不伪造一个会话级的 off 状态；agent 不能自行恢复。
+      await setProjectOff(engine, true, reason, { by: 'human' })
       runtime.emit()
-      return '本会话门禁已关闭（/flow off），操作不再拦截；账本已记录。恢复：/flow on。'
+      return [
+        `项目门禁已暂停（项目级）：${reason}`,
+        '写操作不再拦截；暂停状态写入 .flowgate/state/flags.json 并记账本 flow.project_off。',
+        '恢复：/flow on（负责人）；agent 无法自行恢复。',
+      ].join('\n')
     }
     case 'on': {
       const engine = await engineFor(runtime, agent)
-      await engine.setOff(false, rest === '' ? '负责人手动恢复' : rest)
+      const reason = rest === '' ? '负责人手动恢复' : rest
+      const change = safeCurrentChange(engine)
+      const flags = safeGetProjectFlags(engine)
+      const lines: string[] = []
+      if (change) {
+        await engine.setOff(false, reason)
+        lines.push('本会话门禁已恢复（/flow on）。')
+      }
+      // 无变更时必须恢复项目级暂停；有变更时若存在项目级 off 也一并恢复。
+      if (!change || flags?.off !== undefined) {
+        try {
+          await setProjectOff(engine, false, '负责人恢复')
+          lines.push('项目门禁已恢复（项目级）。')
+        } catch (error) {
+          if (!change) throw error
+          lines.push(`项目级恢复失败：${describeError(error)}`)
+        }
+      }
+      if (flags?.incident !== undefined) {
+        lines.push(`注意：事故 ${flags.incident.id}（${flags.incident.severity}）仍未关闭；请补 /flow incident 查看，并用 flow_incident_close 补审计。`)
+      }
       runtime.emit()
-      return '门禁已恢复（/flow on）。'
+      return lines.join('\n')
     }
     default:
       throw new HostError(`未知子命令：${verb}`, `运行 /flow help 查看支持的命令；当前输入：/flow ${verb}`)
@@ -230,6 +281,27 @@ function statusCommand(runtime: HostRuntime): string {
       : 'FlowGate 已禁用（插件配置 enabled=false）。'
   }
   const lines = [engine.statusText()]
+  // v0.5.1：接管模式 / 暂停来源 / 事故 / 修复通道（status 是 agent 与负责人都常看的入口）。
+  const snapshot = safeSnapshot(runtime)
+  const takeover = safeGetTakeoverMode(engine) ?? snapshot?.takeover
+  if (takeover !== undefined && takeover !== null && takeover !== 'enforce') {
+    lines.push(takeover === 'observe' ? '接管模式：observe（只记录不拦截）' : '接管模式：off（不拦截不记录）')
+  }
+  if (snapshot?.offBy !== undefined) {
+    lines.push(`暂停来源：${snapshot.offBy === 'human' ? '负责人手动' : 'agent 自暂停（事故）'}`)
+  }
+  const repair = safeGetRepair(engine)
+  if (repair) {
+    const progress = repairProgress(repair)
+    lines.push(
+      `修复通道：${repair.id}「${repair.title}」｜RED ${progress.red ? '✓' : '✗'} GREEN ${progress.green ? '✓' : '✗'}｜完成：/flow fix done`,
+    )
+  }
+  const flags = safeGetProjectFlags(engine)
+  const incident = flags?.incident ?? snapshot?.incident
+  if (incident) {
+    lines.push(`事故：${incident.id}（${incident.severity}）${incident.reason}｜恢复：/flow on；关闭审计：flow_incident_close`)
+  }
   const notices = safeNotices(engine)
   if (notices.length > 0) lines.push('', '通知：', ...notices.map((notice) => `- ${notice}`))
   // 覆盖自检：读取前兜底（从未采样时同步补采一次，避免状态栏显示"未检查"）。
@@ -636,6 +708,109 @@ async function resumeCommand(runtime: HostRuntime, agent: DshAgent | null, args:
   await engine.resumeChange(changeId, takeover ? { takeover: true } : {})
   runtime.emit()
   return `已接续 ${changeId}${takeover ? '（接管）' : ''}。当前阶段：${safeSnapshot(runtime)?.stage ?? '未知'}。`
+}
+
+/**
+ * `/flow fix`：修复通道的人类入口（P1-8/P1-9）。
+ *
+ * 无参/status = 查看当前修复（证据/改动/下一步）；done = 关闭（校验由 core 负责）；
+ * abort <理由> = 放弃。修复通道通常由 agent 用 flow_fix_start 发起，负责人这里
+ * 只做查看/收尾——不需要人工门。
+ */
+async function fixCommand(runtime: HostRuntime, agent: DshAgent | null, args: string[]): Promise<string> {
+  const engine = await engineFor(runtime, agent)
+  const action = (args[0] ?? '').toLowerCase()
+  const repair = safeGetRepair(engine)
+  if (action === 'done') {
+    if (!repair) {
+      throw new HostError('当前没有进行中的修复通道', '修 bug 时由 agent 调 flow_fix_start 声明；查看用 /flow fix')
+    }
+    const result = await finishRepair(engine, {})
+    runtime.emit()
+    const record = result.record
+    return [
+      result.message,
+      `修复 ${record.id} 已关闭。证据：RED ${record.redEvidenceId ?? '未记录'} → GREEN ${record.greenEvidenceId ?? '未记录'}；改动 ${(record.changedFiles ?? []).length} 个文件。`,
+      `审计：.flowgate/fixes/${record.id}.json + 账本 repair.done。`,
+    ].join('\n')
+  }
+  if (action === 'abort') {
+    const reason = args.slice(1).join(' ').trim()
+    if (!repair) {
+      throw new HostError('当前没有进行中的修复通道', '查看状态：/flow fix；发起修复由 agent 调 flow_fix_start')
+    }
+    if (reason === '') {
+      throw new HostError('放弃修复必须写理由', '例：/flow fix abort 根因判断错了，改走正式变更')
+    }
+    const record = await abortRepair(engine, reason)
+    runtime.emit()
+    return `已放弃修复 ${record.id}「${record.title}」：${reason}\n修复通道已关闭并写账本 audit repair.aborted；如仍需要修，重新 flow_fix_start。`
+  }
+  if (action !== '' && action !== 'status') {
+    throw new HostError('用法：/flow fix [status|done|abort <理由>]', '例：/flow fix；/flow fix done；/flow fix abort 改走正式变更')
+  }
+  return fixStatusText(repair)
+}
+
+/** 修复通道状态文本（/flow fix 无参）。 */
+function fixStatusText(repair: RepairRecord | null): string {
+  if (!repair) {
+    return [
+      '修复通道：当前没有进行中的修复。',
+      '修 bug 时由 agent 调 flow_fix_start（声明 title/symptom/scope/verify），然后 RED（flow_verify）→ 修复 → GREEN → flow_fix_done；不需要立项/人工门。',
+      '新功能/需求变更仍走 /flow new（修复通道只用于"修 bug"）。',
+    ].join('\n')
+  }
+  const progress = repairProgress(repair)
+  const nextStep = !progress.red
+    ? '先取 RED：flow_verify（group 自定，如 repro）'
+    : !progress.green
+      ? '修复后取 GREEN：flow_verify（group 自定）'
+      : '证据齐全：/flow fix done 关闭修复通道'
+  return [
+    `修复通道：${repair.id}「${repair.title}」`,
+    `优先级：${repair.severity}｜状态：${repair.status}｜发起：${repair.openedBy === 'agent' ? 'agent' : '负责人'}（${repair.openedAt}）`,
+    `症状：${repair.symptom}`,
+    ...(repair.repro !== undefined ? [`复现：${repair.repro}`] : []),
+    `范围：${repair.scope.join('、')}`,
+    `验证命令：${repair.verify}`,
+    ...(repair.acceptance.length > 0 ? [`验收要点：${repair.acceptance.join('；')}`] : []),
+    `证据：RED ${progress.red ? `✓ ${repair.redEvidenceId}` : '✗ 未取到'}｜GREEN ${progress.green ? `✓ ${repair.greenEvidenceId}` : '✗ 未取到'}${
+      repair.regressionEvidenceId !== undefined ? `｜回归 ✓ ${repair.regressionEvidenceId}` : ''
+    }`,
+    `已放行修复动作：${repair.actions} 次`,
+    `下一步：${nextStep}`,
+  ].join('\n')
+}
+
+/** `/flow incident`：查看未关闭的事故记录。 */
+async function incidentCommand(runtime: HostRuntime, agent: DshAgent | null): Promise<string> {
+  const engine = await engineFor(runtime, agent)
+  const flags = safeGetProjectFlags(engine)
+  const incident: IncidentRecord | { id: string; severity: string; reason: string; openedAt: string } | undefined =
+    flags?.incident ?? safeSnapshot(runtime)?.incident
+  const repair = safeGetRepair(engine)
+  const repairLine = repair
+    ? `修复通道：${repair.id}「${repair.title}」（${repair.status}，/flow fix 查看证据与下一步）`
+    : '修复通道：无进行中的修复'
+  if (!incident) return ['当前没有未关闭的事故记录。', repairLine].join('\n')
+  return [
+    `事故 ${incident.id}（${incident.severity}）｜${incident.openedAt}`,
+    `原因：${incident.reason}`,
+    '状态：未关闭（项目级写操作可能已被暂停）。',
+    '恢复：负责人 /flow on（或下次宿主启动按 hostEpoch 自动恢复）。',
+    '恢复后补审计：flow_incident_close({ summary, commit?, tests?, files? })。',
+    repairLine,
+  ].join('\n')
+}
+
+/** 当前变更（读取失败返回 null；/flow off/on 用它区分会话级与项目级）。 */
+function safeCurrentChange(engine: EngineLike) {
+  try {
+    return engine.currentChange() ?? null
+  } catch {
+    return null
+  }
 }
 
 function safeSnapshot(runtime: HostRuntime) {

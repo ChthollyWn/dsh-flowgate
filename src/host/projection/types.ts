@@ -141,6 +141,22 @@ export interface FlowgateProjection {
   epoch?: string
 }
 
+/**
+ * 投影启动自检结果（P0-2）：`installProjection` 在 register 之前运行。
+ *
+ * 自检失败时**不注册投影**（任何坏投影都不能再毒化会话创建），但插件其余功能
+ * 照常运行；结果经 runtime 缓存后在 /flow doctor 可见。
+ */
+export interface ProjectionSelfCheckResult {
+  ok: boolean
+  checkedAt: string
+  stateVersion: number
+  /** 自检 wire 值的 UTF-8 字节数（正常形状应远小于面板预算）。 */
+  wireBytes?: number
+  /** 失败原因（ok=false 时一定有）。 */
+  error?: string
+}
+
 /** 未初始化/无变更时的兜底快照（投影 init 与降级共用）。 */
 export function emptySnapshot(now: string): RuntimeSnapshot {
   return {

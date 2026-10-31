@@ -152,8 +152,10 @@ async function evaluatePreExecute(
   next: () => Promise<unknown>,
 ): Promise<unknown> {
   const callId = callIdOf(exec)
-  debugGuard(`pre-execute tool=${exec.name} args=${JSON.stringify(exec.arguments)?.slice(0, 400)} enabled=${String(runtime.isEnabled())}`)
+  debugGuard(`pre-execute tool=${exec.name} args=${JSON.stringify(exec.arguments)?.slice(0, 400)} enabled=${String(runtime.isEnabled())} enforcement=${runtime.enforcement()}`)
   if (!runtime.isEnabled()) return next()
+  // safe-mode / takeover=off：完全不拦截（P0-4 逃生口；index.ts 在 safe 下通常也不装 guard）。
+  if (runtime.enforcement() === 'off') return next()
   const engine = runtime.engine()
   if (!engine) return next()
 
@@ -169,8 +171,12 @@ async function evaluatePreExecute(
     debugGuard(
       `snapshot initialized=${String(snapshot?.initialized)} off=${String(snapshot?.off)} change=${String(snapshot?.changeId)} stage=${String(snapshot?.stage)} managed=${String(runtime.isManagedNow())}`,
     )
-    // 未初始化 / 当前会话已 off：不拦截任何操作（03 §2.4）。
-    if (!snapshot || snapshot.initialized === false || snapshot.off === true) return next()
+    // 未初始化：不拦截（03 §2.4）。
+    // 注意：**不要**因为 snapshot.off 就短路——项目级暂停（flags.off）不是全放行：
+    // core 的 evaluateAction 对 `.flowgate/**`、`.git/**` 仍返回 R-PROTECTED deny，
+    // 防止 agent 自己解除暂停/改账本；change.off（旧会话级 off）则由 engine 判定为
+    // allow。两种情况都交给 engine，host 只负责执行判定（2026-11-01 core 对齐）。
+    if (!snapshot || snapshot.initialized === false) return next()
 
     const params = asRecord(exec.arguments)
     const classification = runtime.deps.core.classifyTool(exec.name, Object.keys(params))
@@ -207,6 +213,11 @@ async function evaluatePreExecute(
       }),
     )
     runtime.emit()
+    // 注意：observe **不是**"所有规则都不拦"。core 契约里 observe 只放宽
+    // R-NO-CHANGE（未立项写入）：无变更时 engine.evaluateAction 返回 allow 并记
+    // takeover.observed；有变更时的阶段/范围/受保护/修复通道 scope 规则照常 deny。
+    // 因此这里不再按 takeover 分支放行——只有 enforcement='off'（safe-mode /
+    // 显式 config.takeover='off'）在 pre-execute 入口整体放行。
     const reason = shortReason(decision)
     return {
       kind: 'deny',
@@ -231,6 +242,10 @@ async function evaluatePreExecute(
 function evaluateSyncGuard(runtime: HostRuntime, exec: DshToolExecution): string | undefined {
   try {
     if (!runtime.isEnabled()) return undefined
+    // 只有 enforcement='off'（safe-mode / 显式关闭接管）才整体放行；
+    // observe 仍按 pre-execute 的缓存判定执行（deny 就 deny，R-NO-CHANGE 由
+    // engine 在 pre-execute 阶段返回 allow，不需要 host 特判）。
+    if (runtime.enforcement() === 'off') return undefined
     if (!runtime.isManagedNow()) return undefined
     const callId = callIdOf(exec)
     const entry = runtime.takeGuardDecision(callId)

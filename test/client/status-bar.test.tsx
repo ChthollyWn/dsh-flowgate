@@ -26,9 +26,11 @@ import {
   makeIdleProjection,
   makeLockedProjection,
   makeLowComplexityProjection,
+  makeObserveProjection,
   makeOffProjection,
   makePendingProjection,
   makeProjection,
+  makeRepairProjection,
 } from './mock'
 
 const zh = createTranslator('zh')
@@ -349,5 +351,37 @@ describe('StatusBar slot container', () => {
     expect(html).toContain('data-state="awaiting"')
     expect(html).toContain('data-flowgate="auth-card"')
     expect(html).toContain('data-action="auth-approve"')
+  })
+})
+
+describe('修复通道 / 接管模式徽标（v0.6 客户端契约）', () => {
+  it('renders the repair lane badge + RED/GREEN progress without a gate card', () => {
+    const html = render(makeRepairProjection())
+    expect(html).toContain('data-state="repair"')
+    expect(html).toContain('data-flowgate="dock-repair"')
+    expect(html).toContain('data-fix-id="FIX-20261101-031500"')
+    expect(html).toContain('data-red="true"')
+    expect(html).toContain('data-green="false"')
+    expect(html).toContain('修复 FIX-20261101-031500')
+    // 修复车道不产生人工门授权卡。
+    expect(html).not.toContain('data-flowgate="auth-card"')
+  })
+
+  it('shows observe mode, agent pause and incident badges during self-hosting recovery', () => {
+    const html = render(makeObserveProjection())
+    expect(html).toContain('data-flowgate="dock-mode"')
+    expect(html).toContain('data-mode="observe"')
+    expect(html).toContain('观察模式')
+    expect(html).toContain('data-flowgate="dock-off-by"')
+    expect(html).toContain('agent 已暂停门禁')
+    expect(html).toContain('data-flowgate="dock-incident"')
+    expect(html).toContain('INC-20261101-031000')
+  })
+
+  it('does not show repair/observe badges for an ordinary change', () => {
+    const html = render(makeProjection())
+    expect(html).not.toContain('data-flowgate="dock-repair"')
+    expect(html).not.toContain('data-flowgate="dock-mode"')
+    expect(html).not.toContain('data-flowgate="dock-incident"')
   })
 })

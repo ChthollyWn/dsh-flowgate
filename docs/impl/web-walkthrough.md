@@ -184,11 +184,28 @@ rm -rf /tmp/fg-walk
 在隔离 home 里手工种 `workspaces` 时若用 `/tmp/...`，而会话 cwd realpath 是 `/private/tmp/...`，`session/create` 会返回
 `session/workspace-attach-failed … its cwd resolves to '/private/tmp/...'`，UI 停留在 splash。改成 `/private/tmp/...` 后正常。之前的 Web 走查/复现脚本如用 /tmp 路径可能踩到同一坑。
 
-### 5.3 一次性现象（未归因）
+### 5.3 一次性现象（已归因，v0.5.1 修复 + v0.6 回归门）
 
-首次启动（当时 `lib/` 正在被并行重建、且 workspace path 还是 /tmp）创建会话时，`session/create` 返回
-`failed to create session: Error: forwarded host event "api-session/added" argument 0 is not lossless JSON data`
-（DSH `@deepseek-ai/dsh-api-remotes` 对转发事件做 lossless-JSON 校验）。改用 realpath + 固定构建快照后未再复现，**无法确认**是插件投影含 `undefined` 触发还是并行重建期的临时状态；若后续复现，优先检查 `api-session/added` 的 summary 里 flowgate 投影值是否含 `undefined` 字段（`engine.snapshot()` 里 `changeId/title/…` 在无变更时是显式 `undefined`）。
+> **2026-11-01 归因结论**：这不是环境偶发，而是**真实产品 bug**。根因是 `flowgate` 会话投影的 wire 值
+> 含显式 `undefined` 字段（`engine.snapshot()`/`buildPanel()` 的 `changeId`、`activeTaskId`、`panel`、
+> `panel.changes[].session` 等），DSH `@deepseek-ai/dsh-api-remotes` 在转发 `api-session/added` 前用
+> `isJsonValue()` 校验，失败即 `failed to create session: ... not lossless JSON data`。
+>
+> **关键细节（2026-11-01 复验修正）**：只创建**一个**会话不会触发；首个会话完成 FlowGate engine
+> 初始化后，**连续新建第二个及以后的会话**才会在会话摘要里带上脏投影。因此事故当时的"首个会话"
+> 可能正常，用户感知为"突然所有新会话都建不了"。
+>
+> **修复**：投影边界 `toLosslessJson()`（v0.5.1）；v0.6 进一步改为显式 wire DTO + 投影启动自检
+> （自检失败不注册投影），见 [host-client-contract.md](host-client-contract.md) §1.1/§1.5。
+>
+> **回归测试**：`test/host/projection.test.ts`（lossless 清洗）+ **`pnpm verify:host`**
+> （隔离真实 DSH 宿主，连续创建 ≥2 个会话；本次事故的唯一可靠回归门）。证据与可复现步骤见
+> [docs/compat/host-smoke.md](../compat/host-smoke.md)：修复构建 3/3 通过；把修复中性化模拟旧构建时
+> 第 2、3 次创建报同一错误（`--expect-fail` 元验证通过）。
+>
+> 原始观察保留如下（当时因并行重建/realpath 干扰未归因）：首次启动创建会话时 `session/create` 返回
+> `failed to create session: Error: forwarded host event "api-session/added" argument 0 is not lossless JSON data`；
+> 改用 realpath + 固定构建快照后未再复现，**现确认是同一 bug 的触发条件差异**（单会话 vs 连续多会话）。
 
 ## 6. 仍未验证（下一轮建议）
 

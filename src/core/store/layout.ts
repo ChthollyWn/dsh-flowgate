@@ -27,8 +27,17 @@ export interface FlowgateLayout {
   stateDir: string
   ledger: string
   sessions: string
+  /** 项目级开关（暂停/事故）`.flowgate/state/flags.json`（v0.5.1）。 */
+  flags: string
+  /** 进行中的修复声明 `.flowgate/state/repair.json`（v0.5.1）。 */
+  repair: string
   snapshotsDir: string
   evidenceDir: string
+  /** 已完成的修复记录目录 `.flowgate/fixes/`（v0.5.1）。 */
+  fixesDir: string
+  fixesIndex: string
+  /** 已关闭的事故记录目录 `.flowgate/incidents/`（v0.5.1）。 */
+  incidentsDir: string
   worktreesDir: string
   metricsDir: string
   retro: string
@@ -92,8 +101,13 @@ export function layout(root: string): FlowgateLayout {
     stateDir: `${dir}/state`,
     ledger: `${dir}/state/ledger.jsonl`,
     sessions: `${dir}/state/sessions.json`,
+    flags: `${dir}/state/flags.json`,
+    repair: `${dir}/state/repair.json`,
     snapshotsDir: `${dir}/state/snapshots`,
     evidenceDir: `${dir}/state/evidence`,
+    fixesDir: `${dir}/fixes`,
+    fixesIndex: `${dir}/fixes/index.md`,
+    incidentsDir: `${dir}/incidents`,
     worktreesDir: `${dir}/worktrees`,
     metricsDir: `${dir}/metrics`,
     retro: `${dir}/retro.md`,
@@ -192,6 +206,9 @@ const README = `# .flowgate/ 目录说明
   \`dashboard.html\` —— 跨会话看板。
 - \`state/ledger.jsonl\` —— 审计账本：只追加，哈希链 + HMAC；\`state/sessions.json\` 会话租约；
   \`state/snapshots/\` 工作区快照；\`state/evidence/<id>.log\` 完整命令输出。
+- \`state/flags.json\` —— 项目级暂停与未关闭的事故记录（v0.5.1）。
+- \`fixes/<FIX-id>.json\` —— 修复通道记录：一次声明、范围迭代、RED→GREEN 关门，\`.flowgate/fixes/index.md\` 为索引。
+- \`incidents/<INC-id>.json\` —— 已关闭的事故记录（自暂停的审计归档）。
 - \`worktrees/<change-id>/<task-id>/\` —— 并行任务的独立检出目录（合并后删除）。
 
 ## 谁能写
@@ -218,6 +235,8 @@ function scaffoldDirs(root: string): string[] {
     l.stateDir,
     l.snapshotsDir,
     l.evidenceDir,
+    l.fixesDir,
+    l.incidentsDir,
     l.worktreesDir,
     l.metricsDir,
   ]

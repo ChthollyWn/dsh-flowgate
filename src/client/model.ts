@@ -293,6 +293,43 @@ function coerceSnapshot(raw: unknown): RuntimeSnapshot | null {
         })) as RuntimeSnapshot['externalChanges'])
       : [],
     off: raw.off === true,
+    offBy: raw.offBy === 'agent' ? ('agent' as const) : raw.offBy === 'human' ? ('human' as const) : undefined,
+    takeover:
+      raw.takeover === 'enforce' || raw.takeover === 'observe' || raw.takeover === 'off'
+        ? (raw.takeover as RuntimeSnapshot['takeover'])
+        : undefined,
+    incident:
+      isRecord(raw.incident) && typeof raw.incident.id === 'string'
+        ? {
+            id: raw.incident.id,
+            severity:
+              raw.incident.severity === 'P0' || raw.incident.severity === 'P1' || raw.incident.severity === 'P2'
+                ? raw.incident.severity
+                : ('P1' as const),
+            reason: typeof raw.incident.reason === 'string' ? raw.incident.reason : '',
+            openedAt: typeof raw.incident.openedAt === 'string' ? raw.incident.openedAt : '',
+          }
+        : undefined,
+    repair:
+      isRecord(raw.repair) && typeof raw.repair.id === 'string'
+        ? {
+            id: raw.repair.id,
+            title: typeof raw.repair.title === 'string' ? raw.repair.title : '',
+            severity:
+              raw.repair.severity === 'P0' || raw.repair.severity === 'P1' || raw.repair.severity === 'P2'
+                ? raw.repair.severity
+                : ('P1' as const),
+            scope: Array.isArray(raw.repair.scope)
+              ? raw.repair.scope.filter((item): item is string => typeof item === 'string')
+              : [],
+            verify: typeof raw.repair.verify === 'string' ? raw.repair.verify : '',
+            red: raw.repair.red === true,
+            green: raw.repair.green === true,
+            openedAt: typeof raw.repair.openedAt === 'string' ? raw.repair.openedAt : '',
+            actions: typeof raw.repair.actions === 'number' ? raw.repair.actions : 0,
+            status: 'open' as const,
+          }
+        : undefined,
     locked: raw.locked === true,
     interceptCounts: isRecord(raw.interceptCounts)
       ? Object.fromEntries(
@@ -377,7 +414,7 @@ export function readProjection(props: { useProjection?: (key: string) => unknown
 // ---------------------------------------------------------------------------
 
 /** Dock state machine (docs/impl/ui-interaction-redesign.md §2). */
-export type DockState = 'demo' | 'locked' | 'off' | 'idle' | 'active' | 'awaiting' | 'pending' | 'blocked'
+export type DockState = 'demo' | 'locked' | 'off' | 'idle' | 'repair' | 'active' | 'awaiting' | 'pending' | 'blocked'
 
 /** `data-kind` of the next-step chip: an icon + phrase, never a command. */
 export type DockNextKind = 'question' | 'action' | 'auto' | 'wait'
@@ -451,6 +488,14 @@ export interface DockModel {
   awaitingGate?: string
   /** v0.5 自动流程路由摘要（fast/standard/full + 是否自动放行）。 */
   flowPlan?: NonNullable<RuntimeSnapshot['flowPlan']>
+  /** 修复通道（FIX-id）激活时的摘要；与七阶段变更车道并列，不占 stage。 */
+  repair?: NonNullable<RuntimeSnapshot['repair']>
+  /** 当前生效的接管模式（observe = 自举/维护时的观察模式，只记录不拦截）。 */
+  takeover?: NonNullable<RuntimeSnapshot['takeover']>
+  /** 项目级暂停的发起者（agent = flow_self_pause，human = /flow off）。 */
+  offBy?: NonNullable<RuntimeSnapshot['offBy']>
+  /** 进行中的事故记录（工具不可用时的 flow_self_pause / incident）。 */
+  incident?: NonNullable<RuntimeSnapshot['incident']>
   /** Seven stages, never empty (placeholders while FlowGate is not enabled). */
   nodes: StageNodeModel[]
   progress: { done: number; total: number }
@@ -466,6 +511,7 @@ export const DOCK_TONES: Record<DockState, Tone> = {
   locked: 'blocked',
   off: 'blocked',
   idle: 'idle',
+  repair: 'active',
   active: 'active',
   awaiting: 'attention',
   pending: 'attention',
@@ -518,6 +564,9 @@ export function dockStateOf(snapshot: RuntimeSnapshot | null | undefined): DockS
   if (snapshot === null || snapshot === undefined || snapshot.initialized !== true) return 'demo'
   if (snapshot.locked === true) return 'locked'
   if (snapshot.off === true) return 'off'
+  // 修复通道是一等公民（vibe coding 的 bug 修复循环）：与七阶段变更并列，
+  // 优先于 idle/越界等状态展示，避免修复中被误显示成"没有变更"。
+  if (snapshot.repair !== undefined) return 'repair'
   if ((snapshot.violations ?? []).length > 0) return 'blocked'
   if (snapshot.awaitingGate !== undefined) return 'awaiting'
   if (openPendingItems(snapshot).length > 0) return 'pending'
@@ -642,6 +691,18 @@ function buildDockNext(
       return { kind: 'action', text: t('dock.next.off') }
     case 'idle':
       return { kind: 'question', text: t('dock.next.idle') }
+    case 'repair': {
+      // 修复通道：不占 stage，直接把 RED/GREEN 进度与下一步告诉负责人。
+      const repair = snapshot?.repair
+      return {
+        kind: 'auto',
+        text: t('dock.next.repair', {
+          id: repair?.id ?? '',
+          red: repair?.red === true ? t('dock.repair.red.yes') : t('dock.repair.red.no'),
+          green: repair?.green === true ? t('dock.repair.green.yes') : t('dock.repair.green.no'),
+        }),
+      }
+    }
     case 'awaiting':
       return { kind: 'action', text: awaitingText(snapshot?.awaitingGate, t) }
     case 'pending':
@@ -898,6 +959,10 @@ export function buildDockModel(proj: FlowgateProjection | null, t: TFn): DockMod
     stage,
     awaitingGate: snapshot?.awaitingGate,
     flowPlan: snapshot?.flowPlan,
+    ...(snapshot?.repair !== undefined ? { repair: snapshot.repair } : {}),
+    ...(snapshot?.takeover !== undefined ? { takeover: snapshot.takeover } : {}),
+    ...(snapshot?.offBy !== undefined ? { offBy: snapshot.offBy } : {}),
+    ...(snapshot?.incident !== undefined ? { incident: snapshot.incident } : {}),
     nodes,
     progress: { done, total: nodes.length },
     next,

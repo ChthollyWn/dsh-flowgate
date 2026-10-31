@@ -52,6 +52,28 @@ export type {
 } from './state'
 
 export {
+  emptyProjectFlags,
+  normalizeProjectFlags,
+  readProjectFlags,
+  writeProjectFlags,
+} from './flags'
+
+export {
+  stampedId,
+  nextStampedId,
+  normalizeRepairRecord,
+  readActiveRepair,
+  writeActiveRepair,
+  clearActiveRepair,
+  renderFixIndexHeader,
+  renderFixIndexRow,
+  listFixIds,
+  listIncidentIds,
+  writeFixRecord,
+  writeIncidentRecord,
+} from './repair'
+
+export {
   freezeContract,
   contractConfigSnapshot,
   frozenContractConfig,

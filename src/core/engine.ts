@@ -29,11 +29,13 @@ import type {
   DispatchOutcome,
   DispatchTaskEnvelope,
   DoctorReport,
+  EnforcerKind,
   EnginePorts,
   EvidenceKind,
   EvidenceReceipt,
   ExceptionRecord,
   ExecutionPlan,
+  FileAction,
   FlowgateConfig,
   FlowPlan,
   FlowRoute,
@@ -44,6 +46,7 @@ import type {
   HumanGateId,
   GitPort,
   HandoffSummary,
+  IncidentRecord,
   InjectionBundle,
   InitResult,
   LedgerEvent,
@@ -57,6 +60,9 @@ import type {
   PendingItem,
   PendingKind,
   ProjectDoc,
+  ProjectFlags,
+  RepairRecord,
+  RepairSeverity,
   ReviewFinding,
   ReviewRecord,
   RiskLevel,
@@ -67,6 +73,7 @@ import type {
   StageId,
   StageProgress,
   StatusSummary,
+  TakeoverMode,
   TaskCard,
   TaskDoneOutcome,
   TaskStartOutcome,
@@ -78,6 +85,7 @@ import { PENDING_PREFIX, GATES, STAGES } from './types'
 import { isoNow, dateOnly, isOlderThanMinutes } from './util/time'
 import { normalizeRelPath, posixJoin, isUnder } from './util/paths'
 import { matchGlob } from './util/glob'
+import { matchesScope, outOfScopePaths } from './util/scope'
 import { sha256, stableJson, containsSecret, redactSecrets } from './util/hash'
 import type { FileSystem } from './util/fs'
 
@@ -124,7 +132,7 @@ import {
   shouldDowngradeRule,
   type RuleFeedback,
 } from './rules'
-import { validateVerifyCommand } from './shell'
+import { validateVerifyCommand, classifyRepairShellCommand, extractWriteTargets } from './shell'
 import { loadArtifacts, loadProjectDoc, runGateChecks, artifactHashes, parseIncrementalSpec, parseRoadmap, parseTaskCardFragment } from './artifacts'
 import { renderExecutionPlanMarkdown, renderExecutionDiagram } from './plan'
 import { verifyCitations, citationsStale, documentCitations } from './citations'
@@ -180,6 +188,15 @@ export interface EngineOptions extends EnginePorts {
   sessionAppend?: (type: string, data: Record<string, unknown>) => void
   onStateChange?: (snapshot: RuntimeSnapshot) => void
   host?: EngineHostHooks
+  /**
+   * 接管模式（v0.5.1，构造时固定）：
+   * - `enforce`（默认）：未立项的仓库改动一律拒绝；
+   * - `observe`：只记录 `takeover.observed` 并放行（用于自举/试运行）；
+   * - `off`：不拦截也不记录。
+   */
+  takeover?: TakeoverMode
+  /** 宿主进程 epoch：agent 自暂停（autoRearm）在宿主重启后自动恢复的判定依据。 */
+  hostEpoch?: string
 }
 
 const EVIDENCE_INDEX = 'state/evidence/index.jsonl'
@@ -234,6 +251,19 @@ export class FlowEngine {
   private evidenceCounter = 0
   /** 负责人批准的项目规则（.flowgate/rules/*.json），创建新变更时并入契约。 */
   private projectRules: Rule[] = []
+  /** 接管模式（构造时固定；v0.5.1）。 */
+  private readonly takeover: TakeoverMode
+  /** 宿主进程 epoch（用于 agent 自暂停的宿主重启自动恢复）。 */
+  private readonly hostEpoch?: string
+  /** 项目级开关（暂停/事故）：`.flowgate/state/flags.json`（v0.5.1）。 */
+  private flags: ProjectFlags = {}
+  /** 进行中的修复声明：`.flowgate/state/repair.json`（v0.5.1）。 */
+  private activeRepair: RepairRecord | null = null
+  /**
+   * 观察模式去重：每会话每规则至多写一次 `takeover.observed`。
+   * 键为规则 id（当前只有 R-NO-CHANGE）；引擎实例即会话作用域。
+   */
+  private readonly observedTakeover = new Set<string>()
 
   constructor(options: EngineOptions) {
     this.ports = options
@@ -249,6 +279,8 @@ export class FlowEngine {
     this.sessionAppend = options.sessionAppend
     this.onStateChange = options.onStateChange
     this.hooks = options.host
+    this.takeover = options.takeover ?? 'enforce'
+    this.hostEpoch = options.hostEpoch
     this.config = store.DEFAULT_CONFIG
   }
 
@@ -284,6 +316,8 @@ export class FlowEngine {
         this.project = null
         this.roadmapDoc = null
         this.current = null
+        this.flags = {}
+        this.activeRepair = null
         this.loaded = true
         return
       }
@@ -337,6 +371,11 @@ export class FlowEngine {
       this.project = await loadProjectDoc(this.fs, this.root)
       this.roadmapDoc = await this.loadRoadmapDoc()
       await this.rebuildCounters()
+      // v0.5.1：项目级开关（暂停/事故）与进行中的修复声明都从磁盘恢复；两者
+      // 损坏时按「未暂停 / 无修复」降级，绝不因为辅助状态文件坏掉而让 load 失败。
+      this.flags = await store.readProjectFlags(this.fs, this.root)
+      this.activeRepair = await store.readActiveRepair(this.fs, this.root)
+      await this.autoRearmProjectFlags()
 
       // Attach session / current change.
       if (this.stateCorruption.length > 0) {
@@ -456,6 +495,22 @@ export class FlowEngine {
 
   getConfig(): FlowgateConfig {
     return this.config
+  }
+
+  /** 接管模式（v0.5.1）：构造时固定，运行期不可变。 */
+  getTakeoverMode(): TakeoverMode {
+    return this.takeover
+  }
+
+  /** 项目级开关快照（暂停/事故）；返回副本，调用方修改不影响引擎。 */
+  getProjectFlags(): ProjectFlags {
+    return JSON.parse(JSON.stringify(this.flags)) as ProjectFlags
+  }
+
+  /** 进行中的修复声明（v0.5.1）；没有时返回 null。返回副本。 */
+  getRepair(): RepairRecord | null {
+    if (this.activeRepair === null) return null
+    return JSON.parse(JSON.stringify(this.activeRepair)) as RepairRecord
   }
 
   /** 面板/试跑用：当前变更实际生效的规则（内置 + 项目规则，按冻结契约）。 */
@@ -917,6 +972,13 @@ export class FlowEngine {
   async newChange(input: NewChangeInput): Promise<NewChangeOutcome> {
     if (!this.state?.initialized) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
     if (this.state.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
+    // v0.5.1：修复通道与七阶段变更互斥——修 bug 不是新功能，先关门再立项。
+    if (this.activeRepair !== null) {
+      throw new FlowGateError(
+        `修复通道 ${this.activeRepair.id} 正在进行中（${this.activeRepair.title}）`,
+        '先 flow_fix_done 完成修复并留证（或 flow_fix_abort 中止）后再 flow_new_change 立项；修复通道内不需要立项',
+      )
+    }
     // T2.7：空仓库里 `/flow new <需求>` 不应直接立一个大变更——先走项目级澄清 + 路线图。
     if (!input.project && !input.fromRoadmap && !this.roadmapApprovedByOwner() && (await this.looksLikeEmptyRepository())) {
       this.pushNotice('检测到空仓库：先进入项目级澄清与路线图（PROJECT 变更），批准 GR 后再从路线图立项。')
@@ -2087,7 +2149,26 @@ export class FlowEngine {
       }
     }
     const change = this.current
+    // 负责人对本变更临时关闭门禁（旧语义）：全部放行。
     if (change?.off) return { effect: 'allow', message: '' }
+    // 项目级暂停（v0.5.1）：写操作放行，但 `.flowgate/**`、`.git/**` 仍受保护，
+    // 否则 agent 可以自己解除暂停、改账本或篡改状态。
+    if (this.flags.off !== undefined) {
+      const protectedTarget = this.protectedWriteTarget(action)
+      if (protectedTarget !== undefined) {
+        return {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-PROTECTED',
+            decision: 'deny',
+            why: `项目门禁处于暂停状态（${this.flags.off.reason}），但 ${protectedTarget} 属于插件状态/git 内部，仍不允许 agent 写。`,
+            unlock: '用 flow_* 工具修改状态；恢复门禁用 /flow on。',
+          },
+          message: '拒绝：受保护路径（R-PROTECTED，项目暂停期间仍拦截）。用 flow_* 工具修改状态。',
+        }
+      }
+      return { effect: 'allow', message: '', notes: ['项目门禁已暂停：写操作放行'] }
+    }
     // 已被其它会话接管的旧会话：写操作一律拒绝（T3.7 验收 #2）。
     if (change) {
       await this.refreshForeignLease()
@@ -2128,31 +2209,47 @@ export class FlowEngine {
     }
 
     if (!change) {
-      // Managed project without an active change: protect plugin state and secrets.
-      const target = 'path' in action ? action.path : undefined
-      if (target && (isUnder(target, '.flowgate') || isUnder(target, '.git'))) {
+      // 受保护路径（.git / 密钥 / 插件状态）任何模式都拒绝；文件动作与 shell 写目标都查。
+      const protectedTarget = this.protectedWriteTarget(action)
+      if (protectedTarget !== undefined) {
         return {
           effect: 'deny',
           rule: { ruleId: 'R-PROTECTED', decision: 'deny', why: 'FlowGate 状态与 git 内部文件不允许 agent 直接写。', unlock: '用 flow_* 工具修改状态。' },
           message: '拒绝：受保护路径（R-PROTECTED）。用 flow_* 工具修改状态。',
         }
       }
-      // 接管原则：FlowGate 启用后，任何会改变仓库的动作都必须挂在一个已立项的变更上。
-      // 否则「先改代码、后立项」会绕过阶段门、范围控制、证据链与审查。
-      if (mutatesRepository(action)) {
+      // 修复通道（v0.5.1）：bugfix 是一等公民。已声明 scope 内自由迭代，
+      // 用 RED→GREEN 证据关门；不需要七阶段、不逐动作等人工。
+      if (this.activeRepair !== null) {
+        return this.evaluateRepairAction(this.activeRepair, action)
+      }
+      // 无修复、无变更：按接管模式处理。
+      const mutating = mutatesRepository(action)
+      if (!mutating) return { effect: 'allow', message: '', notes: ['尚未立项：只读动作放行'] }
+      if (this.takeover === 'observe') {
+        await this.recordTakeoverObserved(action)
         return {
-          effect: 'deny',
-          rule: {
-            ruleId: 'R-NO-CHANGE',
-            decision: 'deny',
-            why: 'FlowGate 已启用但当前没有进行中的变更：所有代码/文件/命令改动必须由 FlowGate 接管。',
-            unlock:
-              '先调用 flow_new_change 立项（或在输入框用 /flow new <需求>）：立项前先评估改动规模，在 assessment 里声明 route/autoApprove/clear/acceptance/scope/verify；简单需求可由 auto-review 自动放行。',
-          },
-          message: '拒绝：FlowGate 已启用但未立项（R-NO-CHANGE）。先 flow_new_change 立项，再按阶段推进。',
+          effect: 'allow',
+          message: '',
+          notes: ['观察模式（takeover=observe）：未立项的改动已放行，并记入账本一次（每会话每规则至多一次）'],
         }
       }
-      return { effect: 'allow', message: '', notes: ['尚未立项：建议用 flow_new_change 立项'] }
+      if (this.takeover === 'off') {
+        return { effect: 'allow', message: '', notes: ['接管已关闭（takeover=off）：不拦截也不记录'] }
+      }
+      // 接管原则：FlowGate 启用后，任何会改变仓库的动作都必须挂在一个已立项的
+      // 变更（或修复声明）上，否则会绕过阶段门、范围控制、证据链与审查。
+      return {
+        effect: 'deny',
+        rule: {
+          ruleId: 'R-NO-CHANGE',
+          decision: 'deny',
+          why: 'FlowGate 已启用但当前没有进行中的变更：所有代码/文件/命令改动必须由 FlowGate 接管。',
+          unlock:
+            '若这是修复：用 flow_fix_start 开修复通道（推荐）；若是新功能：flow_new_change 立项（含 assessment）。立项前先评估改动规模，在 assessment 里声明 route/autoApprove/clear/acceptance/scope/verify；简单需求可由 auto-review 自动放行。',
+        },
+        message: '拒绝：FlowGate 已启用但未立项（R-NO-CHANGE）。修复用 flow_fix_start；新功能用 flow_new_change 立项。',
+      }
     }
 
     // Delegation tools are closed in managed sessions.
@@ -2247,6 +2344,112 @@ export class FlowEngine {
       }
     }
     return decision
+  }
+
+  /**
+   * 找出会写到 `.flowgate/` 或 `.git/` 的目标（文件动作或 shell 写目标）。
+   * 这些路径在任何「放行」模式（项目暂停 / 修复通道 / observe）下仍然拒绝。
+   */
+  private protectedWriteTarget(action: Action): string | undefined {
+    const paths: string[] = []
+    if ('path' in action && typeof (action as FileAction).path === 'string') {
+      const file = action as FileAction
+      if (file.kind !== 'read') {
+        paths.push(normalizeRelPath(file.path))
+        if (file.kind === 'rename' && file.toPath !== undefined) paths.push(normalizeRelPath(file.toPath))
+      }
+    }
+    if (action.kind === 'shell') {
+      for (const target of extractWriteTargets(action.command)) paths.push(normalizeRelPath(target))
+    }
+    return paths.find((path) => path !== '' && (isUnder(path, '.flowgate') || isUnder(path, '.git')))
+  }
+
+  /** 修复通道的动作判定（无 current change 时）：范围/命令策略 + 审计计数。 */
+  private async evaluateRepairAction(repair: RepairRecord, action: Action): Promise<Decision> {
+    const scopeHint =
+      '修复通道只允许改声明过的范围（scope）；需要扩范围请 flow_fix_abort 后重新 flow_fix_start（写清 scope），或改用 flow_new_change 立项。'
+    if (action.kind === 'read' || action.kind === 'other') {
+      return { effect: 'allow', message: '', notes: [`修复通道 ${repair.id}：只读/flow_* 动作放行`] }
+    }
+    if (action.kind === 'delegate' || action.kind === 'mcp') {
+      this.noteRepairDenied('R-FIX-TOOL')
+      return {
+        effect: 'deny',
+        rule: {
+          ruleId: 'R-FIX-TOOL',
+          decision: 'deny',
+          why: `修复通道只允许文件编辑、只读动作与测试/构建类 shell；${action.kind}（${action.tool}）不在允许范围内。`,
+          unlock: '修复通道内不派发子 agent、不调 MCP、不改依赖/不推送；需要这些请完成修复后走 flow_new_change。',
+        },
+        message: `拒绝：修复通道不允许 ${action.kind}（R-FIX-TOOL）。`,
+      }
+    }
+    if (action.kind === 'shell') {
+      const verdict = classifyRepairShellCommand(action.command)
+      if (!verdict.allowed) {
+        this.noteRepairDenied('R-FIX-SHELL')
+        const decision: Decision = {
+          effect: 'deny',
+          rule: {
+            ruleId: 'R-FIX-SHELL',
+            decision: 'deny',
+            why: `修复通道不允许该 shell 命令：${verdict.reason ?? '不在允许范围内'}`,
+            unlock:
+              '修复通道只允许测试/构建/lint/typecheck/run 类命令与只读/提交类 git（git status/diff/log/add/commit/rev-parse/stash）；危险命令（rm -rf、git push、git reset --hard、npm publish、curl/wget、ssh、chmod/chown、mkfs 等）一律拒绝。',
+          },
+          message: `拒绝：修复通道不允许该命令（R-FIX-SHELL）：${verdict.reason ?? ''}`,
+        }
+        return decision
+      }
+      return { effect: 'allow', message: '', notes: [`修复通道 ${repair.id}：允许的 shell 命令`] }
+    }
+    // write / create / delete / rename
+    const file = action as FileAction
+    const targets = [normalizeRelPath(file.path)]
+    if (file.kind === 'rename' && file.toPath !== undefined) targets.push(normalizeRelPath(file.toPath))
+    const outside = targets.filter((target) => target === '' || !matchesScope(target, repair.scope))
+    if (outside.length > 0) {
+      this.noteRepairDenied('R-FIX-SCOPE')
+      return {
+        effect: 'deny',
+        rule: {
+          ruleId: 'R-FIX-SCOPE',
+          decision: 'deny',
+          why: `修复通道 ${repair.id}「${repair.title}」只允许改声明范围：${repair.scope.join('、')}；${outside.join('、')} 不在范围内。`,
+          unlock: scopeHint,
+        },
+        message: `拒绝：修复通道范围外（R-FIX-SCOPE）：${outside.join('、')}。${scopeHint}`,
+      }
+    }
+    repair.actions += 1
+    try {
+      await store.writeActiveRepair(this.fs, this.root, repair)
+    } catch {
+      // 计数持久化失败不阻断修复动作。
+    }
+    return { effect: 'allow', message: '', notes: [`修复通道 ${repair.id}：已放行并计数（actions=${repair.actions}）`] }
+  }
+
+  /** 修复通道拒绝计数（无 C-xxx 变更，不写 rule.denied 账本；host guard 负责拦截日志）。 */
+  private noteRepairDenied(ruleId: string): void {
+    this.interceptCounts[ruleId] = (this.interceptCounts[ruleId] ?? 0) + 1
+  }
+
+  /** 观察模式：每会话每规则至多写一次 `takeover.observed` + 提示。 */
+  private async recordTakeoverObserved(action: Action): Promise<void> {
+    const ruleId = 'R-NO-CHANGE'
+    if (this.observedTakeover.has(ruleId)) return
+    this.observedTakeover.add(ruleId)
+    const rawTarget =
+      'path' in action ? (action as { path?: string }).path : 'command' in action ? (action as { command?: string }).command : undefined
+    await this.appendLedger('takeover.observed', {
+      mode: 'observe',
+      ruleId,
+      tool: action.tool,
+      target: rawTarget !== undefined ? redactSecrets(rawTarget) : undefined,
+    })
+    this.pushNotice('观察模式（takeover=observe）：检测到未立项的仓库改动，已放行并记入账本（本会话每规则只记一次）。恢复硬接管：负责人调整 takeover 配置，或修复自举后重启。')
   }
 
   private async logDenied(change: ChangeStatus, decision: Decision, action: Action): Promise<void> {
@@ -3811,8 +4014,18 @@ export class FlowEngine {
   // ------------------------------------------------------------------
 
   async runVerify(request: VerifyRequest): Promise<EvidenceReceipt> {
-    const change = this.requireChange()
     if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
+    // 修复通道（v0.5.1）：没有 C-xxx 变更时也允许由插件亲自跑验证命令，
+    // 回执结构不变（changeId = FIX-id，落 .flowgate/state/evidence/），RED/GREEN 自动绑定。
+    if (this.current === null && this.activeRepair !== null) {
+      const command = request.command !== undefined && request.command.trim() !== '' ? request.command.trim() : this.activeRepair.verify
+      const groupName = request.group.trim() === '' ? 'repair' : request.group.trim()
+      const inputs = request.inputs !== undefined && request.inputs.length > 0 ? request.inputs : this.activeRepair.scope
+      const receipt = await this.runRepairReceipt({ command, group: groupName, inputs, bind: true })
+      this.hooks?.onEvidence?.(receipt)
+      return receipt
+    }
+    const change = this.requireChange()
     let command = request.command
     let inputs = request.inputs
     let groupName = request.group
@@ -4468,6 +4681,527 @@ export class FlowEngine {
   }
 
   // ------------------------------------------------------------------
+  // Project-level pause, incident records and the repair lane (v0.5.1)
+  // ------------------------------------------------------------------
+
+  /**
+   * agent 自暂停的宿主重启自动恢复（auto-rearm）：`flags.off.autoRearm === true`
+   * 且记录的 hostEpoch 与当前进程 hostEpoch 都存在且不同 → 清暂停并记账。
+   * 负责人手动暂停（by='human' / 无 autoRearm）永不自动恢复。
+   */
+  private async autoRearmProjectFlags(): Promise<void> {
+    const off = this.flags.off
+    if (off === undefined || off.autoRearm !== true) return
+    if (off.hostEpoch === undefined || this.hostEpoch === undefined) return
+    if (off.hostEpoch === this.hostEpoch) return
+    delete this.flags.off
+    try {
+      await store.writeProjectFlags(this.fs, this.root, this.flags)
+    } catch {
+      // 写失败不影响本次 load：内存里已经恢复，下一次写入会补上。
+    }
+    await this.appendLedger('flow.project_on', {
+      reason: '宿主重启自动恢复（auto-rearm）',
+      auto: true,
+      by: off.by,
+      previousEpoch: off.hostEpoch,
+      hostEpoch: this.hostEpoch,
+    })
+    this.pushNotice('门禁已从 agent 自暂停中自动恢复（宿主重启 auto-rearm）。如有未结事故，请用 flow_incident_close 补审计记录。')
+  }
+
+  /**
+   * 项目级暂停/恢复（v0.5.1）：`/flow off` / `/flow on` 在没有活动变更时也能用。
+   * 暂停期间写操作放行，但 `.flowgate/**`、`.git/**` 仍由 evaluateAction 拦截，
+   * 防止 agent 自己解除暂停或改账本。
+   */
+  async setProjectOff(
+    off: boolean,
+    reason: string,
+    options: { by?: EnforcerKind; autoRearm?: boolean } = {},
+  ): Promise<void> {
+    if (!this.isInitialized()) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
+    const by = options.by ?? 'human'
+    const text = reason.trim() === '' ? (off ? '负责人暂停门禁' : '负责人恢复门禁') : reason.trim()
+    let previousBy: EnforcerKind | undefined
+    if (off) {
+      this.flags.off = {
+        by,
+        reason: text,
+        at: isoNow(this.clock),
+        ...(options.autoRearm === true ? { autoRearm: true } : {}),
+        ...(this.hostEpoch !== undefined ? { hostEpoch: this.hostEpoch } : {}),
+      }
+    } else {
+      previousBy = this.flags.off?.by
+      delete this.flags.off
+    }
+    await store.writeProjectFlags(this.fs, this.root, this.flags)
+    if (off) {
+      await this.appendLedger('flow.project_off', { reason: text, by, autoRearm: options.autoRearm === true })
+      this.pushNotice(`门禁已暂停（写操作放行${by === 'agent' ? '，agent 自暂停' : ''}）：${text}。恢复用 /flow on。`)
+    } else {
+      await this.appendLedger('flow.project_on', { reason: text, by, previousBy })
+      this.pushNotice(`门禁已恢复：${text}`)
+    }
+    this.emitState()
+  }
+
+  /**
+   * agent 自暂停（v0.5.1）：开一条事故记录 + 项目级暂停（autoRearm），让 agent
+   * 在遇到自身 bug 时能先止血而不是被自己的门禁锁死。负责人 `/flow on` 或宿主
+   * 重启后自动恢复；完成后用 `flow_incident_close` 补审计记录。
+   */
+  async selfPause(input: { reason: string; severity?: RepairSeverity }): Promise<{ incident: IncidentRecord; message: string }> {
+    if (!this.isInitialized()) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
+    if (this.flags.incident !== undefined) {
+      const existing: IncidentRecord = { ...this.flags.incident }
+      return {
+        incident: existing,
+        message: `已有未关闭的事故 ${existing.id}（${existing.severity}）：${existing.reason}。修复完成后用 flow_incident_close 补审计记录；恢复门禁用 /flow on（或宿主重启自动恢复）。`,
+      }
+    }
+    const reason = input.reason.trim()
+    if (reason === '') {
+      throw new FlowGateError('自暂停必须写原因', '用法：flow_self_pause({ reason: "为什么暂停门禁（P0/P1 事故）", severity?: "P0" | "P1" | "P2" })')
+    }
+    const ids = await store.listIncidentIds(this.fs, this.root)
+    const now = isoNow(this.clock)
+    const incident: IncidentRecord = {
+      id: store.nextStampedId('INC', this.clock, ids),
+      severity: input.severity ?? 'P2',
+      reason,
+      openedAt: now,
+      openedBy: 'agent',
+    }
+    this.flags.incident = incident
+    this.flags.off = {
+      by: 'agent',
+      reason,
+      at: now,
+      autoRearm: true,
+      ...(this.hostEpoch !== undefined ? { hostEpoch: this.hostEpoch } : {}),
+    }
+    await store.writeProjectFlags(this.fs, this.root, this.flags)
+    await this.appendLedger('incident.open', { incidentId: incident.id, severity: incident.severity, reason, openedBy: 'agent' })
+    await this.appendLedger('flow.project_off', { reason, by: 'agent', autoRearm: true, incidentId: incident.id })
+    const message = `门禁已暂停（写操作放行）；恢复：负责人 /flow on，或下一次宿主启动自动恢复；完成后用 flow_incident_close 补审计记录。事故 ${incident.id}（${incident.severity}）。`
+    this.pushNotice(message)
+    this.emitState()
+    return { incident: { ...incident }, message }
+  }
+
+  /** 关闭事故记录（v0.5.1）：补摘要/commit/tests/files 归档到 `.flowgate/incidents/<id>.json` 并解除 agent 自暂停。 */
+  async closeIncident(input: { summary: string; commit?: string | null; tests?: string; files?: string[] }): Promise<{ incident: IncidentRecord; message: string }> {
+    const open = this.flags.incident
+    if (open === undefined) {
+      throw new FlowGateError('当前没有未关闭的事故记录', '自暂停用 flow_self_pause；关闭用 flow_incident_close({ summary, commit?, tests?, files? })')
+    }
+    const summary = input.summary.trim()
+    if (summary === '') {
+      throw new FlowGateError('关闭事故必须写摘要', 'summary 写清：原因、修复方式、验证结论（commit/tests/files 可选但建议填）')
+    }
+    const closed: IncidentRecord = { ...open, closedAt: isoNow(this.clock), summary }
+    if (input.commit !== undefined) closed.commit = input.commit
+    if (input.tests !== undefined) closed.tests = input.tests
+    if (input.files !== undefined) closed.files = [...input.files]
+    const path = await store.writeIncidentRecord(this.fs, this.root, closed)
+    delete this.flags.incident
+    const pausedByAgent = this.flags.off?.by === 'agent'
+    if (pausedByAgent) delete this.flags.off
+    await store.writeProjectFlags(this.fs, this.root, this.flags)
+    await this.appendLedger('incident.close', {
+      incidentId: closed.id,
+      summary,
+      commit: closed.commit ?? null,
+      tests: closed.tests ?? null,
+      files: closed.files ?? [],
+      path,
+    })
+    if (pausedByAgent) await this.appendLedger('flow.project_on', { reason: '事故关闭，门禁恢复', incidentId: closed.id })
+    const message = `事故 ${closed.id} 已关闭并归档到 ${path}${pausedByAgent ? '；门禁已恢复' : ''}。`
+    this.pushNotice(message)
+    this.emitState()
+    return { incident: closed, message }
+  }
+
+  /**
+   * 开始一次修复（v0.5.1）：一次声明（scope + verify + 验收），之后在范围内自由
+   * 迭代（edit → 跑测试 → 再 edit），用 RED→GREEN 证据关门；不产生 C-xxx 变更。
+   */
+  async startRepair(input: {
+    title: string
+    symptom: string
+    repro?: string
+    scope: string[]
+    verify: string
+    acceptance?: string[]
+    severity?: RepairSeverity
+    openedBy?: EnforcerKind
+  }): Promise<RepairRecord> {
+    if (!this.isInitialized()) throw new FlowGateError('FlowGate 未初始化', '等待负责人在授权卡片上启用 FlowGate 后重试')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复（从账本重建状态）后再开修复通道')
+    const activeChanges = (this.state?.changes ?? []).filter((change) => change.lifecycle === 'active')
+    if (activeChanges.length > 0) {
+      const first = activeChanges[0]!
+      throw new FlowGateError(
+        `已有进行中的变更 ${first.id}（${first.title}）`,
+        '修复通道用于「没有进行中变更」时的 bug 修复；先把现有变更 finish/pause，再 flow_fix_start',
+      )
+    }
+    if (this.activeRepair !== null) {
+      throw new FlowGateError(
+        `已有进行中的修复 ${this.activeRepair.id}（${this.activeRepair.title}）`,
+        '先 flow_fix_done 完成并留证，或 flow_fix_abort 中止后再开始新的修复',
+      )
+    }
+    const title = input.title.trim()
+    if (title === '') throw new FlowGateError('修复标题不能为空', '用一句话说清修什么，例如「修复新建会话失败」')
+    const symptom = input.symptom.trim()
+    if (symptom === '') throw new FlowGateError('修复必须写症状（symptom）', '写清用户可见现象/报错/影响面，便于复盘')
+    const scope = [...new Set(input.scope.map((pattern) => normalizeRelPath(pattern)).filter((pattern) => pattern !== ''))]
+    if (scope.length === 0) {
+      throw new FlowGateError(
+        '修复范围不能为空（scope）',
+        '写清允许改动的仓库相对路径或 glob（≤20 条），例如 ["src/core/**", "test/core/**"]',
+      )
+    }
+    if (scope.length > 20) throw new FlowGateError(`修复范围过大（${scope.length} 条，最多 20 条）`, '缩小 scope；若是跨模块大改请改用 flow_new_change 立项')
+    const verify = input.verify.trim()
+    if (verify === '') throw new FlowGateError('修复必须声明验证命令（verify）', '例如 "pnpm vitest run test/core/xxx.test.ts"；RED→GREEN 由插件亲自执行该命令')
+    const shape = validateVerifyCommand(verify)
+    if (!shape.ok) throw new FlowGateError(`验证命令不合法：${shape.reason}`, '只写一条命令，不允许 && || ; 管道 重定向 命令替换和反引号')
+    if (!this.runner) throw new FlowGateError('宿主没有提供命令执行器', '运行 /flow doctor 查看缺失接口')
+    const acceptance = (input.acceptance ?? []).map((item) => item.trim()).filter((item) => item !== '')
+    const ids = await store.listFixIds(this.fs, this.root)
+    const now = isoNow(this.clock)
+    const record: RepairRecord = {
+      id: store.nextStampedId('FIX', this.clock, ids),
+      title,
+      symptom,
+      ...(input.repro !== undefined && input.repro.trim() !== '' ? { repro: input.repro.trim() } : {}),
+      scope,
+      verify,
+      acceptance,
+      severity: input.severity ?? 'P2',
+      status: 'open',
+      openedAt: now,
+      openedBy: input.openedBy ?? 'agent',
+      actions: 0,
+    }
+    this.activeRepair = record
+    await store.writeActiveRepair(this.fs, this.root, record)
+    await this.appendLedger('repair.started', {
+      repairId: record.id,
+      title,
+      severity: record.severity,
+      scope,
+      verify,
+      symptom,
+      openedBy: record.openedBy,
+    })
+    this.pushNotice(
+      `修复通道已开启 ${record.id}「${title}」（${record.severity}）。只允许改声明范围：${scope.join('、')}。下一步：先写复现测试/跑失败命令拿 RED（flow_verify），再改到 GREEN，完成后 flow_fix_done。`,
+    )
+    this.emitState()
+    return JSON.parse(JSON.stringify(record)) as RepairRecord
+  }
+
+  /** 记录一条修复回执并（可选）绑定 RED/GREEN；回执结构与普通验证完全一致。 */
+  private async runRepairReceipt(input: { command: string; group: string; inputs: string[]; bind: boolean }): Promise<EvidenceReceipt> {
+    const repair = this.activeRepair
+    if (repair === null) throw new FlowGateError('当前没有进行中的修复', '先用 flow_fix_start 开修复通道')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
+    if (!this.runner) throw new FlowGateError('宿主没有提供命令执行器', '运行 /flow doctor 查看缺失接口')
+    const shape = validateVerifyCommand(input.command)
+    if (!shape.ok) throw new FlowGateError(`验证命令不合法：${shape.reason}`, '只写一条可执行命令，不允许 && || ; 管道 重定向 命令替换和反引号')
+    this.evidenceCounter += 1
+    const id = `E-${String(this.evidenceCounter).padStart(4, '0')}`
+    const now = isoNow(this.clock)
+    // 修复通道没有 C-xxx 变更目录：回执的 changeId 用 FIX-id，evidence 索引与日志
+    // 都落在 `.flowgate/state/evidence/`（与普通回执同构），host 无需特殊处理。
+    const syntheticChange: ChangeStatus = {
+      id: repair.id,
+      kind: 'change',
+      title: repair.title,
+      complexity: 'low',
+      risk: 'normal',
+      stage: 'S4',
+      lifecycle: 'active',
+      gates: {},
+      batches: [],
+      tasks: {},
+      evidenceIds: [],
+      pending: [],
+      overrides: [],
+      exceptions: [],
+      violations: [],
+      reviews: [],
+      createdAt: repair.openedAt,
+      updatedAt: now,
+    }
+    const syntheticTask: TaskCard = {
+      id: 'FIX',
+      title: repair.title,
+      covers: [],
+      scope: [...repair.scope],
+      tests: [],
+      newFiles: [],
+      changes: [],
+      dependsOn: [],
+      tdd: 'required',
+      verify: [{ group: input.group, command: input.command, inputs: [...input.inputs] }],
+      run: 'main',
+      risk: [],
+      size: 'M',
+      body: '',
+    }
+    const receipt = await runVerifyGroup({
+      fs: this.fs,
+      root: this.root,
+      runner: this.runner,
+      change: syntheticChange,
+      task: syntheticTask,
+      group: { group: input.group, command: input.command, inputs: [...input.inputs] },
+      clock: this.clock,
+      nextEvidenceId: () => id,
+    })
+    await this.appendReceipt(receipt)
+    if (input.bind) await this.bindRepairEvidence(receipt)
+    else
+      await this.appendLedger('repair.evidence', {
+        repairId: repair.id,
+        evidenceId: receipt.id,
+        group: input.group,
+        phase: receipt.phase,
+        command: receipt.command,
+        exitCode: receipt.exitCode,
+        inputsHash: receipt.inputsHash,
+        bound: false,
+      })
+    return receipt
+  }
+
+  /**
+   * 把验证回执绑定到修复记录：RED 只绑定一次（在拿到 GREEN 之前可刷新），
+   * GREEN 一旦出现即可更新（多次 green 以最后一次为准）。
+   */
+  private async bindRepairEvidence(receipt: EvidenceReceipt): Promise<void> {
+    const repair = this.activeRepair
+    if (repair === null || this.current !== null) return
+    let bound: 'red' | 'green' | null = null
+    if (receipt.phase === 'red') {
+      if (repair.greenEvidenceId === undefined && repair.redEvidenceId !== receipt.id) {
+        repair.redEvidenceId = receipt.id
+        bound = 'red'
+      }
+    } else if (receipt.phase === 'green') {
+      if (repair.redEvidenceId !== undefined && repair.greenEvidenceId !== receipt.id) {
+        repair.greenEvidenceId = receipt.id
+        bound = 'green'
+      }
+    }
+    if (bound !== null) {
+      try {
+        await store.writeActiveRepair(this.fs, this.root, repair)
+      } catch {
+        // 持久化失败不阻断验证；下一次写入会带上。
+      }
+      this.pushNotice(
+        bound === 'red'
+          ? `修复 ${repair.id} 已记录 RED 证据 ${receipt.id}（${receipt.command}）。现在改代码到通过，再 flow_verify 拿 GREEN。`
+          : `修复 ${repair.id} 已记录 GREEN 证据 ${receipt.id}。下一步 flow_fix_done 关门（会跑全量回归并核对改动范围）。`,
+      )
+    }
+    await this.appendLedger('repair.evidence', {
+      repairId: repair.id,
+      evidenceId: receipt.id,
+      group: receipt.group,
+      phase: receipt.phase,
+      command: receipt.command,
+      exitCode: receipt.exitCode,
+      inputsHash: receipt.inputsHash,
+      bound,
+      redEvidenceId: repair.redEvidenceId ?? null,
+      greenEvidenceId: repair.greenEvidenceId ?? null,
+    })
+  }
+
+  /**
+   * 修复通道的收尾（v0.5.1）。前置全部通过才写修复记录并清空 repair.json：
+   * - RED/GREEN 都存在且 GREEN 晚于 RED；
+   * - 全量回归（config.commands.test）通过（未配置则跳过并写明）；
+   * - 重新运行声明的 verify 命令且回执新鲜；
+   * - 改动文件全部命中 scope（收集不到时记 unknown 并继续，不误杀）。
+   * 任一失败抛 FlowGateError 且**不清空**进行中的修复。
+   */
+  async finishRepair(input: { summary?: string; commit?: string | null } = {}): Promise<{ record: RepairRecord; message: string }> {
+    const repair = this.activeRepair
+    if (repair === null) throw new FlowGateError('当前没有进行中的修复', '先用 flow_fix_start 开修复通道（声明 scope 与 verify），修完再用 flow_fix_done')
+    if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '等待负责人在授权卡片上修复')
+    const notes: string[] = []
+    const red = repair.redEvidenceId !== undefined ? this.receipts.find((receipt) => receipt.id === repair.redEvidenceId) : undefined
+    const green = repair.greenEvidenceId !== undefined ? this.receipts.find((receipt) => receipt.id === repair.greenEvidenceId) : undefined
+    if (red === undefined) {
+      throw new FlowGateError(
+        `修复 ${repair.id} 还没有 RED 证据`,
+        '先写复现测试/跑失败命令：flow_verify 会把失败回执记为 RED；修复通道保持开启',
+      )
+    }
+    if (green === undefined) {
+      throw new FlowGateError(
+        `修复 ${repair.id} 还没有 GREEN 证据`,
+        '修好后重新 flow_verify，直到验证命令通过（GREEN）；修复通道保持开启',
+      )
+    }
+    const redAt = Date.parse(red.finishedAt)
+    const greenAt = Date.parse(green.finishedAt)
+    if (Number.isFinite(redAt) && Number.isFinite(greenAt) && greenAt <= redAt) {
+      throw new FlowGateError(`修复 ${repair.id} 的 GREEN 证据不晚于 RED`, '重新跑一次 flow_verify 生成新的 GREEN 回执后再 flow_fix_done')
+    }
+    // 1) 改动文件必须在声明范围内（收集不到时记 unknown，继续）。
+    const collected = await this.collectChangedFiles()
+    if (collected === null) {
+      notes.push('未收集到改动文件（GitPort 与命令行都不可用，或不是 git 仓库）：changedFiles 记为 unknown')
+    } else {
+      const outside = outOfScopePaths(collected, repair.scope)
+      if (outside.length > 0) {
+        const shown = outside.slice(0, 5).join('、')
+        throw new FlowGateError(
+          `修复改动超出声明范围：${shown}${outside.length > 5 ? ` 等 ${outside.length} 个文件` : ''}`,
+          '把这些文件写进 scope 后重新 flow_fix_start（或 flow_fix_abort 后重开）；若这是新功能请 flow_new_change 立项。修复通道保持开启',
+        )
+      }
+    }
+    // 2) 全量回归（config.commands.test；none/缺失跳过并记录 notes）。
+    const testCommand = this.config.commands.test
+    let regression: EvidenceReceipt | undefined
+    if (testCommand === undefined || testCommand === 'none' || testCommand.trim() === '') {
+      notes.push('项目没有配置全量测试命令（commands.test = none/缺失）：已跳过全量回归')
+    } else {
+      regression = await this.runRepairReceipt({
+        command: testCommand,
+        group: 'repair-regression',
+        inputs: repair.scope.length > 0 ? repair.scope : this.baselineInputs(),
+        bind: false,
+      })
+      if (regression.exitCode !== 0 || regression.phase !== 'green') {
+        throw new FlowGateError(
+          `全量回归失败（${testCommand}）：exit=${regression.exitCode}，phase=${regression.phase}`,
+          `先修好回归失败再 flow_fix_done；修复通道保持开启（回归回执 ${regression.id}）`,
+        )
+      }
+      notes.push(`全量回归通过（回执 ${regression.id}）`)
+    }
+    // 3) 重新运行声明的 verify 命令，确认当前输入下仍是 GREEN。
+    const confirm = await this.runRepairReceipt({ command: repair.verify, group: 'repair-verify', inputs: repair.scope, bind: true })
+    if (confirm.exitCode !== 0 || confirm.phase !== 'green') {
+      throw new FlowGateError(
+        `重新运行验证命令未通过（${repair.verify}）：phase=${confirm.phase}，exit=${confirm.exitCode}`,
+        '继续改到 flow_verify 通过后再 flow_fix_done；修复通道保持开启（本次回执已记录）',
+      )
+    }
+    // 4) 新鲜度：回执的输入哈希必须等于当前 scope 的哈希（复用证据 freshness 口径）。
+    const freshHash = (await hashInputs(this.fs, this.root, repair.scope)).hash
+    if (confirm.inputsHash !== freshHash) {
+      throw new FlowGateError('验证回执已过期：运行验证命令后声明范围内的输入又发生了变化', '不要改文件，直接重新 flow_fix_done（会重新跑验证命令）')
+    }
+    // 5) commit：负责人可显式传；否则尽力取 git HEAD（取不到记 null，不阻断）。
+    let commit: string | null = null
+    if (input.commit !== undefined) commit = input.commit
+    else if (this.git) commit = await this.git.head(this.root).catch(() => null)
+    // 6) 落审计记录并清空 active repair。
+    const closedAt = isoNow(this.clock)
+    const summaryInput = input.summary?.trim() ?? ''
+    const record: RepairRecord = {
+      ...repair,
+      status: 'done',
+      closedAt,
+      summary: summaryInput === '' ? `修复完成：${repair.title}` : summaryInput,
+      greenEvidenceId: confirm.id,
+      ...(regression !== undefined ? { regressionEvidenceId: regression.id } : {}),
+      ...(collected !== null ? { changedFiles: collected } : {}),
+      commit,
+    }
+    const path = await store.writeFixRecord(this.fs, this.root, record)
+    await this.appendLedger('repair.done', {
+      repairId: record.id,
+      redEvidenceId: record.redEvidenceId ?? null,
+      greenEvidenceId: record.greenEvidenceId ?? null,
+      regressionEvidenceId: record.regressionEvidenceId ?? null,
+      changedFiles: record.changedFiles ?? null,
+      commit: record.commit ?? null,
+      summary: record.summary ?? null,
+      path,
+      notes,
+    })
+    this.activeRepair = null
+    await store.clearActiveRepair(this.fs, this.root)
+    const message = renderRepairReport(record, red, confirm, regression, notes)
+    this.pushNotice(`修复完成 ${record.id}「${record.title}」：记录 ${path}`)
+    this.emitState()
+    return { record: JSON.parse(JSON.stringify(record)) as RepairRecord, message }
+  }
+
+  /** 中止修复（v0.5.1）：记录理由与（能收集到的）改动文件后清空 active repair。 */
+  async abortRepair(reason: string): Promise<RepairRecord> {
+    const repair = this.activeRepair
+    if (repair === null) throw new FlowGateError('当前没有进行中的修复', '用 flow_fix_start 开修复通道；中止用 flow_fix_abort({ reason })')
+    const text = reason.trim()
+    if (text === '') throw new FlowGateError('中止修复必须写理由', '说清为什么放弃（例如根因在另一个模块，需要 flow_new_change 大改）')
+    const collected = await this.collectChangedFiles()
+    const record: RepairRecord = {
+      ...repair,
+      status: 'aborted',
+      abortReason: text,
+      closedAt: isoNow(this.clock),
+      ...(collected !== null ? { changedFiles: collected } : {}),
+    }
+    const path = await store.writeFixRecord(this.fs, this.root, record)
+    await this.appendLedger('repair.aborted', {
+      repairId: record.id,
+      reason: text,
+      path,
+      changedFiles: record.changedFiles ?? null,
+    })
+    this.activeRepair = null
+    await store.clearActiveRepair(this.fs, this.root)
+    this.pushNotice(`修复通道已中止 ${record.id}：${text}（记录 ${path}）`)
+    this.emitState()
+    return JSON.parse(JSON.stringify(record)) as RepairRecord
+  }
+
+  /**
+   * 收集工作区改动文件（repo-relative）：优先 GitPort，其次 CommandRunner 跑
+   * `git status --porcelain --untracked-files=all`；都不是 git / 命令失败返回 null。
+   * `.flowgate/`、`.git/` 下的改动是插件状态，不算修复改动。
+   */
+  private async collectChangedFiles(): Promise<string[] | null> {
+    let status: string | null = null
+    if (this.git !== undefined) {
+      try {
+        status = await this.git.statusPorcelain(this.root)
+      } catch {
+        status = null
+      }
+    }
+    if (status === null && this.runner !== undefined) {
+      try {
+        const result = await this.runner.run('git status --porcelain --untracked-files=all', { cwd: this.root, timeoutMs: 30_000 })
+        if (result.exitCode === 0) status = result.stdout
+      } catch {
+        status = null
+      }
+    }
+    if (status === null) return null
+    const paths = FlowEngine.porcelainPaths(status).filter(
+      (path) => !isUnder(path, '.flowgate') && !isUnder(path, '.git') && path !== '',
+    )
+    return [...new Set(paths)].sort()
+  }
+
+
+  // ------------------------------------------------------------------
   // Analysis tasks
   // ------------------------------------------------------------------
 
@@ -4949,7 +5683,13 @@ export class FlowEngine {
         ? 'FlowGate 未启用：项目没有 .flowgate/config.yaml。在授权卡片上启用（或 /flow init）。'
         : this.state?.locked
           ? `锁定模式：${this.state.locked.reason}。修复入口：/flow repair。`
-          : 'FlowGate 运行正常。',
+          : this.flags.incident !== undefined
+            ? `门禁已因事故暂停（${this.flags.incident.id} · ${this.flags.incident.severity}）：写操作放行。修复后用 flow_incident_close 补审计记录；恢复用 /flow on 或宿主重启自动恢复。`
+            : this.flags.off !== undefined
+              ? `门禁已暂停（${this.flags.off.by === 'agent' ? 'agent 自暂停' : '负责人手动'}）：写操作放行。恢复用 /flow on。`
+              : this.activeRepair !== null
+                ? `修复通道进行中：${this.activeRepair.id}「${this.activeRepair.title}」（${this.activeRepair.severity}，RED ${this.activeRepair.redEvidenceId !== undefined ? '已有' : '待补'} / GREEN ${this.activeRepair.greenEvidenceId !== undefined ? '已有' : '待补'}）。`
+                : 'FlowGate 运行正常。',
     }
     return report
   }
@@ -5115,16 +5855,39 @@ export class FlowEngine {
         const text = `[FlowGate] 锁定模式：${this.state.locked.reason}。写操作被拒绝，等待负责人在授权卡片上修复。`
         return { text, approxTokens: approx(text) }
       }
+      // v0.5.1：项目级暂停 / 事故自暂停——写操作放行，但 .flowgate 与 .git 仍受保护。
+      if (this.flags.off !== undefined) {
+        const incident = this.flags.incident
+        const text =
+          incident !== undefined
+            ? `[FlowGate] 门禁已因事故暂停（${incident.id} · ${incident.severity}）：写操作放行，但 .flowgate/ 与 .git/ 仍受保护。修复完成后用 flow_incident_close 补审计记录；恢复：负责人 /flow on，或下一次宿主启动自动恢复。`
+            : `[FlowGate] 项目门禁已暂停（${this.flags.off.reason}）：写操作放行，但 .flowgate/ 与 .git/ 仍受保护。恢复：负责人 /flow on，或下一次宿主启动自动恢复（agent 自暂停时）。`
+        return { text, approxTokens: approx(text) }
+      }
+      // v0.5.1：修复通道（bugfix 一等公民）——无变更时也能迭代，RED→GREEN 关门。
+      if (this.activeRepair !== null) {
+        const repair = this.activeRepair
+        const text = `[FlowGate] 修复通道 ${repair.id}「${repair.title}」（${repair.severity}）进行中：只允许改声明范围 ${repair.scope.join('、')}；验证命令 ${repair.verify}。当前${repair.redEvidenceId !== undefined ? '已有 RED' : '等待 RED'}${repair.greenEvidenceId !== undefined ? '、已有 GREEN' : ''}。下一步：${repair.redEvidenceId === undefined ? '写复现测试/跑失败命令，用 flow_verify 拿 RED' : '改代码并用 flow_verify 拿 GREEN，然后 flow_fix_done 关门（会跑全量回归并核对改动范围）'}。`
+        return { text, approxTokens: approx(text) }
+      }
       if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
         const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
         const text = `[FlowGate] 路线图已批准，但还没有立项变更。下一步：用 flow_new_change({ fromRoadmap: "${first}" }) 立项第一个变更（工程骨架 ${first}）；不要用无 fromRoadmap 的立项绕过路线图。`
         return { text, approxTokens: approx(text) }
       }
-      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更：任何改动都必须先立项（R-NO-CHANGE）。下一步：评估这次需求的大小与清晰度，然后调用 flow_new_change({ title, summary, assessment }) 立项。assessment 字段：route=full|standard|fast、autoApprove、clear、goal、acceptance[]、scope[]、verify、reasons[]；宿主 auto-review 会校验并可能调整：复杂/高风险/敏感面 → full；中等 → standard（合并 G1+G3 一次确认）；低复杂度且清晰可验证 → fast（G1/G3/G6 检查通过后自动放行，直到交付归档）。`
+      const text = `[FlowGate] 项目已启用 FlowGate 但当前没有进行中的变更：任何改动都必须先立项（R-NO-CHANGE），修 bug 则用 flow_fix_start 开修复通道（推荐）。下一步：评估这次需求的大小与清晰度，然后调用 flow_new_change({ title, summary, assessment }) 立项。assessment 字段：route=full|standard|fast、autoApprove、clear、goal、acceptance[]、scope[]、verify、reasons[]；宿主 auto-review 会校验并可能调整：复杂/高风险/敏感面 → full；中等 → standard（合并 G1+G3 一次确认）；低复杂度且清晰可验证 → fast（G1/G3/G6 检查通过后自动放行，直到交付归档）。`
       return { text, approxTokens: approx(text) }
     }
     if (change.off) {
       const text = `[FlowGate] 本会话门禁已被负责人临时关闭，操作不再拦截；账本已记录。`
+      return { text, approxTokens: approx(text) }
+    }
+    if (this.flags.off !== undefined) {
+      const incident = this.flags.incident
+      const text =
+        incident !== undefined
+          ? `[FlowGate] 门禁已因事故暂停（${incident.id} · ${incident.severity}）：写操作放行，但 .flowgate/ 与 .git/ 仍受保护。修复完成后用 flow_incident_close 补审计记录；恢复：负责人 /flow on，或下一次宿主启动自动恢复。`
+          : `[FlowGate] 项目门禁已暂停（${this.flags.off.reason}）：写操作放行，但 .flowgate/ 与 .git/ 仍受保护。恢复：负责人 /flow on，或下一次宿主启动自动恢复。`
       return { text, approxTokens: approx(text) }
     }
     const lines: string[] = []
@@ -5237,7 +6000,35 @@ export class FlowEngine {
       externalChanges: (change?.externalChanges ?? []).filter((item) => item.confirmedAt === undefined),
       resumed: this.resumed,
       exceptions: (change?.exceptions ?? []).filter((item) => item.revokedAt === undefined),
-      off: change?.off ?? false,
+      off: (change?.off ?? false) || this.flags.off !== undefined,
+      offBy: change?.off === true ? 'human' : this.flags.off?.by,
+      takeover: this.takeover,
+      ...(this.flags.incident !== undefined
+        ? {
+            incident: {
+              id: this.flags.incident.id,
+              severity: this.flags.incident.severity,
+              reason: this.flags.incident.reason,
+              openedAt: this.flags.incident.openedAt,
+            },
+          }
+        : {}),
+      ...(this.activeRepair !== null
+        ? {
+            repair: {
+              id: this.activeRepair.id,
+              title: this.activeRepair.title,
+              severity: this.activeRepair.severity,
+              status: 'open' as const,
+              scope: [...this.activeRepair.scope],
+              verify: this.activeRepair.verify,
+              red: this.activeRepair.redEvidenceId !== undefined,
+              green: this.activeRepair.greenEvidenceId !== undefined,
+              openedAt: this.activeRepair.openedAt,
+              actions: this.activeRepair.actions,
+            },
+          }
+        : {}),
       locked: Boolean(this.state?.locked),
       interceptCounts: { ...this.interceptCounts },
       coverage: this.coverageReport ?? undefined,
@@ -5276,12 +6067,26 @@ export class FlowEngine {
   private nextStepText(change: ChangeStatus | null, level: LevelProfile | null): string {
     if (!this.isInitialized()) return 'FlowGate 未启用：在授权卡片上启用后继续'
     if (this.state?.locked) return 'FlowGate 已锁定：等待负责人在授权卡片上修复'
+    // v0.5.1：项目级暂停 / 事故自暂停（写操作放行，.flowgate 与 .git 仍受保护）。
+    if (this.flags.off !== undefined) {
+      if (this.flags.incident !== undefined) {
+        return `门禁因事故 ${this.flags.incident.id}（${this.flags.incident.severity}）已暂停：修复后用 flow_incident_close 补审计记录；恢复用 /flow on（或宿主重启自动恢复）`
+      }
+      return '门禁已暂停（项目级）：恢复用 /flow on，或下一次宿主启动自动恢复'
+    }
     if (!change) {
+      // v0.5.1：修复通道提示——先拿 RED 证据，再修到 GREEN 关门。
+      if (this.activeRepair !== null) {
+        const repair = this.activeRepair
+        if (repair.redEvidenceId === undefined) return '先写复现测试/跑失败命令拿 RED：flow_verify'
+        if (repair.greenEvidenceId === undefined) return '改代码到验证通过：flow_verify 拿 GREEN，然后 flow_fix_done'
+        return '证据齐了：flow_fix_done 关门（会跑全量回归并核对改动范围）'
+      }
       if (this.roadmapApprovedByOwner() && this.roadmapChangesCreated() === 0) {
         const first = this.roadmapDoc?.entries[0]?.change ?? 'C0'
         return `用 flow_new_change({ fromRoadmap: "${first}" }) 从已批准路线图立项（第一个变更必须是工程骨架 ${first}）`
       }
-      return '用一句话描述你想做的变更，由 agent 立项'
+      return '用一句话描述你想做的变更，由 agent 立项；修 bug 可直接用 flow_fix_start 开修复通道'
     }
     if (change.off) return '门禁已关闭：可在授权卡片上恢复'
     const awaiting = (Object.entries(change.gates) as [GateId, GateRecord][]).find(([, record]) => record.state === 'awaiting')?.[0]
@@ -5510,7 +6315,25 @@ export function extractMentionedPaths(text: string): string[] {
 export function buildStatusLine(snapshot: RuntimeSnapshot): string {
   if (!snapshot.initialized) return '◆ FlowGate 未启用 · 在授权卡片上启用'
   if (snapshot.locked) return '◆ FlowGate 锁定 · 等待负责人在授权卡片上修复'
+  // v0.5.1：暂停/事故优先显示（写操作放行，但不改变既有正常文案）。
+  if (snapshot.off) {
+    const incident = snapshot.incident
+    if (incident !== undefined) {
+      return truncateStatusLine(`◆ FlowGate 事故暂停 ${incident.id}（${incident.severity}）│ 写操作放行 │ 下一步：${snapshot.nextStep}`)
+    }
+    return truncateStatusLine(
+      `◆ FlowGate 门禁暂停${snapshot.offBy === 'agent' ? '（agent 自暂停）' : ''} │ 写操作放行 │ 下一步：${snapshot.nextStep}`,
+    )
+  }
   const parts: string[] = ['◆ FlowGate']
+  // v0.5.1：修复通道（无变更）状态条。
+  if (snapshot.repair !== undefined && !snapshot.changeId) {
+    const repair = snapshot.repair
+    parts.push(`修复 ${repair.id}`)
+    parts.push(repair.red ? (repair.green ? 'RED→GREEN' : 'RED') : '待 RED')
+    parts.push(`下一步：${snapshot.nextStep}`)
+    return truncateStatusLine(parts.join(' │ '))
+  }
   if (snapshot.changeId && snapshot.changeId !== 'PROJECT') {
     parts.push(snapshot.changeId)
     parts.push(`${complexityShort(snapshot.complexity)} · ${riskShort(snapshot.risk)}`)
@@ -5532,9 +6355,50 @@ export function buildStatusLine(snapshot: RuntimeSnapshot): string {
     parts.push(`拦截 ${interceptCount} · 待处理 ${snapshot.pending.length}`)
   }
   parts.push(`下一步：${snapshot.nextStep}`)
-  let text = parts.join(' │ ')
-  if (text.length > 120) text = `${text.slice(0, 119)}…`
-  return text
+  return truncateStatusLine(parts.join(' │ '))
+}
+
+/** 状态条 ≤120 字符（超出截断并加省略号）。 */
+function truncateStatusLine(text: string): string {
+  if (text.length <= 120) return text
+  return `${text.slice(0, 119)}…`
+}
+
+/**
+ * finishRepair 的中文报告：证据 id、改动文件、回归结论、commit 与建议提交文案。
+ * 直接返回给 host 展示/注入，不依赖客户端渲染。
+ */
+function renderRepairReport(
+  record: RepairRecord,
+  red: EvidenceReceipt,
+  green: EvidenceReceipt,
+  regression: EvidenceReceipt | undefined,
+  notes: readonly string[],
+): string {
+  const changed =
+    record.changedFiles !== undefined
+      ? record.changedFiles.length > 0
+        ? record.changedFiles.join('、')
+        : '（无工作区改动）'
+      : 'unknown（未收集到 git 改动，见备注）'
+  const lines = [
+    `修复完成 ${record.id}「${record.title}」（${record.severity}）`,
+    `- RED 证据：${red.id}（${red.command}，exit=${red.exitCode}，${red.finishedAt}）`,
+    `- GREEN 证据：${green.id}（重新运行 ${record.verify} 通过，${green.finishedAt}）`,
+    `- 全量回归：${regression !== undefined ? `${regression.id}（通过）` : '未配置全量测试命令，已跳过'}`,
+    `- 改动文件（${record.changedFiles !== undefined ? record.changedFiles.length : 'unknown'}）：${changed}`,
+    `- commit：${record.commit === null || record.commit === undefined ? '（未获取到 git HEAD；完成修复后请自行提交）' : record.commit}`,
+    `- 审计记录：.flowgate/fixes/${record.id}.json；索引 .flowgate/fixes/index.md`,
+    ...notes.map((note) => `- 备注：${note}`),
+    '',
+    '建议提交信息：',
+    `fix: ${record.title}`,
+  ]
+  if (record.symptom !== '') lines.push('', `症状：${record.symptom}`)
+  if (record.summary !== undefined && record.summary !== '' && record.summary !== `修复完成：${record.title}`) {
+    lines.push('', record.summary)
+  }
+  return lines.join('\n')
 }
 
 function complexityShort(complexity: Complexity | undefined): string {

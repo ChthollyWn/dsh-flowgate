@@ -15,6 +15,7 @@ export {
 } from './tokenize'
 export {
   classifyShellCommand,
+  classifyRepairShellCommand,
   dangerousCommandReasons,
   isDangerousCommand,
   isPushCommand,
@@ -27,3 +28,4 @@ export {
   validateVerifyCommand,
   extractWriteTargets,
 } from './classify'
+export type { RepairShellVerdict } from './classify'

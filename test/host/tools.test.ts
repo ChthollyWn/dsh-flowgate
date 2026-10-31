@@ -6,6 +6,7 @@ import { setupPlugin, type PluginHarness } from './helpers.js'
 import { resetHostPluginForTest } from '../../src/host/index.js'
 import { FLOW_TOOL_NAMES } from '../../src/host/tools/definitions.js'
 import type { DshToolDefinition } from '../../src/host/adapters/dsh-types.js'
+import { isLosslessJson } from '../../src/host/boundary/json.js'
 
 let harness: PluginHarness | null = null
 
@@ -35,12 +36,17 @@ async function runTool(harness: PluginHarness, name: string, args: Record<string
 }
 
 describe('工具注册', () => {
-  it('14 个 flow_* 工具全部注册', () => {
+  it('20 个 flow_* 工具全部注册（FLOW_TOOL_NAMES 与注册表一致）', () => {
     harness = null
     return setupPlugin().then(async (setup) => {
       harness = setup
+      expect(FLOW_TOOL_NAMES.length).toBe(20)
       for (const name of FLOW_TOOL_NAMES) {
         expect(harness.tools.state.tools.has(name), `${name} 未注册`).toBe(true)
+      }
+      // 修复通道/事故工具必须在清单里（P1-8）。
+      for (const name of ['flow_fix_start', 'flow_fix_done', 'flow_fix_abort', 'flow_self_pause', 'flow_incident_close']) {
+        expect(FLOW_TOOL_NAMES).toContain(name)
       }
     })
   })
@@ -175,12 +181,161 @@ describe('工具执行与错误口径', () => {
   })
 })
 
+describe('修复通道工具（P1-8/P1-9）', () => {
+  it('flow_fix_start 声明修复并返回 FIX-id/scope/verify 与 RED→GREEN→done 下一步', async () => {
+    harness = await setupPlugin()
+    const { value } = await runTool(harness, 'flow_fix_start', {
+      title: '续费回调重复扣款',
+      symptom: '生产回调重试导致重复扣款',
+      scope: ['src/renewal/**'],
+      verify: 'pnpm vitest run test/renewal',
+      severity: 'P0',
+    })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('修复通道已开启')
+    expect(value.summary).toContain('无需立项/人工门')
+    expect(value.summary).toContain('RED')
+    expect(value.data?.id).toBe('FIX-20260101-000000')
+    expect(value.data?.scope).toEqual(['src/renewal/**'])
+    expect(value.data?.verify).toBe('pnpm vitest run test/renewal')
+    expect(engineState(harness.engine).calls.startRepair.length).toBe(1)
+  })
+
+  it('flow_fix_start 空 scope 返回 {error,hint}（参数语义错误）', async () => {
+    harness = await setupPlugin()
+    const { value } = await runTool(harness, 'flow_fix_start', { title: 'x', symptom: 'y', scope: [], verify: 'pnpm test' })
+    expect(value.ok).toBe(false)
+    expect(String(value.data?.error)).toContain('scope 不能为空')
+    expect(engineState(harness.engine).calls.startRepair.length).toBe(0)
+  })
+
+  it('flow_fix_done 关闭修复并返回中文修复报告（证据/改动/是否成功）', async () => {
+    harness = await setupPlugin()
+    await runTool(harness, 'flow_fix_start', {
+      title: '回调重复扣款',
+      symptom: '重复扣款',
+      scope: ['src/renewal/**'],
+      verify: 'pnpm test',
+    })
+    const { value } = await runTool(harness, 'flow_fix_done', { summary: '根因是重试未幂等；已加幂等键' })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('修复报告')
+    expect(value.summary).toContain('是否成功：是')
+    expect(value.summary).toContain('RED')
+    expect(value.summary).toContain('GREEN')
+    expect(value.summary).toContain('.flowgate/fixes/')
+    expect(value.data?.ok).toBe(true)
+    expect(value.data?.evidence).toMatchObject({ red: 'E-RED-1', green: 'E-GREEN-1' })
+    expect(engineState(harness.engine).calls.finishRepair.length).toBe(1)
+  })
+
+  it('flow_fix_abort 放弃修复并写审计原因', async () => {
+    harness = await setupPlugin()
+    await runTool(harness, 'flow_fix_start', { title: 'x', symptom: 'y', scope: ['src/a.ts'], verify: 'pnpm test' })
+    const { value } = await runTool(harness, 'flow_fix_abort', { reason: '根因判断错误，改走正式变更' })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('已放弃修复')
+    expect(value.summary).toContain('根因判断错误')
+    expect(engineState(harness.engine).calls.abortRepair).toEqual(['根因判断错误，改走正式变更'])
+  })
+
+  it('flow_self_pause 返回事故 id、暂停说明与恢复方式（agent 不能自行恢复）', async () => {
+    harness = await setupPlugin()
+    const { value } = await runTool(harness, 'flow_self_pause', { reason: '主流程不可用，需要负责人决策', severity: 'P1' })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('INC-1')
+    expect(value.summary).toContain('不能自行恢复')
+    expect(value.summary).toContain('/flow on')
+    expect(value.summary).toContain('flow_incident_close')
+    expect(value.data?.paused).toBe(true)
+    expect(engineState(harness.engine).calls.selfPause.length).toBe(1)
+  })
+
+  it('flow_incident_close 关闭事故并补审计摘要', async () => {
+    harness = await setupPlugin()
+    await runTool(harness, 'flow_self_pause', { reason: '环境不可用', severity: 'P2' })
+    const { value } = await runTool(harness, 'flow_incident_close', {
+      summary: '环境恢复，重跑通过',
+      tests: 'pnpm vitest run',
+      files: ['src/a.ts'],
+    })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('已关闭')
+    expect(value.summary).toContain('环境恢复')
+    expect(value.data?.summary).toBe('环境恢复，重跑通过')
+    expect(engineState(harness.engine).calls.closeIncident.length).toBe(1)
+  })
+
+  it('flow_status 展示修复通道 / 事故 / 暂停来源', async () => {
+    harness = await setupPlugin()
+    await runTool(harness, 'flow_self_pause', { reason: '需要负责人介入', severity: 'P0' })
+    let status = await runTool(harness, 'flow_status', {})
+    expect(status.value.summary).toContain('事故：INC-1')
+    expect(status.value.summary).toContain('暂停来源：agent 自暂停')
+    expect((status.value.data?.snapshot as Record<string, unknown>).incident).toBeTruthy()
+
+    // 新的 engine 实例状态：清事故 + 开修复通道。
+    engineState(harness.engine).incident = null
+    delete engineState(harness.engine).projectFlags.incident
+    delete engineState(harness.engine).projectFlags.off
+    engineState(harness.engine).takeover = 'observe'
+    await runTool(harness, 'flow_fix_start', { title: '修 bug', symptom: 'x', scope: ['src/a.ts'], verify: 'pnpm test' })
+    status = await runTool(harness, 'flow_status', {})
+    expect(status.value.summary).toContain('修复通道：FIX-20260101-000000')
+    expect(status.value.summary).toContain('接管模式：observe')
+    expect((status.value.data?.snapshot as Record<string, unknown>).repair).toBeTruthy()
+  })
+
+  it('修复通道工具的参数 schema：必填项与 severity 枚举', async () => {
+    harness = await setupPlugin()
+    const tool = harness.tools.state.tools.get('flow_fix_start')
+    expect(tool).toBeDefined()
+    const schema = tool!.parameters as {
+      properties?: Record<string, { type?: string; enum?: string[] }>
+      required?: string[]
+    }
+    expect(schema.required).toEqual(expect.arrayContaining(['title', 'symptom', 'scope', 'verify']))
+    expect(schema.properties?.scope?.type).toBe('array')
+    expect(schema.properties?.verify?.type).toBe('string')
+    expect(schema.properties?.severity?.enum).toEqual(['P0', 'P1', 'P2'])
+    for (const name of ['flow_fix_done', 'flow_fix_abort', 'flow_self_pause', 'flow_incident_close']) {
+      expect(harness.tools.state.tools.get(name)?.description.length).toBeGreaterThan(10)
+    }
+  })
+})
+
 describe('tool results are lossless JSON', () => {
   it('strips undefined/class values before returning to the runtime', async () => {
-    const { toLosslessJson } = await import('../../src/host/tools/schema.js')
-    const sanitized = toLosslessJson({ ok: true, summary: 'x', data: { a: undefined, b: new Date(0), c: [1, undefined] } }) as Record<string, unknown>
+    const { toLosslessValue } = await import('../../src/host/boundary/json.js')
+    const sanitized = toLosslessValue({
+      ok: true,
+      summary: 'x',
+      data: { a: undefined, b: new Date(0), c: [1, undefined] },
+    }) as Record<string, unknown>
     expect(JSON.parse(JSON.stringify(sanitized))).toEqual(sanitized)
+    expect(isLosslessJson(sanitized)).toBe(true)
     expect((sanitized.data as Record<string, unknown>).a).toBeUndefined()
+    expect((sanitized.data as Record<string, unknown>).b).toBe('1970-01-01T00:00:00.000Z')
     expect((sanitized.data as Record<string, unknown>).c).toEqual([1, null])
+  })
+
+  it('flow_status 的运行时返回值（summary+data）是 lossless JSON', async () => {
+    harness = await setupPlugin()
+    const { value } = await runTool(harness, 'flow_status', {})
+    // 引擎快照里大量可选字段是 undefined：工具边界必须清洗掉。
+    expect(isLosslessJson(value)).toBe(true)
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item)
+        return
+      }
+      if (node !== null && typeof node === 'object') {
+        for (const [key, item] of Object.entries(node)) {
+          expect(item, key).not.toBeUndefined()
+          walk(item)
+        }
+      }
+    }
+    walk(value)
   })
 })

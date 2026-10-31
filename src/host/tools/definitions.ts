@@ -1,8 +1,19 @@
 /**
- * FlowGate 暴露给模型的 14 个工具（03 §10.1）。
+ * FlowGate 暴露给模型的 20 个工具（03 §10.1 + v0.5.1 修复通道）。
+ *
+ * 分组：
+ * - 流程推进：flow_status / flow_new_change / flow_submit / flow_task_start /
+ *   flow_task_done / flow_request_scope_change / flow_request_plan_change；
+ * - 证据与审查：flow_verify / flow_attach_evidence / flow_report_risk /
+ *   flow_propose_rule / flow_investigate / flow_submit_analysis / flow_diff /
+ *   flow_declare_rework；
+ * - 修复通道（P1-8/P1-9）：flow_fix_start / flow_fix_done / flow_fix_abort；
+ * - 事故与自暂停（P1-8）：flow_self_pause / flow_incident_close。
  *
  * 红线：**没有任何批准/放行/降低等级类工具**——那些只有 `/flow` 命令（负责人）
- * 能触发。工具参数全部写清必填项与示例；错误统一返回 { error, hint, validValues }。
+ * 能触发。修复通道里的"自由迭代"仅限声明的 scope 内，且必须留 RED→GREEN 证据；
+ * 自暂停后 agent 不能自行恢复（只能负责人 `/flow on` 或宿主重启 autoRearm）。
+ * 工具参数全部写清必填项与示例；错误统一返回 { error, hint, validValues }。
  */
 import type { DshToolDefinition } from '../adapters/dsh-types.js'
 import type { EngineLike } from '../types.js'
@@ -11,6 +22,17 @@ import type { CitationRef, EvidenceReceipt } from '../../core/types.js'
 import { defineHostTool, fail, ok, type HostToolValue, type ParamSpecs } from './schema.js'
 import { HostError, toAgentError } from '../errors.js'
 import { captureTaskStartSnapshot } from '../postcheck/index.js'
+import {
+  abortRepair,
+  closeIncident,
+  finishRepair,
+  repairView,
+  safeGetProjectFlags,
+  safeGetRepair,
+  safeGetTakeoverMode,
+  selfPause,
+  startRepair,
+} from '../engine-api.js'
 import { readTaskDiff, reviewCapability, runFinalReview, runInvestigation, runTaskReview, taskReviewRounds } from '../review/index.js'
 import { runRuntimeEvidence } from '../verify/run.js'
 
@@ -66,6 +88,29 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
         lines.push(`下一步：${snapshot.nextStep}`)
         if (snapshot.off) lines.push('注意：本会话门禁已被负责人临时关闭，操作不再拦截。')
         if (snapshot.locked) lines.push('注意：处于锁定模式，写操作被拒绝；等待负责人在授权卡片上修复。')
+        // v0.5.1：接管模式 / 暂停来源 / 事故 / 修复通道（让 agent 知道当前为什么没被拦）。
+        const takeover = safeGetTakeoverMode(engine) ?? snapshot.takeover
+        if (takeover !== undefined && takeover !== 'enforce') {
+          lines.push(
+            takeover === 'observe'
+              ? '接管模式：observe（只记录不拦截；常见于自举开发本插件时）'
+              : '接管模式：off（不拦截不记录；safe-mode 或负责人配置）',
+          )
+        }
+        if (snapshot.offBy !== undefined) {
+          lines.push(`暂停来源：${snapshot.offBy === 'human' ? '负责人手动' : 'agent 自暂停（事故）'}`)
+        }
+        if (snapshot.incident) {
+          lines.push(
+            `事故：${snapshot.incident.id}（${snapshot.incident.severity}）${snapshot.incident.reason}｜恢复：负责人 /flow on；恢复后由负责人或 agent 调 flow_incident_close 补审计。`,
+          )
+        }
+        const repair = repairView(safeGetRepair(engine) ?? snapshot.repair)
+        if (repair) {
+          lines.push(
+            `修复通道：${repair.id}「${repair.title}」｜RED ${repair.red ? '✓' : '✗'} GREEN ${repair.green ? '✓' : '✗'}｜已放行动作 ${repair.actions}｜完成：flow_fix_done；放弃：flow_fix_abort。`,
+          )
+        }
         const notices = safeTakeNotices(engine)
         if (notices.length > 0) lines.push(`通知：${notices.join('；')}`)
         return ok(lines.join('\n'), {
@@ -87,7 +132,12 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
             tasks: Object.values(change?.tasks ?? {}),
             nextStep: snapshot.nextStep,
             off: snapshot.off,
+            offBy: snapshot.offBy,
             locked: snapshot.locked,
+            takeover: safeGetTakeoverMode(engine) ?? snapshot.takeover,
+            incident: snapshot.incident,
+            repair: snapshot.repair,
+            projectFlags: safeGetProjectFlags(engine),
           },
         })
       },
@@ -440,7 +490,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     defineHostTool({
       name: 'flow_verify',
       description:
-        'S2–S5 由插件亲自执行验证命令并记录回执（唯一能作为 RED/GREEN 证据的来源）。返回命令、退出码、运行/通过/失败/跳过数、输入哈希与完整输出路径。',
+        'S2–S5 由插件亲自执行验证命令并记录回执（唯一能作为 RED/GREEN 证据的来源）。返回命令、退出码、运行/通过/失败/跳过数、输入哈希与完整输出路径。修复通道（flow_fix_start 之后）下可直接用：group 自定，如 repro（先跑失败命令拿 RED、修复后再跑拿 GREEN）。',
       parameters: {
         taskId: { type: 'string', description: '任务 id（S5 全量验证可省略）' },
         group: { type: 'string', required: true, description: '验证组名（来自任务卡的 verify.group）' },
@@ -632,6 +682,230 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
     }),
   )
 
+  // 16) flow_fix_start --------------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_fix_start',
+      description:
+        '修复通道（bugfix 一等公民）：声明一次修复，拿到 FIX-id 后可在声明的 scope 内自由迭代——不需要立项、不需要七阶段文档、不需要人工门，但必须留下 RED→GREEN 证据。' +
+        '适用：生产事故、回归缺陷、行为明确的 bug。需求变更/新功能仍走 flow_new_change。' +
+        '流程：flow_fix_start → 先 flow_verify 跑失败命令拿 RED（group 自定，如 repro）→ 在 scope 内修复 → flow_verify 拿 GREEN 并跑声明验证命令确认回归 → flow_fix_done。',
+      parameters: {
+        title: { type: 'string', required: true, description: '一句话标题，例如「续费回调重复扣款」' },
+        symptom: { type: 'string', required: true, description: '可观察的故障现象：报错/错误行为/影响范围' },
+        repro: { type: 'string', description: '复现步骤（建议同时用 flow_verify 跑出 RED 证据）' },
+        scope: {
+          type: 'array',
+          required: true,
+          items: { type: 'string' },
+          description: '允许改动的仓库相对路径/glob（1–20 条；超出会被拒绝，修复动作只放行命中 scope 的写入）',
+        },
+        verify: { type: 'string', required: true, description: '验证命令，如 `pnpm vitest run test/xx.test.ts`（修复完成后用于确认回归）' },
+        acceptance: { type: 'array', items: { type: 'string' }, description: '可测量的验收要点（可选，写入修复声明）' },
+        severity: { type: 'string', enum: ['P0', 'P1', 'P2'], description: '优先级：P0 生产不可用 / P1 主要功能受损 / P2 一般缺陷（默认 P2）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const scope = toStringArray(args.scope)
+        if (scope.length === 0) {
+          return fail('scope 不能为空', '至少写一条允许改动的路径/glob，例如 scope: ["src/renewal/**"]')
+        }
+        const severity =
+          args.severity === 'P0' || args.severity === 'P1' || args.severity === 'P2' ? args.severity : undefined
+        const acceptance = toStringArray(args.acceptance)
+        const repair = await startRepair(engine, {
+          title: String(args.title),
+          symptom: String(args.symptom),
+          ...(typeof args.repro === 'string' && args.repro !== '' ? { repro: args.repro } : {}),
+          scope,
+          verify: String(args.verify),
+          ...(acceptance.length > 0 ? { acceptance } : {}),
+          ...(severity !== undefined ? { severity } : {}),
+          openedBy: 'agent',
+        })
+        runtime.emit()
+        const lines = [
+          `修复通道已开启：${repair.id}「${repair.title}」（${repair.severity}）。`,
+          `范围（只放行命中这些路径的修复写入）：${repair.scope.join('、')}`,
+          `验证命令：${repair.verify}`,
+          ...(repair.acceptance.length > 0 ? [`验收要点：${repair.acceptance.join('；')}`] : []),
+          '这是一条修复通道：范围内自由迭代，无需立项/人工门；但必须留 RED→GREEN 证据。',
+          '下一步（按顺序）：',
+          '1) 先写复现/跑失败命令拿 RED：flow_verify({ group: "repro", command: "<必失败的命令>" })；',
+          '2) 在 scope 内修复（范围外写入会被拒绝，需要时先说明理由扩 scope 或转 flow_new_change）；',
+          '3) 再 flow_verify({ group: "repro" }) 拿 GREEN，并跑声明的验证命令确认回归；',
+          `4) flow_fix_done({ summary }) 关闭修复通道；放弃用 flow_fix_abort({ reason })。`,
+        ]
+        return ok(lines.join('\n'), {
+          id: repair.id,
+          title: repair.title,
+          severity: repair.severity,
+          scope: repair.scope,
+          verify: repair.verify,
+          acceptance: repair.acceptance,
+          opensAt: repair.openedAt,
+          next: 'RED（flow_verify group=repro）→ 修复 → GREEN → flow_fix_done',
+        })
+      },
+    }),
+  )
+
+  // 17) flow_fix_done ---------------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_fix_done',
+      description:
+        '关闭修复通道：校验 RED→GREEN 证据、改动是否越出 scope、声明的验证命令是否通过；成功才落 .flowgate/fixes/<FIX-id>.json 与账本审计。前置失败会返回逐项原因且不清空修复声明（可继续修）。',
+      parameters: {
+        summary: { type: 'string', description: '修复说明：根因 / 改了什么 / 如何验证（建议写清，进入修复报告）' },
+        commit: { type: 'string', description: '修复提交 SHA（自动提交关闭时由负责人/宿主提供；可选）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const result = await finishRepair(engine, {
+          ...(typeof args.summary === 'string' && args.summary !== '' ? { summary: args.summary } : {}),
+          ...(typeof args.commit === 'string' && args.commit !== '' ? { commit: args.commit } : {}),
+        })
+        runtime.emit()
+        const record = result.record
+        const lines = [
+          result.message,
+          '—— 修复报告 ——',
+          `是否成功：是（${record.id}）`,
+          `证据：RED ${record.redEvidenceId ?? '未记录'} → GREEN ${record.greenEvidenceId ?? '未记录'}${
+            record.regressionEvidenceId !== undefined ? `；回归 ${record.regressionEvidenceId}` : ''
+          }`,
+          `改动文件：${(record.changedFiles ?? []).join('、') || '（宿主未采集到 git diff）'}`,
+          `提交：${record.commit ?? '（未提交）'}`,
+          `审计：.flowgate/fixes/${record.id}.json + 账本 repair.done`,
+        ]
+        return ok(lines.join('\n'), {
+          id: record.id,
+          ok: true,
+          message: result.message,
+          evidence: {
+            red: record.redEvidenceId,
+            green: record.greenEvidenceId,
+            regression: record.regressionEvidenceId,
+          },
+          changedFiles: record.changedFiles ?? [],
+          commit: record.commit ?? null,
+          summary: record.summary,
+        })
+      },
+    }),
+  )
+
+  // 18) flow_fix_abort --------------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_fix_abort',
+      description: '放弃当前修复通道（写明原因，写账本审计 repair.aborted）。修复声明关闭后再修需要重新 flow_fix_start。',
+      parameters: {
+        reason: { type: 'string', required: true, description: '为什么放弃这次修复（例如根因判断错了/需要走正式变更）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const reason = String(args.reason)
+        const record = await abortRepair(engine, reason)
+        runtime.emit()
+        return ok(`已放弃修复 ${record.id}「${record.title}」：${reason}
+修复通道已关闭；如仍需要修，重新 flow_fix_start。`, {
+          id: record.id,
+          status: record.status,
+          abortReason: record.abortReason ?? reason,
+        })
+      },
+    }),
+  )
+
+  // 19) flow_self_pause -------------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_self_pause',
+      description:
+        'agent 自暂停（事故上报）：当遇到无法安全继续/需要负责人决策/环境不可用的情形，调用本工具暂停本项目写操作并创建事故记录（INC-id），等待负责人处理。' +
+        'agent 不能自行恢复；负责人 /flow on 或下次宿主启动（hostEpoch 变化，autoRearm=true）恢复；恢复后补 flow_incident_close 审计。',
+      parameters: {
+        reason: { type: 'string', required: true, description: '为什么必须暂停：现象、影响、为什么 agent 不能自行继续' },
+        severity: { type: 'string', enum: ['P0', 'P1', 'P2'], description: '事故等级：P0 生产不可用 / P1 主要功能受损 / P2 一般问题（默认 P2）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const severity =
+          args.severity === 'P0' || args.severity === 'P1' || args.severity === 'P2' ? args.severity : undefined
+        const result = await selfPause(engine, {
+          reason: String(args.reason),
+          ...(severity !== undefined ? { severity } : {}),
+        })
+        runtime.emit()
+        const incident = result.incident
+        const lines = [
+          result.message,
+          `事故 id：${incident.id}（${incident.severity}）｜${incident.reason}`,
+          '已暂停本项目写操作（项目级，by=agent，autoRearm=true）：agent 不能自行恢复。',
+          '恢复方式：负责人 /flow on，或下次宿主启动（hostEpoch 变化）自动恢复。',
+          '恢复后请补审计：flow_incident_close({ summary, tests?, files?, commit? })。',
+        ]
+        return ok(lines.join('\n'), {
+          incident: {
+            id: incident.id,
+            severity: incident.severity,
+            reason: incident.reason,
+            openedAt: incident.openedAt,
+            openedBy: incident.openedBy,
+          },
+          paused: true,
+          rearm: { by: 'agent', autoRearm: true, humanCommand: '/flow on' },
+        })
+      },
+    }),
+  )
+
+  // 20) flow_incident_close ---------------------------------------------
+  tools.push(
+    defineHostTool({
+      name: 'flow_incident_close',
+      description:
+        '关闭事故并补审计（flow_self_pause 之后）：写摘要/提交/验证/涉及文件，清理项目级事故标记。负责人 /flow on 恢复后调用；写操作已恢复时也可调用以补闭环。',
+      parameters: {
+        summary: { type: 'string', required: true, description: '事故摘要：根因、处理过程、最终结论' },
+        commit: { type: 'string', description: '关联修复提交 SHA（可选）' },
+        tests: { type: 'string', description: '验证命令或证据摘要（可选，自由文本）' },
+        files: { type: 'array', items: { type: 'string' }, description: '本次事故涉及/改动的主要文件（可选）' },
+      },
+      execute: async (args) => {
+        const engine = await requireEngine(runtime)
+        const files = toStringArray(args.files)
+        const result = await closeIncident(engine, {
+          summary: String(args.summary),
+          ...(typeof args.commit === 'string' && args.commit !== '' ? { commit: args.commit } : {}),
+          ...(typeof args.tests === 'string' && args.tests !== '' ? { tests: args.tests } : {}),
+          ...(files.length > 0 ? { files } : {}),
+        })
+        runtime.emit()
+        const incident = result.incident
+        const lines = [
+          result.message,
+          `事故 ${incident.id}（${incident.severity}）已关闭${incident.closedAt ? `（${incident.closedAt}）` : ''}。`,
+          `摘要：${incident.summary ?? ''}`,
+          ...(incident.tests !== undefined ? [`验证：${incident.tests}`] : []),
+          ...(incident.files !== undefined && incident.files.length > 0 ? [`涉及文件：${incident.files.join('、')}`] : []),
+          ...(incident.commit !== undefined && incident.commit !== null ? [`提交：${incident.commit}`] : []),
+        ]
+        return ok(lines.join('\n'), {
+          id: incident.id,
+          severity: incident.severity,
+          closedAt: incident.closedAt,
+          summary: incident.summary,
+          commit: incident.commit ?? null,
+          tests: incident.tests,
+          files: incident.files ?? [],
+        })
+      },
+    }),
+  )
+
   // 14) flow_diff -------------------------------------------------------
   tools.push(
     defineHostTool({
@@ -700,6 +974,11 @@ export const FLOW_TOOL_NAMES = [
   'flow_submit_analysis',
   'flow_diff',
   'flow_declare_rework',
+  'flow_fix_start',
+  'flow_fix_done',
+  'flow_fix_abort',
+  'flow_self_pause',
+  'flow_incident_close',
 ] as const
 
 /** 参数 schema 自检（测试用）。 */

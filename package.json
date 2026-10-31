@@ -65,6 +65,8 @@
     "verify:compat": "node scripts/verify-dsh-compat.mjs",
     "verify:client": "node scripts/verify-client-bundle.mjs",
     "verify:uninstall": "node scripts/verify-uninstall.mjs",
+    "verify:host": "node scripts/smoke-host.mjs",
+    "host:recover": "node scripts/host-recover.mjs",
     "measure:startup": "node scripts/measure-startup.mjs",
     "eval:collate": "node scripts/collate-evaluation.mjs"
   },

@@ -13,6 +13,8 @@
  */
 import type { DshContentBlock, DshToolDefinition } from '../adapters/dsh-types.js'
 import { toAgentError } from '../errors.js'
+// 工具结果的 lossless JSON 清洗统一走 host 边界（P0-1）：本文件不再定义本地 helper。
+import { toLosslessValue } from '../boundary/json.js'
 
 export type ParamType = 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'
 
@@ -104,21 +106,6 @@ function matchesType(value: unknown, spec: ParamSpec): boolean {
   }
 }
 
-/**
- * Tool result values must be *losslessly JSON* (DSH validates the runtime value
- * before content rendering; `undefined` object properties/class instances make
- * it fail with 'value is not lossless JSON'). Round-trip through JSON to drop
- * everything JSON cannot represent exactly.
- */
-export function toLosslessJson<T>(value: T): unknown {
-  if (value === undefined) return null
-  try {
-    return JSON.parse(JSON.stringify(value)) as unknown
-  } catch {
-    return null
-  }
-}
-
 /** 渲染工具结果：模型看到 summary + 结构化 data（紧凑 JSON）。 */
 function renderValue(_args: unknown, value: unknown): DshContentBlock[] {
   const result = value as HostToolValue
@@ -193,10 +180,10 @@ export function defineHostTool(options: DefineHostToolOptions): DshToolDefinitio
           agentId: exec?.agent?.id !== undefined ? String(exec.agent.id) : undefined,
           toolCallId: exec?.callId !== undefined ? String(exec.callId) : undefined,
         })
-        return toLosslessJson(value) as HostToolValue
+        return toLosslessValue(value) as HostToolValue
       } catch (error) {
         const info = toAgentError(error)
-        return toLosslessJson({
+        return toLosslessValue({
           ok: false,
           summary: `${info.error}${info.hint ? `。提示：${info.hint}` : ''}`,
           data: { error: info.error, hint: info.hint, ...(info.code ? { code: info.code } : {}) },

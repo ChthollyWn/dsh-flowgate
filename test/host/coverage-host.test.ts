@@ -31,15 +31,8 @@ import {
   toRepoRelative,
 } from '../../src/host/adapters/windows-path'
 import { buildMergedConfirm, renderConfirmCardText, toGatePanelConfirm } from '../../src/host/gates/merged'
-import {
-  defineHostTool,
-  fail,
-  ok,
-  toJsonSchema,
-  toLosslessJson,
-  validValuesOf,
-  validateArgs,
-} from '../../src/host/tools/schema'
+import { defineHostTool, fail, ok, toJsonSchema, validValuesOf, validateArgs } from '../../src/host/tools/schema'
+import { toLosslessValue } from '../../src/host/boundary/json'
 import { runInit } from '../../src/host/init/index'
 import {
   captureTaskStartSnapshot,
@@ -241,12 +234,12 @@ describe('host/tools/schema — 声明 DSL 与参数校验', () => {
     expect(validateArgs(specs, { name: 'a', obj: { k: 'v' }, bareObj: {} })).toEqual([])
   })
 
-  it('toLosslessJson / validValuesOf / ok / fail', () => {
-    expect(toLosslessJson(undefined)).toBeNull()
+  it('toLosslessValue / validValuesOf / ok / fail', () => {
+    expect(toLosslessValue(undefined)).toBeNull()
     const circular: Record<string, unknown> = {}
     circular['self'] = circular
-    expect(toLosslessJson(circular)).toBeNull()
-    expect(toLosslessJson({ a: undefined, b: 1 })).toEqual({ b: 1 })
+    expect(toLosslessValue(circular)).toBeNull()
+    expect(toLosslessValue({ a: undefined, b: 1 })).toEqual({ b: 1 })
     expect(validValuesOf(specs)).toEqual({ name: ['a', 'b'] })
     expect(ok('summary')).toEqual({ ok: true, summary: 'summary' })
     expect(ok('summary', { x: 1 })).toEqual({ ok: true, summary: 'summary', data: { x: 1 } })

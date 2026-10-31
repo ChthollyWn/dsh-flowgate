@@ -28,9 +28,11 @@ import {
   makeIdleProjection,
   makeLockedProjection,
   makeLowComplexityProjection,
+  makeObserveProjection,
   makeOffProjection,
   makePendingProjection,
   makeProjection,
+  makeRepairProjection,
   makeSnapshot,
 } from './mock'
 
@@ -517,5 +519,81 @@ describe('trialRuleLocal (FR-9.4 fallback)', () => {
         'R-CUSTOM',
       ])
     })
+  })
+})
+
+describe('修复通道 / 接管模式（v0.6 客户端契约）', () => {
+  it('runs the repair lane as a first-class dock state', () => {
+    const snapshot = makeRepairProjection().snapshot
+    expect(dockStateOf(snapshot)).toBe('repair')
+    const model = buildDockModel(makeRepairProjection(), zh)
+    expect(model.state).toBe('repair')
+    expect(model.tone).toBe('active')
+    expect(model.repair?.id).toBe('FIX-20261101-031500')
+    expect(model.repair?.red).toBe(true)
+    expect(model.repair?.green).toBe(false)
+    // 修复车道不产生人工门授权卡（不需要 G1/G3 文档与确认）。
+    expect(model.card).toBeUndefined()
+    expect(model.next?.text).toContain('FIX-20261101-031500')
+    expect(model.next?.text).toContain('已取得')
+    expect(model.next?.text).toContain('待验证')
+  })
+
+  it('keeps the change lane untouched when no repair is active', () => {
+    // engine 拒绝在修复通道 open 时新建变更，两者不会同时出现；
+    // 没有 repair 时七阶段变更车道的既有状态机不受影响。
+    expect(dockStateOf(makeProjection().snapshot)).toBe('awaiting')
+  })
+
+  it('exposes observe/paused/incident state for self-hosting and tool-down recovery', () => {
+    const model = buildDockModel(makeObserveProjection(), zh)
+    expect(model.takeover).toBe('observe')
+    expect(model.offBy).toBe('agent')
+    expect(model.incident?.id).toBe('INC-20261101-031000')
+    expect(model.repair).toBeUndefined()
+  })
+
+  it('coerces the new optional snapshot fields and drops junk', () => {
+    const good = normalizeProjection({
+      snapshot: {
+        initialized: true,
+        updatedAt: '2026-11-01T03:15:00+08:00',
+        offBy: 'agent',
+        takeover: 'observe',
+        incident: { id: 'INC-1', severity: 'P0', reason: '新建会话失败', openedAt: '2026-11-01T03:10:00+08:00' },
+        repair: {
+          id: 'FIX-1',
+          title: '修 lossless',
+          severity: 'P2',
+          scope: ['src/host/**', 42],
+          verify: 'pnpm test',
+          red: true,
+          green: true,
+          openedAt: '2026-11-01T03:15:00+08:00',
+          actions: 3,
+        },
+      },
+    })
+    expect(good?.snapshot.offBy).toBe('agent')
+    expect(good?.snapshot.takeover).toBe('observe')
+    expect(good?.snapshot.incident?.id).toBe('INC-1')
+    expect(good?.snapshot.repair?.scope).toEqual(['src/host/**'])
+    expect(good?.snapshot.repair?.green).toBe(true)
+    expect(good?.snapshot.repair?.actions).toBe(3)
+
+    const junk = normalizeProjection({
+      snapshot: {
+        initialized: true,
+        updatedAt: 'x',
+        offBy: 'owner',
+        takeover: 'maybe',
+        incident: { id: 7 },
+        repair: { id: 2 },
+      },
+    })
+    expect(junk?.snapshot.offBy).toBeUndefined()
+    expect(junk?.snapshot.takeover).toBeUndefined()
+    expect(junk?.snapshot.incident).toBeUndefined()
+    expect(junk?.snapshot.repair).toBeUndefined()
   })
 })

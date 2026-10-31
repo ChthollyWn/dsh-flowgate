@@ -58,7 +58,15 @@ Process level has two independent dimensions: **complexity** (low / medium / hig
 - **Evidence:** verification is executed by the plugin (`flow_verify`), producing receipts with command, exit code, test counts, and input hashes. Receipts expire when inputs change. "It passed on my machine" does not count.
 - **Delivery:** G1 / G3 / G6 are human gates. The agent has no tool to approve, override, or lower a level; pushes and PR creation can only happen after G6 and only when the owner triggers them.
 
-## Quick start (isolated profile)
+## Quick start (dual profiles: daily desktop / dev flowgate-dev / dogfood)
+
+**Do not `link:` a workspace source checkout into your daily `desktop` profile** (lesson from the v0.5.1 incident: a broken build instantly pollutes daily use, and recovery actions may be blocked by the broken plugin). Since v0.6, use the three profiles described in [docs/impl/dev-loop.md](docs/impl/dev-loop.md):
+
+| profile | Install from | Purpose |
+|---|---|---|
+| `desktop` (daily) | published npm version (`dsh-flowgate@<known-good>`) | Daily use; keep the previous known-good version for a fast rollback |
+| `flowgate-dev` | `link:<repo>` | Source development / local E2E (`pnpm verify:host`) |
+| `flowgate-dogfood` | `pnpm pack` → `file:<tgz>` | Govern FlowGate's own development; upgrade only after `verify:host` passes |
 
 During development and trial installs, use an isolated profile — do not install into your daily `desktop` profile. Create an isolated development profile first:
 
@@ -72,7 +80,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 # 2a. Install the published version from npm (recommended)
 "$DSH" plugin --profile flowgate-dev add dsh-flowgate@0.1.0
 
-# 2b. Or link: a source checkout during development (run pnpm install && pnpm build first)
+# 2b. Or link: a source checkout during development (isolated dev profile only; run pnpm install && pnpm build first)
 "$DSH" plugin --profile flowgate-dev add link:/path/to/dsh-flowgate
 
 # 3. Confirm the plugin line exists in the composition tree
@@ -102,6 +110,8 @@ Day to day you only need **natural language and clicks** — every decision that
 - **Click-to-authorize:** approve / reject / clear breaker / confirm external changes are all executed by the card button (`ctx.remote.commands.execute`) — **nothing is written into the composer**, and you never press Enter to confirm a command.
 - **Question cards:** questions use the native `ask_user_question` tool, rendered as DSH question cards (options + custom text); the agent is told not to ask in plain prose.
 - **In-conversation visualization:** every `flow_*` tool call renders as a mini seven-stage rail, showing where that call sits in the pipeline.
+- **Bug fixes need no change proposal (v0.6 repair lane):** for a known-bad behavior, just say "fix this bug: <symptom>". The agent calls `flow_fix_start` (declaring symptom, allowed scope, and verify command) → reproduce for RED → iterate freely inside scope → GREEN → full regression → auto-archive under `.flowgate/fixes/`. No seven-stage documents and no human gates, but the evidence chain is unchanged; new features/requirement changes still use the change lane. See [docs/impl/repair-lane.md](docs/impl/repair-lane.md).
+- **Self-rescue first (v0.6):** if the plugin breaks the host, do not uninstall it — run `pnpm host:recover --safe-mode --reason "<symptom>"`; after a restart the plugin enters **safe mode (takeover=off, no blocking at all, guard and related modules skipped)**. Fix it, confirm with `pnpm verify:host`, then `--clear`. See [docs/impl/host-recovery.md](docs/impl/host-recovery.md).
 
 > Projects that never ran `/flow init` are **not** gated; the dock shows a one-click enable card (FR-15.1).
 >
@@ -125,6 +135,8 @@ Day to day you only need **natural language and clicks** — every decision that
 | `/flow board` | Open the cross-session `dashboard.html` board |
 | `/flow parallel <n>` | Change the parallel limit (affects future batches only) |
 | `/flow route <full\|standard\|fast> <reason>` | Owner override of the auto-flow route (fast still limited to low complexity × normal risk) |
+| `/flow fix [status\|done\|abort <reason>]` | Repair lane: status / close (validates RED→GREEN, scope, full regression) / abort; `/flow repair` (rebuild state from the ledger) keeps its old meaning |
+| `/flow incident` | Show unclosed incident records (after agent `flow_self_pause`); close them with `flow_incident_close` for audit |
 | `/flow allow-once <rule id or last> <reason>` | One-time override (`OV-n`, applies to the next matching action only) |
 | `/flow scope approve\|reject <SC-n> [reason]` | Handle scope-change requests |
 | `/flow risk approve\|reject <RK-n> [reason]` | Handle risk take-over items |
@@ -138,6 +150,8 @@ Day to day you only need **natural language and clicks** — every decision that
 | `/flow off` / `/flow on` | Turn gating off / on for this session (recorded; the dock turns red and offers a recovery card when off) |
 
 ## Model tools (no approve, override, or lower-level tools)
+
+**21 tools** are registered: 20 `flow_*` tools plus `flow_dispatch_next` (dispatch mode only). The repair-lane and incident tools are included; **none of them can approve, allow, or lower a level** (only the owner can do that via `/flow` commands or authorization cards).
 
 | Tool | When | Notes |
 |---|---|---|
@@ -156,6 +170,12 @@ Day to day you only need **natural language and clicks** — every decision that
 | `flow_investigate` | Analysis tasks, S1–S2 | Spawn read-only investigation subagents (default max 2) returning cited reports |
 | `flow_submit_analysis` | Analysis tasks | Submit conclusion, proposal, limitations, and source citations; the plugin verifies citations before archiving |
 | `flow_diff` | Review subagents only | Read-only diff of the task under review |
+| `flow_declare_rework` | S4–S6 on defects/requirement changes | Rework declaration: invalidates affected tasks' receipts and reviews by type (defects propagate along depends_on) |
+| `flow_fix_start` | Bug fixing (no active change) | **Repair lane:** declare title/symptom/scope/verify/acceptance/severity and get a `FIX-id`; iterate freely inside scope with no change proposal or human gate, but RED→GREEN evidence is mandatory |
+| `flow_fix_done` | After the fix | Close-out checks: RED/GREEN order, every `git status` change inside scope, `config.commands.test` full regression, re-run of the declared verify, fresh receipts; failure keeps the lane open |
+| `flow_fix_abort` | Abandon the fix | Requires a reason; logs `repair.aborted` and clears the in-progress declaration |
+| `flow_self_pause` | Cannot continue safely / owner decision needed | Agent self-pause: project-level write pause + `INC-id` incident record (`autoRearm`; recovers automatically on the next host start; the agent cannot resume by itself) |
+| `flow_incident_close` | After recovery | Write summary/commit/tests/files, archive `.flowgate/incidents/<INC-id>.json`, clear the incident marker |
 
 ## Rule reference
 
@@ -226,6 +246,10 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 | Graphical flow visualization (input dock / panel flow page / in-conversation tool rail) | ✅ 2026-11-01 v0.2: the input dock became a seven-stage animated rail + next-step chip + graphical state card (demo/locked/off/idle/active/awaiting/pending/blocked); the sidebar gained a `panel-rail` and a graphical flow page (hero progress ring, vertical timeline, human/auto gate badges, "you are here", next-step callout); each `flow_*` tool call renders a mini seven-stage rail; motion only animates transform/opacity/stroke and respects `prefers-reduced-motion`; **cards and panels use DSH's native `--dsw-*` design tokens, the authorization card mirrors the native plan-approval card (warn strip + white card + primary/outline buttons), and widths strictly match `--dsh-chat-content-width` (real-host measurement: dock/card 844.8px, ±0px)**; real-host screenshots in [docs/screenshots](docs/screenshots/README.md) |
 | Card-first interaction (click-to-authorize + native question cards) | ✅ 2026-11-01 v0.2: human gates / pending items (SC·RK·PC·RL·TM·CF·BL) / non-agent change confirmation / enable / repair are all clickable authorization cards; a click executes the equivalent command through `ctx.remote.commands.execute` (`sessions.binding().session.command` as fallback) and **the composer is never filled**; the FlowGate preset composes the native `ask_user_question` tool for question cards; user-facing `/flow` hints in host/core were rewritten as card guidance (only help / usage errors / doctor diagnostics remain); real-host click flow in [docs/screenshots](docs/screenshots/README.md) |
 | Full FlowGate takeover + auto-flow routing + auto-review | ✅ v0.5 (2026-11-01): once enabled, writes/mutating shell without an active change are denied by `R-NO-CHANGE` (reads and `flow_*` allowed) — every change must start with a change record. The model self-assesses size/clarity in `flow_new_change.assessment` and proposes a `route`: `full` (all human gates), `standard` (G1+G3 merged into one confirmation), `fast` (low complexity + clear/verifiable: G1/G3/G6 auto-pass after checks, through delivery). A deterministic host auto-review independently enforces safety: high risk/complex/sensitive surfaces force full; fast requires clear + ≥2 acceptance items + valid verify command + 1–5 scope entries; the owner can override with `/flow route ...`. Audit events `flow.assessed` / `flow.route_override`; the dock/panel show an auto-flow badge |
+| **Repair lane (bug fixing as a first-class citizen, v0.6)** | ✅ 2026-11-01: `flow_fix_start/done/abort` + `/flow fix`; FIX-id declares scope (1–20), verify and symptom → RED (`flow_verify` failure receipt) → free iteration in scope → GREEN → full regression → auto-archive `.flowgate/fixes/<FIX-id>.json` + `index.md` + ledger `repair.*`; guards `R-FIX-SCOPE`/`R-FIX-SHELL`/`R-FIX-TOOL`; no human gates, no seven-stage documents; contract and limits in [repair-lane.md](docs/impl/repair-lane.md) |
+| **Self-healing and recovery (v0.6)** | ✅ 2026-11-01: safe-mode sentinel (`$DSH_HOME/flowgate/safe-mode` + project-level + `FLOWGATE_SAFE`) → forces takeover=off and skips guard/delegation/gates/dispatch; module switches `FLOWGATE_DISABLE`/`config.modules`; self-host repository defaults to observe (**only `R-NO-CHANGE` unplanned writes are allowed and recorded; stage/scope/protected-path/repair-scope rules still block**); `pnpm host:recover` (`--status/--safe-mode/--clear/--profile <p> --remove [--yes]`, audits to `recovery.log`, never deletes project data); agent self-pause/incident records (`flow_self_pause`/`flow_incident_close`, `INC-id`); see [host-recovery.md](docs/impl/host-recovery.md) |
+| **Real-host regression gate `pnpm verify:host` (v0.6)** | ✅ 2026-11-01: isolated `DSH_HOME` + real DSH web host + `link:` this repo, **creates ≥2 (default 3) sessions in a row** and asserts no `not lossless JSON` — the only reliable regression gate for the v0.5.1 incident (a single session misses it); fixed build 3/3 GREEN, a neutralized pre-fix build fails at the 2nd/3rd creation (validated via `--expect-fail`). See [docs/compat/host-smoke.md](docs/compat/host-smoke.md) |
+| **Explicit projection wire DTO + self-check + budget (v0.6)** | ✅ 2026-11-01: `src/host/boundary/json.ts` mirrors DSH lossless rules (undefined/NaN/negative zero/sparse arrays/class instances…); `wire.ts` explicit allow-list DTO + count limits + a 256KiB per-frame budget with a degradation order; `projectionSelfCheck()` before registration (a failing projection is not registered); `stateVersion=2`; measurements in [projection-budget.md](docs/impl/projection-budget.md) |
 | Learning mode / stage learning cards (removed) | 🗑 Removed in v0.4 at the owner's request: the panel's learning-mode selector, stage learning cards (what/why/method source/anti-patterns/examples), glossary, the `/flow learn` command, the `learning` config and projection field; a legacy `learning:` key in `.flowgate/config.yaml` is ignored on load. Live gate checks and artifact chips remain. |
 | Runtime visualization: subagent topology (workflow graph / tree) + background job list | ✅ 2026-11-01 v0.3: two new panel views. The subagent view reads the native DSH `subagentCatalog` session projection plus live running state and joins it with FlowGate tasks/batches/worktrees, offering **workflow graph (top-down, measured 0 horizontal overflow at 560/719px sidebar widths) / tree** modes; the jobs view reuses the native DSH `ctx.jobs` service to show status, **exit code**, duration, **live output** (streamed on expand) and **two-step force termination**; all styling uses native `--dsw-*` tokens/neutral colors. Limitation: real-host populated data needs a model run — the real host only verified empty states/composition (22/22), so 34–36 are component-level fixtures, labelled as such. |
 | 10-view right sidebar panel (ledger/flow/gates/tasks/agents/jobs/trace/risk/intercepts/metrics) | ✅ walked through in a real DSH web host: 10 views, in-session preset switch, panel approvals, pending decisions, exception list/revoke, non-agent change confirmation; context occupancy (`contextPct`) wired to the DSH token-meter projection (shown ≥60%); stale GREEN detected by input hash; execution-graph nodes are clickable with a task-detail panel; rule trial is a client-side approximation explicitly labelled "host decision is authoritative"; intercept-view misjudgement feedback verified at component level |
@@ -243,7 +267,18 @@ Every skill ships a `SKILL.md` (when to use, executable steps, what code enforce
 
 **v0.5 (2026-11-01, auto-flow takeover + auto-review):** `R-NO-CHANGE` takes over unplanned writes; `flow_new_change.assessment` self-assessment + host auto-review selects full/standard/fast; fast auto-passes G1/G3/G6 after checks and delivers/archives, standard merges G1+G3 into one human confirmation; new `/flow route` owner override. Verification: lint green; 119 files / 1687 tests (8 auto-review rule classes + fast/standard state-machine integration); coverage 86.18 / 76.23 / 86.88 / 89.27 (thresholds pass); build (host 1.23MB / client 369.4KB); verify:package (39 files / 1079.2KB) / verify:client green; zero-model real-host E2E: auto-flow badge 7/7 (dock + panel, `data-route=fast`) + v0.4 regression 14/14, 0 pageerror/console.error/model requests (see docs/impl/auto-flow.md).
 
-**v0.5.1 (2026-11-01, fix new-session failure):** the `flowgate` session projection wire value contained `undefined` fields; DSH's `api-session/added` lossless-JSON assertion rejected it, so creating a new session/subagent failed with `forwarded host event "api-session/added" argument 0 is not lossless JSON data`. Fixed by sanitizing at the projection boundary (`toLosslessJson()` in `init()` + `wire.view()`) plus regression tests; isolated-host reproduction shows the old build fails `session/create` while the fixed build returns `ok:true` (zero model requests). Verification: lint green; 119 files / 1689 tests; coverage 86.18/76.23/86.88/89.26; build host 1.23MB / client 383.4KB; verify:package 39 files/1080.6KB; verify:client 18 slots pass.
+**v0.6 (2026-11-01, repair lane + self-healing/recovery + verify:host) integrated verification:** lint/tsc pass (148 source files, 0 error); `npx vitest run` **129 files / 1849 tests** green; `pnpm coverage` **86.50 / 76.45 / 87.41 / 89.63** (thresholds pass); `pnpm build` host **1.34MB** / client **375.2KB**; `verify:package` **39 files / 1172.6KB**; `verify:client` **18 slots + 1 right-rail tab** pass; `verify:uninstall` pass; `measure:startup` **about +16ms** (15.3–17.3ms across runs, <200ms; see [docs/compat/startup.md](docs/compat/startup.md) for the measurement); `verify:compat` passed **13/13** (isolated `DSH_HOME`, `--dump-config` 1316 lines; still rerun per the release checklist on a machine with DSH). Real-host evidence: `pnpm verify:host` **creates 3 sessions in a row successfully** (isolated web host ready in 0.8s, about 0.02s/session, no lossless errors); a neutralized pre-fix build reproduces `not lossless JSON` at the 2nd/3rd creation (gate proven effective), see [docs/compat/host-smoke.md](docs/compat/host-smoke.md). Safety/recovery: `host:recover`, safe-mode, module switches, observe mode, repair lane, and incident records are all in place (see the table and docs/impl).
+
+**v0.5.1 (2026-11-01, fix new-session failure):** the `flowgate` session projection wire value contained `undefined` fields; DSH's `api-session/added` lossless-JSON assertion rejected it, so creating a new session/subagent failed with `forwarded host event "api-session/added" argument 0 is not lossless JSON data`. Fixed by sanitizing at the projection boundary (`toLosslessJson()` in `init()` + `wire.view()`) plus regression tests; isolated-host reproduction shows the old build fails from the **2nd consecutive new session** while the fixed build returns `ok:true` (zero model requests; since v0.6, `pnpm verify:host` creating ≥2 sessions in a row is the regression gate). Verification: lint green; 119 files / 1689 tests; coverage 86.18/76.23/86.88/89.26; build host 1.23MB / client 383.4KB; verify:package 39 files/1080.6KB; verify:client 18 slots pass.
+
+## Known limitations (v0.6)
+
+- **Repair-lane scope is declared by the initiator** (1–20 paths/globs), not inferred; close-out compares it against the full `git status --untracked-files=all`, so **unrelated uncommitted changes present before opening the lane are rejected as out of scope** — commit/stash them first.
+- **The repair-lane shell policy is governance, not a sandbox**: shape-based allow-list for test/build/lint/run and read-only/commit git commands, backed by the close-out scope check and full regression; use host sandboxing/containers for strong isolation.
+- **observe only relaxes unplanned writes** (`R-NO-CHANGE`); stage/scope/protected-path rules still block when a change is active. **safe-mode is the only fully non-blocking mode**, it requires a restart, and you should not rely on gates while recovering.
+- **`pnpm verify:host` needs a local DSH desktop install**: GitHub Actions runners have no DSH, so CI does not run it; the release checklist requires running it on a machine with DSH (see [docs/release/v0.1.0.md](docs/release/v0.1.0.md)).
+- **Projection wire size**: panel blocks have count limits and a 256KiB per-frame budget, but an extreme `snapshot` can still exceed it; on-demand panel fetching (remote) is future work (see [projection-budget.md](docs/impl/projection-budget.md)).
+- Desktop (Electron window) walkthroughs are still manual; real-host E2E evidence is web-host based ([docs/compat/host-smoke.md](docs/compat/host-smoke.md), [docs/screenshots](docs/screenshots/README.md)).
 
 ## Screenshots
 
@@ -272,7 +307,10 @@ Historical screenshots of the pre-v0.2 text status line and the 8-view panel rem
 ## FAQ
 
 **Can it lock me out?**
-No dead ends: `/flow allow-once`, "add exception" in the panel, `/flow off` (recorded and counted in metrics), `/flow doctor`, and `/flow repair` (rebuild state from the ledger and artifacts). During development use an isolated profile so the worst case is recreating that profile.
+No dead ends: `/flow allow-once`, "add exception" in the panel, `/flow off` (recorded and counted in metrics), `/flow doctor`, and `/flow repair` (rebuild state from the ledger and artifacts). **If the plugin itself is broken (v0.6):** `pnpm host:recover --safe-mode` writes a sentinel → after a restart the plugin degrades to non-blocking (no uninstall needed); fix it, confirm with `pnpm verify:host`, then `--clear`. Keep `desktop` on stable releases, develop in an isolated `flowgate-dev`, dogfood from a packed tgz; the worst case is rolling back the tgz or recreating the dev profile (see [host-recovery.md](docs/impl/host-recovery.md), [dev-loop.md](docs/impl/dev-loop.md)).
+
+**Do bug fixes need a change proposal?**
+No (since v0.6). Known bugs / incident regressions use the **repair lane**: the agent calls `flow_fix_start` with the symptom, allowed scope, and verify command, reproduces for RED evidence, fixes freely inside the scope, then turns the verify command GREEN and runs the full regression before auto-archiving. No seven-stage documents or human gates, but writes outside the scope are rejected by `R-FIX-SCOPE`, dangerous commands by `R-FIX-SHELL`, and the evidence chain is not weakened. New features / requirement changes still use the change lane (fast route can accelerate it).
 
 **What about false positives?**
 There is a feedback loop: mark an interception as a false positive in the panel → allow once / add an exception (with a reason, revocable) / export evidence. The target is a false-positive rate (M-5) ≤ 5%; rules above that are downgraded to warnings and go into the retro (only after ≥ 20 intercepts; the downgrade allows that one action, logs `rule.hinted`, and enters the retro).
@@ -312,6 +350,9 @@ pnpm verify:package   # inspect the npm tarball (no host core packages; lib/ + s
 pnpm verify:client    # offline check of the browser bundle protocol + slot registrations
 pnpm verify:compat    # compose/import the plugin in an isolated DSH_HOME (never the daily profile)
 pnpm verify:uninstall # isolated-profile install/uninstall cleanliness (never the daily profile)
+pnpm verify:host      # ★ real-host gate: isolated DSH host, creates sessions in a row, asserts no not-lossless-JSON
+pnpm host:recover     # recovery CLI: --status / --safe-mode / --clear / --profile <p> --remove [--yes]
+                      # (see --help; only writes the sentinel and audit log, never deletes project data)
 pnpm measure:startup  # host entry module-load overhead (T6.2, target <200ms)
 ```
 

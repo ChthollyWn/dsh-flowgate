@@ -102,6 +102,82 @@ export interface FlowPlan {
   assessedBy: 'auto-review' | 'owner-override'
 }
 
+// ---------------------------------------------------------------------------
+// Takeover mode, repair lane and incident records (v0.5.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * FlowGate 接管模式：
+ * - `enforce`：完全接管，未立项的仓库改动一律拒绝（默认）。
+ * - `observe`：只观察不拦截——记录一次 `takeover.observed` 并提示，动作放行。
+ * - `off`：不拦截、不记录（与负责人手动暂停的区别：不改写 flags、不出现在面板）。
+ */
+export type TakeoverMode = 'enforce' | 'observe' | 'off'
+
+/** 执行者：human=负责人；agent=模型/agent（自暂停、修复通道默认发起者）。 */
+export type EnforcerKind = 'human' | 'agent'
+
+/** 修复优先级：P0 生产不可用 / P1 主要功能受损 / P2 一般缺陷。 */
+export type RepairSeverity = 'P0' | 'P1' | 'P2'
+
+/**
+ * 修复通道记录（v0.5.1）：一次声明、在声明范围内自由迭代、用 RED→GREEN 关门。
+ *
+ * 与 ChangeStatus 的区别：修复通道不产生 C-xxx 变更、不需要七阶段与 G1/G3 文档、
+ * 不逐动作等人工；完成后落 `.flowgate/fixes/<id>.json` + 账本审计。
+ */
+export interface RepairRecord {
+  id: string
+  title: string
+  symptom: string
+  repro?: string
+  /** 允许改动的仓库相对路径/glob（≤20），修复动作只允许命中这里。 */
+  scope: string[]
+  /** 声明的验证命令（形状受 validateVerifyCommand 约束）。 */
+  verify: string
+  acceptance: string[]
+  severity: RepairSeverity
+  status: 'open' | 'done' | 'aborted'
+  openedAt: string
+  openedBy: EnforcerKind
+  /** 修复通道内被放行的写动作次数（scope 命中才计数）。 */
+  actions: number
+  redEvidenceId?: string
+  greenEvidenceId?: string
+  regressionEvidenceId?: string
+  changedFiles?: string[]
+  commit?: string | null
+  closedAt?: string
+  abortReason?: string
+  summary?: string
+}
+
+/** 事故记录（v0.5.1）：agent 自暂停时创建，关闭时补摘要与证据并归档。 */
+export interface IncidentRecord {
+  id: string
+  severity: RepairSeverity
+  reason: string
+  openedAt: string
+  openedBy: EnforcerKind
+  closedAt?: string
+  summary?: string
+  commit?: string | null
+  tests?: string
+  files?: string[]
+}
+
+/**
+ * 项目级运行开关（`.flowgate/state/flags.json`）。
+ *
+ * - `off`：门禁暂停（写操作放行）。负责人手动暂停 by='human'；agent 自暂停
+ *   by='agent' + autoRearm，宿主重启（hostEpoch 变化）时自动恢复。
+ * - `incident`：未关闭的事故记录；`closeIncident` 补齐审计后清除。
+ */
+export interface ProjectFlags {
+  off?: { by: EnforcerKind; reason: string; at: string; autoRearm?: boolean; hostEpoch?: string }
+  incident?: IncidentRecord
+}
+
 export type PendingKind =
   | 'risk'
   | 'scope'
@@ -1127,6 +1203,16 @@ export type LedgerEventType =
   | 'review.waived'
   | 'rework.declared'
   | 'tamper.cleared'
+  // v0.5.1：接管模式观察、项目级暂停、事故记录与修复通道（修复是一等公民）。
+  | 'takeover.observed'
+  | 'flow.project_off'
+  | 'flow.project_on'
+  | 'incident.open'
+  | 'incident.close'
+  | 'repair.started'
+  | 'repair.evidence'
+  | 'repair.done'
+  | 'repair.aborted'
 
 export interface LedgerEvent {
   seq: number
@@ -1200,6 +1286,31 @@ export interface RuntimeSnapshot {
   /** 生效中的规则例外（面板可撤销）。 */
   exceptions?: ExceptionRecord[]
   off: boolean
+  /**
+   * 谁暂停了门禁（v0.5.1）：human=负责人手动；agent=agent 自暂停（事故）。
+   * 仅在 `off === true` 时出现。
+   */
+  offBy?: EnforcerKind
+  /** 接管模式（v0.5.1）：enforce / observe / off。新引擎恒填。 */
+  takeover?: TakeoverMode
+  /** 未关闭的事故记录摘要（自暂停时创建，closeIncident 后消失）。 */
+  incident?: { id: string; severity: RepairSeverity; reason: string; openedAt: string }
+  /**
+   * 修复通道进行中的声明（无活动变更时可见）：面板可显示 RED/GREEN 进度与
+   * 已放行动作数。修复完成/中止后消失，审计留在 `.flowgate/fixes/`。
+   */
+  repair?: {
+    id: string
+    title: string
+    severity: RepairSeverity
+    status: 'open'
+    scope: string[]
+    verify: string
+    red: boolean
+    green: boolean
+    openedAt: string
+    actions: number
+  }
   locked: boolean
   interceptCounts: Record<string, number>
   coverage?: CoverageReport

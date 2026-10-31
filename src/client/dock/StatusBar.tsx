@@ -313,6 +313,40 @@ export function DockView({ model, t, onAction, onOpen, busy = false, notice }: D
             {...(openPanel !== undefined ? { onSelectStage: () => openPanel() } : {})}
           />
           <span style={{ flex: '1 1 auto', minWidth: 4 }} />
+          {model.repair !== undefined ? (
+            <span
+              data-flowgate="dock-repair"
+              data-fix-id={model.repair.id}
+              data-red={model.repair.red ? 'true' : 'false'}
+              data-green={model.repair.green ? 'true' : 'false'}
+              data-severity={model.repair.severity}
+              className="fg-dock-route"
+              title={`${model.repair.title} · ${model.repair.verify}`}
+            >
+              {t('dock.repair.badge', { id: model.repair.id })}
+            </span>
+          ) : null}
+          {model.takeover === 'observe' ? (
+            <span data-flowgate="dock-mode" data-mode="observe" className="fg-dock-change">
+              {t('dock.mode.observe')}
+            </span>
+          ) : null}
+          {model.offBy === 'agent' ? (
+            <span data-flowgate="dock-off-by" data-by="agent" className="fg-dock-change">
+              {t('dock.offBy.agent')}
+            </span>
+          ) : null}
+          {model.incident !== undefined ? (
+            <span
+              data-flowgate="dock-incident"
+              data-incident-id={model.incident.id}
+              data-severity={model.incident.severity}
+              className="fg-dock-change"
+              title={model.incident.reason}
+            >
+              {t('dock.incident.badge', { id: model.incident.id })}
+            </span>
+          ) : null}
           {model.flowPlan !== undefined ? (
             <span
               data-flowgate="dock-flow-route"

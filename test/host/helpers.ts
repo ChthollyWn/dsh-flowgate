@@ -4,7 +4,7 @@
  */
 import type { DshContext, DshToolSchema } from '../../src/host/adapters/dsh-types.js'
 import type { HostConfig } from '../../src/host/types.js'
-import type { FlowEngine } from '../../src/core/engine.js'
+import type { EngineOptions, FlowEngine } from '../../src/core/engine.js'
 import {
   createFakeAgent,
   createFakeCommandRuntime,
@@ -54,6 +54,8 @@ export interface SetupOptions {
   config?: HostConfig
   /** 不触发 agent/created（测试自己绑定会话）。 */
   bindAgent?: boolean
+  /** 捕获传给 deps.createEngine 的选项（测试 takeover/hostEpoch 透传）。 */
+  onCreateEngine?: (options: EngineOptions) => void
 }
 
 export interface PluginHarness {
@@ -106,7 +108,12 @@ export async function setupPlugin(options: SetupOptions = {}): Promise<PluginHar
     services,
     available: Object.keys(services).filter((name) => !missing.has(name)),
   })
-  const deps = createFakeDeps({ engine, homeDir, ports: createFakePorts('/fake/project') })
+  const deps = createFakeDeps({
+    engine,
+    homeDir,
+    ports: createFakePorts('/fake/project'),
+    ...(options.onCreateEngine ? { onCreateEngine: options.onCreateEngine } : {}),
+  })
   const runtime = startHostPlugin(ctx, { enabled: true, projectRoot: '/fake/project', ...options.config }, deps)
   if (!runtime) throw new Error('host 插件启动失败（startHostPlugin 返回 null）')
   const agent = createFakeAgent({ id: 'session-main', cwd: '/fake/project', ctx })

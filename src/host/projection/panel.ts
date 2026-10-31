@@ -4,6 +4,12 @@
  * 由 `engine.onStateChange` 触发，每次状态变化重新构建；因此这里**只能读**
  * engine 缓存（snapshot/artifacts/config/evidence），不得 await 或触发门禁检查。
  * 复杂数据（指标、报告）由命令/面板动作按需生成，这里只放缓存/摘要。
+ *
+ * P2-11（面板预算）：本模块的每个大块都有条数上限（changes 最近 50、evidence
+ * 最近 50 等），与 `wire.ts` 的 `WIRE_PANEL_LIMITS` 保持一致——面板永远只展示
+ * "最近 N 条"，历史数据由命令按需生成。**后续方向**：把面板改为按需拉取
+ * （remote action，客户端点开某块时才取全量），彻底去掉单帧体积压力；本轮
+ * 不实现 remote，只用上限 + wire 预算兜底（见 docs/impl/projection-budget.md）。
  */
 import type { EngineLike } from '../types.js'
 import type {
@@ -35,7 +41,8 @@ export function buildPanel(input: PanelBuildInput): PanelExtras {
   const panel: PanelExtras = {}
   try {
     // 客户端契约要求 changes 可用（空数组表示未启用/无变更），不要省略字段。
-    panel.changes = engine.allChanges().map(toChangeSummary)
+    // 上限 50（与 wire.WIRE_PANEL_LIMITS.changes 一致；客户端只看最近变更）。
+    panel.changes = engine.allChanges().slice(-50).map(toChangeSummary)
   } catch {
     panel.changes = []
   }
@@ -58,7 +65,7 @@ export function buildPanel(input: PanelBuildInput): PanelExtras {
     // 风险文档损坏时省略。
   }
   try {
-    if (input.intercepts.length > 0) panel.intercepts = [...input.intercepts].slice(-100)
+    if (input.intercepts.length > 0) panel.intercepts = [...input.intercepts].slice(-50)
   } catch {
     // 忽略。
   }
@@ -148,12 +155,12 @@ function buildTrace(engine: EngineLike): TraceRow[] {
       covered,
     })
   }
-  return rows
+  return rows.slice(-50)
 }
 
 function buildRisks(engine: EngineLike): RiskRow[] {
   const entries = engine.getArtifacts().risk?.entries ?? []
-  return entries.map((entry) => ({
+  return entries.slice(-20).map((entry) => ({
     category: entry.category,
     grade: entry.grade,
     reason: entry.reason,
@@ -169,7 +176,7 @@ function buildRules(engine: EngineLike): RuleRow[] {
   const effective = typeof engine.getEffectiveRules === 'function' ? engine.getEffectiveRules() : engine.getConfig().rules ?? []
   const rules = effective
   const counts = engine.snapshot().interceptCounts ?? {}
-  return rules.map((rule) => ({
+  return rules.slice(-50).map((rule) => ({
     id: rule.id,
     decision: rule.decision,
     why: rule.why,
@@ -208,7 +215,7 @@ function buildRoadmap(engine: EngineLike): RoadmapSummary | undefined {
   const delivered = roadmap.entries.filter((entry) => entry.status === '已交付').length
   return {
     mvpCut: roadmap.mvpCut,
-    entries: roadmap.entries.map((entry) => ({
+    entries: roadmap.entries.slice(-30).map((entry) => ({
       change: entry.change,
       capability: entry.capability,
       goal: entry.goal,

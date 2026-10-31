@@ -352,6 +352,75 @@ export function makeEmptyProjection(): FlowgateProjection {
 export const LONG_NEXT_STEP =
   '继续实现 T2，然后跑集成检查点、补齐新鲜证据并进入 S4 阶段 ' + 'x'.repeat(160)
 
+/**
+ * 修复通道（v0.6）：FIX-id 激活 → dock 进入 `repair` 状态，
+ * 不再显示七阶段 rail 的当前阶段，也不显示门禁授权卡。
+ */
+export function makeRepairProjection(overrides: Partial<RuntimeSnapshot> = {}): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      changeId: undefined,
+      title: undefined,
+      kind: undefined,
+      stage: undefined,
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      lifecycle: undefined,
+      pipeline: [],
+      tasks: {},
+      batches: [],
+      pending: [],
+      violations: [],
+      interceptCounts: {},
+      repair: {
+        id: 'FIX-20261101-031500',
+        title: '修复投影 lossless JSON',
+        severity: 'P1',
+        status: 'open',
+        scope: ['src/host/projection/**'],
+        verify: 'pnpm test',
+        red: true,
+        green: false,
+        openedAt: '2026-11-01T03:15:00+08:00',
+        actions: 4,
+      },
+      ...overrides,
+    },
+    panel: {},
+  })
+}
+
+/** 观察模式 + agent 自暂停 + 事故记录（自举/维护场景的 dock 徽标）。 */
+export function makeObserveProjection(overrides: Partial<RuntimeSnapshot> = {}): FlowgateProjection {
+  return makeProjection({
+    snapshot: {
+      changeId: undefined,
+      title: undefined,
+      kind: undefined,
+      stage: undefined,
+      awaitingGate: undefined,
+      pendingGate: undefined,
+      lifecycle: undefined,
+      pipeline: [],
+      tasks: {},
+      batches: [],
+      pending: [],
+      violations: [],
+      interceptCounts: {},
+      takeover: 'observe',
+      offBy: 'agent',
+      incident: {
+        id: 'INC-20261101-031000',
+        severity: 'P1',
+        reason: '插件自身 bug：新建会话失败',
+        openedAt: '2026-11-01T03:10:00+08:00',
+      },
+      ...overrides,
+    },
+    panel: {},
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Dock-state fixtures (contract §2): one projection per input-dock state.
 // ---------------------------------------------------------------------------

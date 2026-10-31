@@ -37,7 +37,11 @@ import type {
   Action,
   Decision,
   FlowgateConfig,
+  IncidentRecord,
+  ProjectFlags,
+  RepairRecord,
   RuntimeSnapshot,
+  TakeoverMode,
   TestSummary,
 } from '../../core/types.js'
 import { MemoryFileSystem } from '../../core/util/memory-fs.js'
@@ -475,6 +479,7 @@ export interface FakeEngineState {
     heartbeat: number
     releaseSession: number
     setOff: { off: boolean; reason?: string }[]
+    setProjectOff: { off: boolean; reason: string; by?: string; autoRearm?: boolean }[]
     approveGate: string[]
     rejectGate: { gate: string; reason: string }[]
     recordReview: unknown[]
@@ -484,12 +489,25 @@ export interface FakeEngineState {
     allowOnce: unknown[]
     decidePending: unknown[]
     turnContinued: unknown[]
+    startRepair: unknown[]
+    finishRepair: unknown[]
+    abortRepair: string[]
+    selfPause: unknown[]
+    closeIncident: unknown[]
   }
   current: unknown
   receipts: unknown[]
   tasks: unknown[]
   injectionText: string
   notes: string[]
+  /** v0.5.1：接管模式（fake 默认 enforce；自举/测试可覆盖为 observe/off）。 */
+  takeover: TakeoverMode
+  /** v0.5.1：项目级 flags（暂停/事故）。 */
+  projectFlags: ProjectFlags
+  /** v0.5.1：进行中的修复通道记录（无则 null）。 */
+  repair: RepairRecord | null
+  /** v0.5.1：未关闭的事故（selfPause 创建，closeIncident 清除）。 */
+  incident: IncidentRecord | null
 }
 
 export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): FlowEngine & { state: FakeEngineState } {
@@ -506,6 +524,7 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
       heartbeat: 0,
       releaseSession: 0,
       setOff: [],
+      setProjectOff: [],
       approveGate: [],
       rejectGate: [],
       recordReview: [],
@@ -515,12 +534,21 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
       allowOnce: [],
       decidePending: [],
       turnContinued: [],
+      startRepair: [],
+      finishRepair: [],
+      abortRepair: [],
+      selfPause: [],
+      closeIncident: [],
     },
     current: overrides.current ?? null,
     receipts: [],
     tasks: overrides.tasks ?? [],
     injectionText: overrides.injectionText ?? '[FlowGate] 假注入：阶段 S4｜活动任务 T1',
     notes: [],
+    takeover: overrides.takeover ?? 'enforce',
+    projectFlags: overrides.projectFlags ?? {},
+    repair: overrides.repair ?? null,
+    incident: overrides.incident ?? null,
   }
   const engine = {
     state,
@@ -650,6 +678,123 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
     async setOff(off: boolean, reason?: string) {
       state.calls.setOff.push({ off, reason })
     },
+    // ---- v0.5.1：接管模式 / 项目 flags / 修复通道 / 事故（fake 行为） ----
+    getTakeoverMode: () => state.takeover,
+    getProjectFlags: () => cloneProjectFlags(state.projectFlags),
+    async setProjectOff(off: boolean, reason: string, options?: { by?: 'human' | 'agent'; autoRearm?: boolean }) {
+      state.calls.setProjectOff.push({
+        off,
+        reason,
+        ...(options?.by !== undefined ? { by: options.by } : {}),
+        ...(options?.autoRearm !== undefined ? { autoRearm: options.autoRearm } : {}),
+      })
+      if (off) {
+        state.projectFlags.off = {
+          by: options?.by ?? 'human',
+          reason,
+          at: '2026-01-01T00:00:00.000Z',
+          ...(options?.autoRearm === true ? { autoRearm: true, hostEpoch: 'fake-host-epoch' } : {}),
+        }
+      } else {
+        delete state.projectFlags.off
+      }
+    },
+    getRepair: () => (state.repair ? { ...state.repair, scope: [...state.repair.scope] } : null),
+    async startRepair(input: {
+      title: string
+      symptom: string
+      repro?: string
+      scope: string[]
+      verify: string
+      acceptance?: string[]
+      severity?: 'P0' | 'P1' | 'P2'
+      openedBy?: 'human' | 'agent'
+    }) {
+      state.calls.startRepair.push(input)
+      const record: RepairRecord = {
+        id: 'FIX-20260101-000000',
+        title: input.title,
+        symptom: input.symptom,
+        ...(input.repro !== undefined ? { repro: input.repro } : {}),
+        scope: [...input.scope],
+        verify: input.verify,
+        acceptance: input.acceptance ?? [],
+        severity: input.severity ?? 'P2',
+        status: 'open',
+        openedAt: '2026-01-01T00:00:00.000Z',
+        openedBy: input.openedBy ?? 'agent',
+        actions: 0,
+      }
+      state.repair = record
+      return { ...record }
+    },
+    async finishRepair(input: { summary?: string; commit?: string | null } = {}) {
+      state.calls.finishRepair.push(input)
+      const current = state.repair
+      if (!current) throw new Error('没有进行中的修复通道（fake）')
+      const record: RepairRecord = {
+        ...current,
+        status: 'done',
+        redEvidenceId: current.redEvidenceId ?? 'E-RED-1',
+        greenEvidenceId: current.greenEvidenceId ?? 'E-GREEN-1',
+        regressionEvidenceId: current.regressionEvidenceId ?? 'E-REG-1',
+        changedFiles: current.changedFiles ?? ['src/fixed.ts'],
+        closedAt: '2026-01-01T00:00:01.000Z',
+        ...(input.summary !== undefined ? { summary: input.summary } : {}),
+        commit: input.commit ?? null,
+      }
+      state.repair = null
+      return { record, message: `修复 ${record.id} 已关闭：RED → GREEN 证据齐全（fake）` }
+    },
+    async abortRepair(reason: string) {
+      state.calls.abortRepair.push(reason)
+      const current = state.repair
+      if (!current) throw new Error('没有进行中的修复通道（fake）')
+      const record: RepairRecord = {
+        ...current,
+        status: 'aborted',
+        abortReason: reason,
+        closedAt: '2026-01-01T00:00:01.000Z',
+      }
+      state.repair = null
+      return record
+    },
+    async selfPause(input: { reason: string; severity?: 'P0' | 'P1' | 'P2' }) {
+      state.calls.selfPause.push(input)
+      const incident: IncidentRecord = {
+        id: `INC-${state.calls.selfPause.length}`,
+        severity: input.severity ?? 'P1',
+        reason: input.reason,
+        openedAt: '2026-01-01T00:00:00.000Z',
+        openedBy: 'agent',
+      }
+      state.incident = incident
+      state.projectFlags.incident = incident
+      state.projectFlags.off = {
+        by: 'agent',
+        reason: input.reason,
+        at: '2026-01-01T00:00:00.000Z',
+        autoRearm: true,
+        hostEpoch: 'fake-host-epoch',
+      }
+      return { incident: { ...incident }, message: `已暂停项目写操作并创建事故 ${incident.id}（fake）` }
+    },
+    async closeIncident(input: { summary: string; commit?: string | null; tests?: string; files?: string[] }) {
+      state.calls.closeIncident.push(input)
+      const current = state.projectFlags.incident ?? state.incident
+      if (!current) throw new Error('没有未关闭的事故（fake）')
+      const incident: IncidentRecord = {
+        ...current,
+        closedAt: '2026-01-01T00:00:02.000Z',
+        summary: input.summary,
+        ...(input.tests !== undefined ? { tests: input.tests } : {}),
+        ...(input.files !== undefined ? { files: [...input.files] } : {}),
+        commit: input.commit ?? null,
+      }
+      delete state.projectFlags.incident
+      state.incident = null
+      return { incident: { ...incident }, message: `事故 ${incident.id} 已关闭（fake）` }
+    },
     async dispatchNext() {
       return { dispatched: [], message: '没有可派发任务（fake）' }
     },
@@ -710,7 +855,19 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
   return engine as unknown as FlowEngine & { state: FakeEngineState }
 }
 
+/** 项目 flags 深拷贝（fake 返回值与内部状态隔离，模拟 core 的"返回拷贝"约定）。 */
+function cloneProjectFlags(flags: ProjectFlags): ProjectFlags {
+  return {
+    ...(flags.off !== undefined ? { off: { ...flags.off } } : {}),
+    ...(flags.incident !== undefined ? { incident: { ...flags.incident } } : {}),
+  }
+}
+
 function makeSnapshot(state: FakeEngineState): RuntimeSnapshot {
+  const flags = state.projectFlags
+  const off = state.snapshotOverrides.off === true || flags.off !== undefined
+  const incident = state.incident ?? flags.incident
+  const repair = state.repair
   return {
     initialized: state.initialized,
     pipeline: [],
@@ -718,7 +875,28 @@ function makeSnapshot(state: FakeEngineState): RuntimeSnapshot {
     batches: [],
     pending: [],
     violations: [],
-    off: false,
+    off,
+    ...(off && flags.off !== undefined ? { offBy: flags.off.by } : {}),
+    takeover: state.takeover,
+    ...(incident !== null && incident !== undefined
+      ? { incident: { id: incident.id, severity: incident.severity, reason: incident.reason, openedAt: incident.openedAt } }
+      : {}),
+    ...(repair !== null
+      ? {
+          repair: {
+            id: repair.id,
+            title: repair.title,
+            severity: repair.severity,
+            status: 'open' as const,
+            scope: [...repair.scope],
+            verify: repair.verify,
+            red: Boolean(repair.redEvidenceId),
+            green: Boolean(repair.greenEvidenceId),
+            openedAt: repair.openedAt,
+            actions: repair.actions,
+          },
+        }
+      : {}),
     locked: false,
     interceptCounts: {},
     nextStep: '下一步（fake）',
@@ -771,6 +949,8 @@ export interface FakeDepsOptions {
   core?: Partial<CoreBridge>
   homeDir?: string
   log?: (level: string, message: string) => void
+  /** 捕获传给 createEngine 的选项（测试 takeover/hostEpoch 透传）。 */
+  onCreateEngine?: (options: EngineOptions) => void
 }
 
 /** 默认假分类器：write/edit → FileAction；bash → ShellAction；subagent → delegate。 */
@@ -869,7 +1049,10 @@ export function createFakeDeps(options: FakeDepsOptions = {}): HostDeps {
   const homeDir = options.homeDir ?? nodePath.join(os.tmpdir(), `flowgate-test-home-${process.pid}-${Math.random().toString(36).slice(2)}`)
   return {
     createPorts: (root: string) => options.ports ?? createFakePorts('/fake/project'),
-    createEngine: (_options: EngineOptions) => engine,
+    createEngine: (engineOptions: EngineOptions) => {
+      options.onCreateEngine?.(engineOptions)
+      return engine
+    },
     core: createFakeCore(options.core),
     homeDir: () => homeDir,
     pluginVersion: '0.1.0-test',

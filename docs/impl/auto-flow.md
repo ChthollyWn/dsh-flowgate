@@ -2,6 +2,8 @@
 
 > 状态：2026-11-01 实现（core/host/client + 测试）；真机零模型 E2E 见文末验收记录。
 > 关联需求：负责人 2026-11-01 指令——启用 FlowGate 后所有修改由 FlowGate 接管；模型在流程开始前判断改动大小，复杂走全流程、中等合并、简单不人工确认；设计 auto-review 机制自动决定是否需要人工确认与是否缩减合并流程。
+> **v0.6 补充**：新增 `takeover` 三态（自举仓库默认 observe：仅对 `R-NO-CHANGE` 未立项写入放行并记账，其余规则照常拦截，§10）、`R-NO-CHANGE` 解锁话术
+> 指向修复通道、以及变更车道与修复车道的边界（§11，修复通道详见 [repair-lane.md](repair-lane.md)）。
 
 ## 0. 三条结论
 
@@ -18,10 +20,24 @@
 |---|---|
 | 未初始化（`/flow init` 前） | 不拦截（与既有 FR-4.6 一致） |
 | 已初始化 + 进行中变更 | 按既有阶段/范围/风险规则 |
-| 已初始化 + **无进行中变更** | 写/创建/删除/重命名、mutating shell、delegate 一律 deny，ruleId=`R-NO-CHANGE`；`.flowgate`/`.git` 仍由 `R-PROTECTED` 拒绝；只读动作与 `flow_*` 允许 |
-| 已初始化 + `off` | 全部放行（负责人临时关闭） |
+| 已初始化 + **无进行中变更** | 写/创建/删除/重命名、mutating shell、delegate 一律 deny，ruleId=`R-NO-CHANGE`（**v0.6 解锁话术：修 bug 用 `flow_fix_start` 开修复通道，新功能用 `flow_new_change` 立项**）；`.flowgate`/`.git` 仍由 `R-PROTECTED` 拒绝；只读动作与 `flow_*` 允许 |
+| 已初始化 + **修复通道进行中** | 只放行命中修复声明 `scope` 的写动作（`R-FIX-SCOPE` 拒绝越界），shell 受 `R-FIX-SHELL` 白名单约束，delegate/MCP 被 `R-FIX-TOOL` 拒绝；不需要立项（见 [repair-lane.md](repair-lane.md)） |
+| 已初始化 + `takeover=observe`（观察模式，v0.6） | **仅"未立项写入"（`R-NO-CHANGE`）放行**，账本记一次 `takeover.observed`（每会话每规则至多一次）并提示；**有进行中变更时，阶段/范围/受保护路径/修复通道 scope 等规则仍按原规则拦截**；自举仓库（项目根是 dsh-flowgate 自身）默认走此模式，避免开发插件时被自己的接管规则拦死（同时保留门禁与观测） |
+| 已初始化 + `takeover=off`（safe-mode / 配置） | 全部放行、不记录（比观察模式更彻底；safe-mode 逃生口见 [host-recovery.md](host-recovery.md)） |
+| 已初始化 + `off` | 全部放行（负责人 `/flow off` 或 agent 自暂停，写 `flags.off` 并记账） |
 
 实现位置：`src/core/engine.ts#evaluateAction`（无 `change` 分支）复用 `src/core/rules/evaluate.ts#mutatesRepository`，因此写文件与 `pnpm install`/`git push` 等命令同一口径。
+
+### 1.1 接管模式（v0.6）
+
+| 模式 | 何时生效 | 行为 |
+|---|---|---|
+| `enforce` | 默认 | 硬接管：未立项/未声明修复的写动作拒绝 |
+| `observe` | 项目根是 dsh-flowgate 自身（自举检测）；或显式配置 `takeover: observe` | **仅对 `R-NO-CHANGE`（未立项写入）放行**并写 `takeover.observed` + 提示；其余规则（阶段/范围/受保护路径/修复通道 scope/危险命令等）仍按原规则拦截；用于自举开发/试运行 |
+| `off` | safe-mode（sentinel/env/config）、显式配置 `takeover: off`、项目暂停（`flags.off` 的另一种形态） | 不拦截不记录（safe-mode 下还会跳过 guard 等模块） |
+
+解析优先级：safe-mode 强制 `off` > 显式 `config.takeover` > 自举检测（`observe`）> 默认 `enforce`；
+`/flow doctor` 显示生效模式与原因。
 
 ## 2. 模型自评：assessment 字段
 
@@ -107,3 +123,38 @@
   - v0.5 徽标 **7/7 PASS**：`/flow help` 含 `/flow route`；创建低复杂度变更后 `/flow route fast 理由` 成功；dock `[data-flowgate="dock-flow-route"]` 与面板 `[data-flowgate="panel-flow-route"]` 均为 `data-route="fast"`、`data-auto="true"`、文案「自动流程 · fast」；pipeline 正常；0 pageerror / 0 console.error / 0 模型请求。截图 [38-panel-auto-flow-v05](../screenshots/38-panel-auto-flow-v05.png)。
   - v0.4 回归 E2E **14/14 PASS**（面板/流程页/无学习模式/旧配置兼容）。
   - 接管拒绝本身无法在零模型真机触发（需要模型发起写工具调用），由 engine 守卫集成测试覆盖；路由行为由 auto-review 单测 + engine fast/standard 集成测试覆盖。
+
+
+## 10. takeover 观察模式（v0.6）
+
+**问题**：FlowGate 仓库自己的 `package.json` 就是 `dsh-flowgate`；默认 `enforce` 时，开发者在该仓库里
+改插件源码会立刻被 `R-NO-CHANGE` 拒绝——自己把自己拦死（自举死锁的另一种形态）。
+
+**做法**：`resolveSafeMode` 之后的第二层模式判定（`src/host/mode.ts#detectSelfHost`）：
+项目根 `package.json` 的 `name === 'dsh-flowgate'` 且含 `dsh` 清单字段 → 自举仓库，默认
+`takeover='observe'`；显式 `config.takeover` 可覆盖（`enforce`/`observe`/`off`）。
+
+**observe 行为**（精确语义）：
+- 放行的**只有** `R-NO-CHANGE`（"已初始化 + 无进行中变更"的未立项写入）这一条接管规则；每次放行照常计数，
+  每会话每规则至多写一次账本 `takeover.observed`（含 mode/ruleId/tool/target），并注入一次提示；
+- **其它规则照常拦截**：有进行中变更时的阶段/范围/顺序规则、`R-PROTECTED`（`.flowgate`/`.git`）、
+  修复通道的 `R-FIX-SCOPE`/`R-FIX-SHELL`/`R-FIX-TOOL`、危险命令/风险触发器等都不因 observe 而放宽；
+- 修复/变更流程本身不被跳过：observe 不会替你推进阶段；`off` 才是"完全不拦截"（safe-mode/config）。
+
+**何时不该用 observe**：日常项目误把 observe 当"关掉门禁"会失去硬约束——需要关就用
+`/flow off`（记账）或 safe-mode（恢复期），并且都要在复盘时说明原因。
+
+## 11. 与修复通道的边界（v0.6）
+
+| 场景 | 走哪条车道 | 入口 |
+|---|---|---|
+| 新功能 / 需求变化 / 跨模块大改 | 变更车道（本文件描述的七阶段 + auto-review 路由） | `flow_new_change`（含 `assessment`） |
+| 已知 bug、事故回归、行为明确的小修 | **修复车道** | `flow_fix_start`（FIX-id：scope + verify + RED→GREEN，无人工门） |
+| 修复中越界/需要设计变更 | 放弃修复后转变更车道 | `flow_fix_abort` → `flow_new_change` |
+
+- 修复车道**不是** `route=fast`：fast 仍是变更车道的加速（要产出最小需求/验收/scope/verify 并过检查）；
+  修复车道是并列的一等公民，不产生 `C-xxx`、不要求七阶段文档、不需要人工门，但必须留 RED→GREEN 证据
+  与全量回归。详见 [repair-lane.md](repair-lane.md)。
+- `R-NO-CHANGE` 的解锁话术已指向两条车道（修复/立项），模型不再被引导"先立项再修 bug"。
+- observe（§10）只放宽"未立项写入"这一条接管规则，修复通道/变更车道的阶段与范围规则仍生效（它们才是流程硬约束）；
+  自举开发时建议用 dev profile + 修复通道 + `pnpm verify:host` 闭环。

@@ -158,8 +158,14 @@ export function InterceptsView({ model, t, onAction }: ViewProps): React.ReactEl
                   </span>,
                   <Badge
                     key="effect"
-                    label={row.effect === 'human' ? t('intercepts.effect.human') : t('intercepts.effect.deny')}
-                    color={row.effect === 'human' ? COLORS.warn : COLORS.fail}
+                    label={
+                      row.effect === 'human'
+                        ? t('intercepts.effect.human')
+                        : row.effect === 'observe'
+                          ? t('intercepts.effect.observe')
+                          : t('intercepts.effect.deny')
+                    }
+                    color={row.effect === 'human' ? COLORS.warn : row.effect === 'observe' ? COLORS.info : COLORS.fail}
                     dataBadge={`effect-${row.effect}`}
                   />,
                   <span key="actions" style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>

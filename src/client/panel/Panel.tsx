@@ -167,6 +167,45 @@ export function PanelSurface(props: PanelSurfaceProps): React.ReactElement {
               {t('panel.flowRoute', { route: model.flowPlan.route })}
             </span>
           ) : null}
+          {model.snapshot?.repair !== undefined ? (
+            <span
+              data-flowgate="panel-repair"
+              data-fix-id={model.snapshot.repair.id}
+              data-red={model.snapshot.repair.red ? 'true' : 'false'}
+              data-green={model.snapshot.repair.green ? 'true' : 'false'}
+              title={model.snapshot.repair.verify}
+              style={{
+                fontSize: 10.5,
+                lineHeight: '16px',
+                color: COLORS.info,
+                border: `0.5px solid ${COLORS.border}`,
+                borderRadius: 999,
+                padding: '0 6px',
+              }}
+            >
+              {t('dock.repair.badge', { id: model.snapshot.repair.id })}
+            </span>
+          ) : null}
+          {model.snapshot?.takeover === 'observe' ? (
+            <span
+              data-flowgate="panel-mode"
+              data-mode="observe"
+              style={{ fontSize: 10.5, color: COLORS.dim, border: `0.5px solid ${COLORS.border}`, borderRadius: 999, padding: '0 6px' }}
+            >
+              {t('dock.mode.observe')}
+            </span>
+          ) : null}
+          {model.snapshot?.incident !== undefined ? (
+            <span
+              data-flowgate="panel-incident"
+              data-incident-id={model.snapshot.incident.id}
+              data-severity={model.snapshot.incident.severity}
+              title={model.snapshot.incident.reason}
+              style={{ fontSize: 10.5, color: COLORS.warn, border: `0.5px solid ${COLORS.border}`, borderRadius: 999, padding: '0 6px' }}
+            >
+              {t('dock.incident.badge', { id: model.snapshot.incident.id })}
+            </span>
+          ) : null}
           {model.off ? <span style={{ fontSize: 11, color: COLORS.fail }}>{t('tone.blocked')}</span> : null}
         </div>
       </header>

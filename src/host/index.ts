@@ -11,7 +11,7 @@
  * - 插件卸载时释放租约、清理心跳与全部注册（ctx.effect）。
  */
 import type { DshContext } from './adapters/dsh-types.js'
-import type { HostConfig, HostDeps } from './types.js'
+import type { HostConfig, HostDeps, HostModuleInfo, HostModuleName } from './types.js'
 import { createHostDeps } from './deps.js'
 import { HostRuntime } from './runtime.js'
 import { toAgentError } from './errors.js'
@@ -38,8 +38,8 @@ export const inject: string[] = []
 /** 当前进程内活动的 runtime（doctor/测试/调试用；正常插件生命周期内唯一）。 */
 let activeRuntime: HostRuntime | null = null
 
-/** 各模块安装结果（doctor/测试可见）。 */
-const moduleStatus: Record<string, 'ok' | 'failed'> = {}
+/** 各模块安装结果（doctor/测试可见；键=中文功能名，保持旧测试口径）。 */
+const moduleStatus: Record<string, 'ok' | 'failed' | 'skipped'> = {}
 
 /** 插件入口。任何异常都不得冒泡到宿主启动流程。 */
 export function apply(ctx: DshContext, config: HostConfig = {}): void {
@@ -67,32 +67,70 @@ export function startHostPlugin(ctx: DshContext, config: HostConfig = {}, deps?:
   }
   activeRuntime = runtime
 
-  // Debug isolation flags (E2E bisect only; never required in normal use):
-  // FLOWGATE_DISABLE=context,tools,guard,projection,session,... skips those modules.
+  // 模块开关（P0-4）：env FLOWGATE_DISABLE + config.modules + safe-mode 覆盖。
+  // FLOWGATE_DISABLE=context,tools,guard,projection,session,... 仅用于 E2E 二分定位。
   const disabled = new Set(
     String((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.FLOWGATE_DISABLE ?? '')
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean),
   )
-  const installIf = (key: string, stage: string, fn: () => void): void => {
-    if (disabled.has(key)) return
-    install(stage, fn)
-  }
-  installIf('session', '会话生命周期', () => installSession(runtime))
-  installIf('guard', '守卫', () => installGuard(runtime))
-  installIf('delegation', '原生委派关闭', () => installDelegation(runtime))
-  installIf('coverage', '覆盖自检', () => installCoverage(runtime))
-  installIf('postcheck', '事后检测', () => installPostcheck(runtime))
-  installIf('compression', '输出压缩', () => installEvidenceCompression(runtime))
-  installIf('context', '上下文注入', () => installContext(runtime))
-  installIf('projection', '会话投影', () => installProjection(runtime))
-  installIf('gates', '人工门', () => installGates(runtime))
-  installIf('commands', '命令族', () => installCommands(runtime))
-  installIf('tools', '模型工具', () => installTools(runtime))
-  installIf('dispatch', '任务派发', () => installDispatch(runtime))
+  const moduleConfig = config.modules ?? {}
+  const safe = runtime.isSafeMode()
+  /**
+   * safe-mode 下强制跳过的模块（P0-4 逃生口）：恢复期不拦截、不派发、不开人工门。
+   * projection 仍安装（wire 是显式白名单 DTO + 自检，不会毒化会话）；session/
+   * commands/tools/coverage/postcheck/compression/context 保持可用，便于人工止血。
+   */
+  const SAFE_SKIP: ReadonlySet<HostModuleName> = new Set<HostModuleName>(['guard', 'delegation', 'gates', 'dispatch'])
+  const moduleRecords: HostModuleInfo[] = []
 
-  logger('info', `FlowGate host 已激活（模块 ${Object.keys(moduleStatus).length} 个；插件版本 ${runtime.deps.pluginVersion}）`)
+  /** 按三层开关（env / config.modules / safe-mode）安装模块，并记录状态与原因。 */
+  const installModule = (name: HostModuleName, stage: string, fn: () => void): void => {
+    let skipReason: string | undefined
+    if (disabled.has(name)) skipReason = '环境变量 FLOWGATE_DISABLE 指定跳过'
+    else if (moduleConfig[name] === false) skipReason = `插件配置 modules.${name}=false`
+    else if (safe && SAFE_SKIP.has(name)) skipReason = 'safe-mode 强制跳过（P0-4：恢复期不拦截/不派发）'
+    if (skipReason !== undefined) {
+      moduleStatus[stage] = 'skipped'
+      moduleRecords.push({ name, stage, status: 'skipped', reason: skipReason })
+      logger('warn', `模块「${stage}」已跳过：${skipReason}`)
+      return
+    }
+    install(stage, fn)
+    const status = moduleStatus[stage] ?? 'failed'
+    moduleRecords.push({
+      name,
+      stage,
+      status,
+      ...(status === 'failed' ? { reason: runtime.inertReasons.find((reason) => reason.stage === stage)?.message } : {}),
+    })
+  }
+  installModule('session', '会话生命周期', () => installSession(runtime))
+  installModule('guard', '守卫', () => installGuard(runtime))
+  installModule('delegation', '原生委派关闭', () => installDelegation(runtime))
+  installModule('coverage', '覆盖自检', () => installCoverage(runtime))
+  installModule('postcheck', '事后检测', () => installPostcheck(runtime))
+  installModule('compression', '输出压缩', () => installEvidenceCompression(runtime))
+  installModule('context', '上下文注入', () => installContext(runtime))
+  installModule('projection', '会话投影', () => installProjection(runtime))
+  installModule('gates', '人工门', () => installGates(runtime))
+  installModule('commands', '命令族', () => installCommands(runtime))
+  installModule('tools', '模型工具', () => installTools(runtime))
+  installModule('dispatch', '任务派发', () => installDispatch(runtime))
+  runtime.setModuleInfo(moduleRecords)
+
+  const effectiveCount = moduleRecords.filter((module) => module.status === 'ok').length
+  const skippedCount = moduleRecords.filter((module) => module.status === 'skipped').length
+  const modeNote = safe
+    ? `safe-mode 生效（${runtime.safeModeInfo().source ?? 'unknown'}）`
+    : runtime.isSelfHost()
+      ? '自举仓库，默认观察模式'
+      : `接管模式 ${runtime.enforcement()}`
+  logger(
+    'info',
+    `FlowGate host 已激活（模块 ${effectiveCount} 个生效${skippedCount > 0 ? `/${skippedCount} 个跳过` : ''}；${modeNote}；插件版本 ${runtime.deps.pluginVersion}）`,
+  )
 
   // 插件卸载：释放租约/心跳/全部 disposer。
   try {
@@ -124,7 +162,7 @@ export function startHostPlugin(ctx: DshContext, config: HostConfig = {}, deps?:
 }
 
 /** 读取模块安装状态（测试/doctor 用）。 */
-export function moduleInstallStatus(): Record<string, 'ok' | 'failed'> {
+export function moduleInstallStatus(): Record<string, 'ok' | 'failed' | 'skipped'> {
   return { ...moduleStatus }
 }
 

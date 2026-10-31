@@ -100,6 +100,8 @@ export function toneOf(snapshot: RuntimeSnapshot | null | undefined): Tone {
   if (snapshot.locked === true || snapshot.off === true) return 'blocked'
   if ((snapshot.violations ?? []).length > 0) return 'blocked'
   if (snapshot.awaitingGate !== undefined || (snapshot.pending ?? []).length > 0) return 'attention'
+  // 修复通道活跃时与"进行中变更"同色：它是正常的工作态，不是异常。
+  if (snapshot.repair !== undefined) return 'active'
   if (snapshot.lifecycle === 'active' || snapshot.changeId !== undefined) return 'active'
   return 'idle'
 }

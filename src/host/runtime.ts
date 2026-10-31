@@ -18,11 +18,17 @@ import type {
   HostCapabilities,
   HostConfig,
   HostDeps,
+  HostEngineOptions,
+  HostModuleInfo,
   HostPorts,
   InertReason,
+  SafeModeInfo,
+  TakeoverMode,
 } from './types.js'
-import type { FlowgateProjection, InterceptRow } from './projection/types.js'
+import type { FlowgateProjection, InterceptRow, ProjectionSelfCheckResult } from './projection/types.js'
 import { initialProjection } from './projection/types.js'
+import { toLosslessJson } from './boundary/json.js'
+import { detectSelfHost, effectiveTakeover, resolveSafeMode, safeModeCandidates, takeoverReason } from './mode.js'
 import { buildPanel } from './projection/panel.js'
 import { EngineUnavailableError, toAgentError, type HostLog } from './errors.js'
 import { findProjectRoot, normalizeSlashes } from './adapters/windows-path.js'
@@ -136,6 +142,16 @@ export class HostRuntime {
   private contextPctSource: (() => number | undefined) | null = null
   /** 累计 token 用量数据源（token-meter 的 tokenUsage 投影，03 §8.2 预算触发器）。 */
   private tokenUsageSource: (() => number | undefined) | null = null
+  /** 运行模式缓存（P0-4/P1-7：safe-mode / 自举 / 生效接管模式；guard 与 doctor 读）。 */
+  private safeModeInfoValue: SafeModeInfo = { active: false }
+  private selfHostValue = false
+  private takeoverValue: TakeoverMode = 'enforce'
+  private takeoverReasonValue = '默认强制接管'
+  private modesResolvedFor: string | null | undefined
+  /** 投影启动自检结果（projection 模块在注册前写入；doctor 读取）。 */
+  private projectionSelfCheckValue: ProjectionSelfCheckResult | null = null
+  /** 模块安装明细（index.ts 的 installIf 写入；doctor 读取）。 */
+  private moduleInfoValue: HostModuleInfo[] = []
 
   constructor(options: HostRuntimeOptions) {
     this.ctx = options.ctx
@@ -143,6 +159,9 @@ export class HostRuntime {
     this.deps = options.deps
     this.capabilities = { ...ALL_CAPABILITIES }
     this.nowFn = options.now ?? (() => systemClock.now())
+    // 构造时就先解析一次运行模式：config.projectRoot 已知时（测试/单仓多项目）
+    // 模块安装阶段即可按 safe-mode 跳过；项目根稍后解析到时在 ensureEngine 里重算。
+    this.refreshModes(options.config.projectRoot ? nodePath.resolve(options.config.projectRoot) : null)
   }
 
   // ------------------------------------------------------------------
@@ -355,6 +374,74 @@ export class HostRuntime {
   }
 
   // ------------------------------------------------------------------
+  // 运行模式（P0-4：safe-mode / 自举观察 / 接管模式）
+  // ------------------------------------------------------------------
+
+  /** 重新解析 safe-mode / 自举 / 生效接管模式（项目根变化时调用）。 */
+  private refreshModes(root: string | null): void {
+    const safe = resolveSafeMode({ deps: this.deps, config: this.config, root })
+    this.safeModeInfoValue = safe
+    this.selfHostValue = this.config.selfHost ?? (root ? detectSelfHost(root) : false)
+    this.takeoverValue = effectiveTakeover(this.config, { selfHost: this.selfHostValue, safe: safe.active })
+    this.takeoverReasonValue = takeoverReason(this.config, {
+      selfHost: this.selfHostValue,
+      safe: safe.active,
+      safeMode: safe,
+    })
+    this.modesResolvedFor = root
+  }
+
+  isSafeMode(): boolean {
+    return this.safeModeInfoValue.active
+  }
+
+  safeModeInfo(): SafeModeInfo {
+    return { ...this.safeModeInfoValue }
+  }
+
+  /** safe-mode sentinel 实际读取的候选路径（doctor 展示，避免"写了不生效"）。 */
+  safeModePaths(): string[] {
+    return safeModeCandidates({ deps: this.deps, root: this.rootValue ?? this.config.projectRoot ?? null })
+  }
+
+  isSelfHost(): boolean {
+    return this.selfHostValue
+  }
+
+  /** 生效接管模式（safe→off；显式配置优先；自举→observe；默认 enforce）。 */
+  enforcement(): TakeoverMode {
+    return this.takeoverValue
+  }
+
+  /** 生效接管模式的原因（doctor 展示）。 */
+  enforcementReason(): string {
+    return this.takeoverReasonValue
+  }
+
+  /** 本次进程的宿主 epoch（写进投影记录；同时传给 core 用于 autoRearm）。 */
+  hostEpoch(): string {
+    return this.projectionEpoch
+  }
+
+  /** projection 模块在注册前写入自检结果（doctor 读取）。 */
+  setProjectionSelfCheck(result: ProjectionSelfCheckResult): void {
+    this.projectionSelfCheckValue = result
+  }
+
+  projectionSelfCheck(): ProjectionSelfCheckResult | null {
+    return this.projectionSelfCheckValue
+  }
+
+  /** index.ts 安装结束后写入模块明细（doctor 读取）。 */
+  setModuleInfo(modules: HostModuleInfo[]): void {
+    this.moduleInfoValue = modules.map((module) => ({ ...module }))
+  }
+
+  moduleInfo(): HostModuleInfo[] {
+    return this.moduleInfoValue.map((module) => ({ ...module }))
+  }
+
+  // ------------------------------------------------------------------
   // 主会话绑定与引擎生命周期
   // ------------------------------------------------------------------
 
@@ -433,6 +520,8 @@ export class HostRuntime {
     try {
       const root = this.resolveProjectRoot(agent)
       this.rootValue = root
+      // 项目根解析出来后重算运行模式（项目级 safe-mode sentinel / 自举检测依赖它）。
+      if (this.modesResolvedFor !== root) this.refreshModes(root)
       const ports = this.deps.createPorts(root)
       this.portsValue = ports
       const keyPath =
@@ -440,7 +529,9 @@ export class HostRuntime {
       const ledgerKey = await ensureLedgerKey(keyPath, { randomKeyHex: (bytes) => this.deps.randomKeyHex(bytes) })
       const sessionId = String(agent.id)
       const sessionLabel = this.sessionLabelOf(agent)
-      const engine = this.deps.createEngine({
+      // v0.5.1：接管模式与 hostEpoch 在构造引擎前确定（core 只读）；
+      // HostEngineOptions 是 EngineOptions 的扩展（core 落地前也能编译）。
+      const engineOptions: HostEngineOptions = {
         root,
         fs: ports.fs,
         clock: systemClock,
@@ -455,6 +546,8 @@ export class HostRuntime {
           void this.appendLedgerRecord(type, data)
         },
         onStateChange: (snapshot) => this.onEngineState(snapshot),
+        takeover: this.enforcement(),
+        hostEpoch: this.projectionEpoch,
         host: {
           onEvidence: (receipt) => {
             this.log('debug', `证据回执 ${receipt.id}（${receipt.phase}）已记录`)
@@ -471,7 +564,8 @@ export class HostRuntime {
             }
           },
         },
-      })
+      }
+      const engine = this.deps.createEngine(engineOptions)
       this.engineValue = engine
       await engine.load()
       this.capabilities.engine = true
@@ -761,8 +855,8 @@ export class HostRuntime {
     const api = await this.ensureSessionApi()
     if (api && this.sessionAppendMode !== 'session-append') {
       try {
-        // Plugin records must be *losslessly JSON*; strip undefined/Date/etc.
-        const safeData = JSON.parse(JSON.stringify(data)) as Record<string, unknown>
+        // Plugin records must be *losslessly JSON*: 统一走 host 边界（P0-1）。
+        const safeData = toLosslessJson(data)
         api.appendPluginRecord(session, normalizeRecordType(type), safeData)
         this.sessionAppendMode = 'plugin-record'
         this.capabilities.sessionAppend = true
@@ -798,7 +892,7 @@ export class HostRuntime {
     try {
       const api = await this.ensureSessionApi()
       if (!api) return // never session.append() an undeclared type (would corrupt the session log)
-      const safe = JSON.parse(JSON.stringify({ type, data, at: this.isoNow() })) as Record<string, unknown>
+      const safe = toLosslessJson({ type, data, at: this.isoNow() })
       api.appendPluginRecord(session, `${FLOWGATE_RECORD_PREFIX}ledger`, safe)
     } catch {
       // 账本事件写会话日志失败只降级，不影响 .flowgate/ledger.jsonl。

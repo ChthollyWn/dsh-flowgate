@@ -6,6 +6,99 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.6：修复通道 + 自愈/恢复 + 真机回归门 verify:host，2026-11-01）
+
+> 未发版。负责人要求：v0.5.1 事故（投影非 lossless JSON → **连续新建会话从第二个起失败**）要根本修复——
+> **修 bug 作为 vibe coding 核心环节成为一等公民（修复通道）**；同时补齐 P0-3 真机冒烟 `verify:host`、
+> P1-6 双 profile + 恢复 CLI、P1-10 恢复 SOP、P2-12 重启/热重载 SOP、P2-13 控制面外移决策、P2-11 投影瘦身与预算。
+
+### Added
+
+- **修复通道（repair lane，P1-8/P1-9）**：`flow_fix_start` / `flow_fix_done` / `flow_fix_abort` + `/flow fix [status|done|abort <理由>]`。
+  FIX-id 声明 `title/symptom/repro?/scope(1–20)/verify/acceptance?/severity`；流程为 RED（`flow_verify` 失败回执）→
+  范围内自由迭代 → GREEN → `flow_fix_done` 关门（校验 RED/GREEN 顺序、`git status --untracked-files=all` 全部改动在 scope、
+  `config.commands.test` 全量回归、重跑声明 verify、回执输入哈希新鲜）。**无人工门、不写七阶段 G1/G3 文档、不逐动作拦截**；
+  失败保持通道开启。产物 `.flowgate/state/repair.json`（进行中）→ `.flowgate/fixes/<FIX-id>.json` + `fixes/index.md`；
+  账本 `repair.started / repair.evidence / repair.done / repair.aborted`；快照 `snapshot.repair`（可选）。
+  守卫：`R-FIX-SCOPE`（范围外写入拒绝）、`R-FIX-SHELL`（只允许测试/构建/lint/run + 只读/提交类 git）、`R-FIX-TOOL`（拒绝 delegate/MCP）。
+  **旧 `/flow repair`（从账本重建状态）语义不变**。文档 [docs/impl/repair-lane.md](docs/impl/repair-lane.md)。
+- **自暂停 / 事故记录（P1-8）**：`flow_self_pause`（项目级暂停写操作 `flags.off`，`by=agent` + `autoRearm`，下次宿主启动自动恢复；
+  创建 `INC-id` 事故记录）与 `flow_incident_close`（补 summary/commit/tests/files 归档 `.flowgate/incidents/<INC-id>.json`，
+  清理事故标记）；命令 `/flow incident`。产物 `.flowgate/state/flags.json`；账本 `incident.open/incident.close/flow.project_off/flow.project_on`；
+  快照 `snapshot.incident/offBy`（可选）。
+- **safe-mode 与模块开关（P0-4）**：`src/host/mode.ts` + `runtime` 模式解析。启动期 sentinel `$DSH_HOME/flowgate/safe-mode`
+  （默认 `~/.dsh/flowgate/safe-mode`；host 侧改为 honor `DSH_HOME`）+ 项目级 `<root>/.flowgate/safe-mode` + `FLOWGATE_SAFE=1`
+  + `config.safeMode`；生效后强制 `takeover=off` 并**跳过** guard/delegation/gates/dispatch（投影/命令/工具/会话保留，可人工止血）。
+  模块开关 `FLOWGATE_DISABLE=<names>`（E2E/二分）与 `config.modules.<name>=false`；`/flow doctor` 显示模块 ok/failed/skipped 与原因、
+  生效接管模式、safe-mode 实际读取路径、投影自检结果、宿主 epoch。
+- **takeover 观察模式（P1-7）**：自举仓库（项目根 `package.json` name=dsh-flowgate 且含 `dsh` 清单字段）默认 `observe`——
+  **只对 `R-NO-CHANGE`（未立项写入）放行**并写账本 `takeover.observed`（每会话每规则至多一次）并提示；
+  **有进行中变更时，阶段/范围/受保护路径（`.flowgate`、`.git`）/修复通道 scope 等规则仍按原规则拦截**——
+  目的是"不被自己的接管规则锁死，同时保留门禁与观测"，不是"观察期全放行"。显式 `config.takeover` 可覆盖
+  （enforce/observe/off）。避免开发插件时被自己拦死（自举死锁）。
+- **恢复 CLI `pnpm host:recover`（P1-10）**：`scripts/host-recover.mjs`。`--status` / `--safe-mode [--reason <文本>]` /
+  `--clear` / `--profile <名> --remove [--yes]`（默认 dry-run）/ `--project <dir>`（项目级 sentinel 双保险）/ `--dsh-home <dir>`；
+  每个实际动作追加审计行到 `$DSH_HOME/flowgate/recovery.log`；只写 sentinel 与审计，**不删除用户数据**。
+- **真机回归门 `pnpm verify:host`（P0-3）**：`scripts/smoke-host.mjs`。隔离 `DSH_HOME` + `HOME`（护 ledger.key）+
+  官方 web 模板 profile + `link:` 本仓库 → 真实 DSH Web 宿主（`--no-open --port 0`，解析 token）→ `GET /connect` 换鉴权 Cookie →
+  **连续创建 ≥2（默认 3）个会话** → 断言 `ok:true` + `sessionId` + 响应无 `not lossless JSON`/`gateway/internal`；
+  支持 `--keep` / `--plugin <dir>` / `--sessions <n>` / `--expect-fail`（用已知坏构建反向验证门有效）。
+  **事实修正**：该 bug 只在 FlowGate 首次初始化后**再次**建会话时触发（首个会话可能正常），单次 POST 不足以复现/回归；
+  中性化修复的模拟旧构建实测第 2/3 次创建失败、修复构建 3/3 通过。证据 [docs/compat/host-smoke.md](docs/compat/host-smoke.md)。
+- **投影 wire 显式 DTO + 启动自检 + 预算（P0-2/P2-11）**：`src/host/boundary/json.ts`（镜像 DSH `isJsonValue`：
+  拒绝 undefined/NaN/Infinity/**负零**/稀疏或带额外属性的数组/Date/Map/Set/类实例/symbol/bigint/循环引用；`toLosslessJson`/
+  `toLosslessValue`/`assertLosslessJson`）；`src/host/projection/wire.ts` 显式白名单 DTO + 条数上限（changes 50、evidence 50、
+  intercepts 50、reviews 20、trace 50、roadmap 30…）+ **256KiB 单帧预算**与降级顺序；`projectionSelfCheck()` 注册前用脏 fixture
+  走 init/apply/wire，失败**不注册投影**（插件其余功能照常，doctor 可见）；`stateVersion` 升到 2；新投影字段
+  `snapshot.takeover/offBy/incident/repair`（可选增量）。预算文档 [docs/impl/projection-budget.md](docs/impl/projection-budget.md)。
+- **文档**：新增 [docs/impl/dev-loop.md](docs/impl/dev-loop.md)（双 profile：日常 desktop 不 link、dev=link、dogfood=tgz；改完→
+  `verify:host`→打包→装 dogfood→重启 SOP + 回滚）、[docs/impl/host-recovery.md](docs/impl/host-recovery.md)（症状矩阵 + L0–L4 恢复阶梯 +
+  审计不断）、[docs/impl/repair-lane.md](docs/impl/repair-lane.md)（双车道模型/字段/守卫/限制）、
+  [docs/impl/projection-budget.md](docs/impl/projection-budget.md)、[docs/impl/control-plane-decision.md](docs/impl/control-plane-decision.md)
+  （控制面外移决策：enforcement 留进程内、recovery 进程外，daemon 推迟 v1.0）、[docs/compat/host-smoke.md](docs/compat/host-smoke.md)（实测证据）。
+- **package.json**：新增 `verify:host`、`host:recover` 两个 script（无新增依赖）。
+
+### Changed
+
+- `RuntimeSnapshot` 新增可选字段 `takeover`/`offBy`/`incident`/`repair`；投影 `stateVersion=2`；wire 改为显式白名单 DTO
+  （新增字段必须显式加入，不再整包透传）。契约 [docs/impl/host-client-contract.md](docs/impl/host-client-contract.md) §1.1/§1.5。
+- 接管模式从"开关"升级为三态 `enforce/observe/off`（enforce=全部规则硬拦截；observe=仅 `R-NO-CHANGE` 放行并记 `takeover.observed`、其余规则照常拦截；off=完全不拦截。safe-mode 强制 off；自举仓库默认 observe；其余默认 enforce），
+  `/flow doctor` 展示生效模式与原因；`R-NO-CHANGE` 解锁话术指向两条车道（修 bug 用 `flow_fix_start`，新功能用 `flow_new_change`）。
+- 面板构建侧与 wire 侧统一条数上限（`changes` 50、`intercepts` 50、`trace` 50、`risks` 20、`rules` 50、`roadmap` 30），
+  历史数据按需通过命令/看板查看（remote 按需拉取为后续方向）。
+- `.flowgate/` 目录新增 `state/flags.json`、`state/repair.json`、`fixes/`、`incidents/`（目录说明同步更新；默认不进 git 的策略不变）。
+- 文档同步：README/README.en（双 profile、修复通道示例、21 工具口径、验证脚本清单、FAQ）、auto-flow（观察模式 + 与修复车道边界）、
+  web-walkthrough §5.3（已归因 + 回归门）、implementation-status §3.17 复验补充 + 新增 §3.18、release/v0.1.0 发布清单（verify:host 必跑项）。
+
+### Fixed
+
+- **新建会话/子会话失败（v0.5.1 回归加固）**：根因是 `flowgate` 投影 wire 值含显式 `undefined`（`engine.snapshot()` 的
+  `changeId`/`activeTaskId`、`panel`、`panel.changes[].session` 等），DSH `@deepseek-ai/dsh-api-remotes` 转发 `api-session/added`
+  前用 `isJsonValue()` 校验并拒绝。v0.6 在 v0.5.1 的 `toLosslessJson` 清洗之上，进一步做**统一 lossless 边界**（所有跨边界数据）、
+  **显式 wire DTO**、**投影启动自检（失败不注册）**，把该类问题从"出事后打补丁"变成"坏值不可能出界"。
+- **恢复死锁（自举死锁）**：旧流程中 `/flow off` 是人工命令且要求已有变更、面板禁用=整插件+重启、`FLOWGATE_DISABLE` 只是 E2E 暗门，
+  插件坏了就没有可用恢复路径。v0.6 的 safe-mode sentinel + `host:recover` + 模块开关 + observe 模式让恢复不依赖插件健康。
+- **自举仓库被自己拦截**：自举检测默认 observe，开发插件时不再被 `R-NO-CHANGE` 锁死。
+
+### Verification
+
+- 真机：`pnpm verify:host`（隔离 DSH 0.2.1-rc.5 Web 宿主，零模型请求，宿主 0.8s ready，约 0.02s/会话）**连续 3 个会话创建成功**；
+  中性化修复的模拟旧构建 **第 2/3 次创建报 `not lossless JSON`**（`--expect-fail` 元验证通过，证明回归门有效）。
+- 离线门槛（2026-11-01 集成验证最终实测）：`lint`/`tsc` 通过（148 个源文件，tsc 0 error）；`npx vitest run` **129 files / 1849 tests** 全绿；
+  `pnpm coverage` **86.50 / 76.45 / 87.41 / 89.63**（阈值 86/76/86/89 通过，exit 0）；`pnpm build` host **1.34MB**（1,339,774 B，sha256 `b979dc08…`）/
+  client **375.2KB**（build-client 打印；文件 389,499 B）；`verify:package` **39 文件 / 1172.6KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过。
+- 真实宿主其它复跑：`verify:uninstall` 全部通过（rc.5 `plugin remove` 不 prune node_modules 已知警告）；`measure:startup` 中位数增量
+  **约 +16ms**（多轮 15.3–17.3ms 波动，验收线 <200ms 通过；具体口径见 docs/compat/startup.md）；`verify:compat` **13/13** 通过（隔离 `DSH_HOME=/tmp/fg-compat-final` + `link:` 安装，`--dump-config` 1316 行）。
+- 证据与可复现步骤：[docs/compat/host-smoke.md](docs/compat/host-smoke.md)。
+
+### Notes
+
+- **事实修正（重要）**：该事故在旧构建上需要**连续创建第二个及以后的会话**才触发；单次 `POST /api/session/create` 可能成功，
+  不能作为回归判据。历史提交信息中的旧表述不改写，以本轮文档为准（implementation-status §3.17 复验补充、host-smoke.md）。
+- 已知限制：修复通道的 scope 由发起人声明（非自动推导）；shell 政策是治理策略不是沙箱（兜底为关门 scope 核对 + 全量回归）；
+  修复通道无独立审查子 agent（高风险/跨模块改动仍应走变更车道）；safe-mode 需重启生效；`verify:host` 依赖本机 DSH，
+  CI 不跑（发布清单要求本地执行）；投影 wire 体积在极端 `snapshot` 下仍可能超 256KiB（面板按需拉取为后续方向）。
+
 ## [Unreleased]（v0.5.1 修复：会话投影非 lossless JSON 导致新建会话失败，2026-11-01）
 
 ### Fixed
@@ -14,6 +107,9 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
   - 修复：`src/host/projection/index.ts` 增加 `toLosslessJson()`（JSON 往返清洗），投影 `init()` 与 `wire.view()` 在交给 DSH 前清洗；`undefined` 被丢弃、NaN/Infinity 变 null，满足 DSH 的 lossless JSON 约束（契约已补充到 host-client-contract §1.1）。
   - 回归测试：`test/host/projection.test.ts` 覆盖 `toLosslessJson` 与「latest 投影带 undefined 字段时 wire.view 仍 lossless」；原有 passthrough 测试改为断言内容等价（不再断言同一引用）。
   - 真机复现/验证（隔离 DSH_HOME + 多会话 bundle profile + link 本仓库）：旧构建 `POST /api/session/create`（新 sessionId）返回 `gateway/internal ... not lossless JSON data`；修复构建同请求返回 `ok:true` 并成功创建会话（0 模型请求）。
+  - **2026-11-01 复验补充（事实修正）**：单次 `POST /api/session/create` 不足以复现/回归该 bug——首个会话创建时 FlowGate engine 尚未初始化，
+    首个会话可能正常；**连续创建第二个及以后的会话**才会在会话摘要里带上含 `undefined` 的投影值并失败。回归门为 `pnpm verify:host`
+    （连续创建 ≥2 个会话；中性化修复的模拟旧构建第 2/3 次失败、修复构建 3/3 通过），见 [docs/compat/host-smoke.md](docs/compat/host-smoke.md)。
 
 ### Verification
 

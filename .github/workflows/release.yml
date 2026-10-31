@@ -13,8 +13,11 @@
 #     去掉 `v` 前缀后的值；npm 上不能已存在同版本。
 #   - `docs/release/<tag>.md` 作为 Release 说明（本仓库当前为
 #     docs/release/v0.1.0.md）；缺失时降级为 GitHub 自动生成的说明。
-#   - 这里不跑 verify:compat：它需要本机安装真实 DSH 桌面端做隔离 profile 验证，
-#     GitHub 托管的 runner 上没有 DSH，兼容性证据见 docs/compat/。
+#   - 这里不跑 verify:compat / verify:uninstall / verify:host：它们需要本机安装真实 DSH
+#     桌面端（隔离 profile/宿主），GitHub 托管的 runner 上没有 DSH。兼容性证据见 docs/compat/。
+#   - **v0.6 起新增人工前置：`pnpm verify:host`（隔离真实宿主连续创建 ≥2 个会话，断言无
+#     not lossless JSON）必须在有 DSH 的机器上通过后才能打 tag**；record the result in
+#     docs/release/<tag>.md. 它是 v0.5.1「新建会话失败」事故的唯一可靠回归门，CI 无法替代。
 #
 # 失败恢复：若 npm publish 已成功但 Release 创建失败，不要重跑本 workflow
 # （npm 会因版本已存在而失败），手动执行：

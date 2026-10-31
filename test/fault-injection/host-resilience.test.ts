@@ -22,6 +22,10 @@ import { FakeClock, FakeCommandRunner, FakeGit, PASSING_SUMMARY, VITEST_PASS_STD
 import { flush, setupPlugin, type PluginHarness } from '../host/helpers'
 import { activeHostRuntime, apply, resetHostPluginForTest } from '../../src/host/index'
 import { createFakeContext } from '../../src/host/testing/fake-ctx'
+import {
+  resetProjectionSelfCheckForTest,
+  setProjectionSelfCheckForTest,
+} from '../../src/host/projection/index'
 import { executeFlowCommand } from '../../src/host/commands/index'
 import type { DshToolExecution } from '../../src/host/adapters/dsh-types'
 
@@ -84,6 +88,7 @@ afterEach(async () => {
     await harness.cleanup()
     harness = null
   }
+  resetProjectionSelfCheckForTest()
   resetHostPluginForTest()
 })
 
@@ -373,6 +378,33 @@ describe('故障注入：会话租约文件损坏（sessions.json 被截断）',
       { tool: 'write', agentRole: 'main' },
     )
     expect(afterRepair.message).not.toContain('R-LOCKED')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 故障注入：投影自检失败（P0-2）——坏投影不得毒化会话创建
+// ---------------------------------------------------------------------------
+describe('故障注入：投影启动自检失败', () => {
+  it('自检失败时不注册投影、插件启动不抛错、doctor 可见；其余模块照常', async () => {
+    setProjectionSelfCheckForTest(() => ({
+      ok: false,
+      checkedAt: '2026-11-01T00:00:00.000Z',
+      stateVersion: 2,
+      error: '注入的坏投影演练：wire 值不是 lossless JSON',
+    }))
+    // 不得抛到宿主启动流程（apply/startHostPlugin 内部消化）。
+    harness = await setupPlugin()
+    expect(harness.projections.state.definitions.has('flowgate')).toBe(false)
+    expect(harness.runtime.projectionSelfCheck()?.ok).toBe(false)
+    const inert = harness.runtime.inertReasons.find((reason) => reason.stage === '投影自检')
+    expect(inert).toBeDefined()
+    expect(inert?.message).toContain('已跳过注册')
+    // 工具/命令/守卫不受影响。
+    expect(harness.tools.state.tools.has('flow_status')).toBe(true)
+    expect(harness.tools.state.guards.length).toBe(1)
+    const doctorText = await executeFlowCommand(harness.runtime, 'doctor', harness.agent)
+    expect(doctorText).toContain('投影自检：失败')
+    expect(doctorText).toContain('会话创建不受影响')
   })
 })
 

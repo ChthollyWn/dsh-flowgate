@@ -9,7 +9,7 @@ import type { HostRuntime } from '../runtime.js'
 import type { DoctorReport } from '../../core/types.js'
 import { toAgentError } from '../errors.js'
 import { postcheckStatus } from '../postcheck/index.js'
-import { projectionInfo } from '../projection/index.js'
+import { lastProjectionSelfCheck, projectionInfo } from '../projection/index.js'
 import { FLOWGATE_PRESETS } from '../guard/delegation.js'
 import { ensureCoverage } from '../coverage/index.js'
 
@@ -66,6 +66,33 @@ export async function formatDoctorReport(runtime: HostRuntime): Promise<string> 
     lines.push(`活动任务：${report.activeTasks.length > 0 ? report.activeTasks.join('、') : '无'}`)
     lines.push(`待处理项：${report.openPending} 个`)
     lines.push(`守卫心跳：工具调用 ${report.guardHeartbeat.toolCalls} 次 / 判定 ${report.guardHeartbeat.decisions} 次`)
+  }
+
+  // 运行模式（P0-4 / P1-7）：enforcement + safe-mode + 自举检测 + 宿主 epoch。
+  lines.push('')
+  lines.push('运行模式：')
+  const safeMode = runtime.safeModeInfo()
+  lines.push(`  接管模式：${runtime.enforcement()}（${runtime.enforcementReason()}）`)
+  lines.push(
+    `  safe-mode：${safeMode.active ? `生效（${safeMode.source ?? 'unknown'}${safeMode.path ? `：${safeMode.path}` : ''}；${safeMode.reason ?? ''}）` : '未触发'}`,
+  )
+  const safePaths = runtime.safeModePaths()
+  lines.push(`  safe-mode 读取路径：${safePaths.length > 0 ? safePaths.join('、') : '（无法解析 home；只支持 FLOWGATE_SAFE/配置）'}`)
+  lines.push(`  自举检测：${runtime.isSelfHost() ? '是（项目根是 dsh-flowgate 自身，默认 observe，不拦截写入）' : '否'}`)
+  lines.push(`  宿主 epoch：${runtime.hostEpoch()}`)
+  lines.push(`  插件启用：${runtime.isEnabled() ? '是' : '否（config.enabled=false）'}`)
+
+  // 模块开关（P0-4）：env/config/safe-mode 三层合并后的实际安装结果。
+  lines.push('')
+  lines.push('模块开关：')
+  const modules = runtime.moduleInfo()
+  if (modules.length === 0) {
+    lines.push('  未记录（插件安装阶段未完成或运行在测试替身里）')
+  } else {
+    for (const module of modules) {
+      const icon = module.status === 'ok' ? '✓' : module.status === 'failed' ? '✗' : '−'
+      lines.push(`  ${icon} ${module.stage}（${module.name}）${module.status === 'skipped' ? `：已跳过（${module.reason ?? '未说明'}）` : module.status === 'failed' ? `：安装失败（${module.reason ?? '未知错误'}）` : ''}`)
+    }
   }
 
   // 覆盖自检：读取前兜底（工具注册早于引擎就绪时可能从未采样，同步补采一次）。
@@ -125,6 +152,14 @@ export async function formatDoctorReport(runtime: HostRuntime): Promise<string> 
   lines.push(`事后检测：${postcheck.gitAvailable ? 'git 可用（前后快照归因）' : 'git 不可用（降级为文件扫描/任务开始快照）'}`)
   const projection = projectionInfo()
   lines.push(`会话投影：key=${projection.key} stateVersion=${projection.stateVersion} record=${projection.recordType}`)
+  const selfCheck = runtime.projectionSelfCheck() ?? lastProjectionSelfCheck()
+  if (!selfCheck) {
+    lines.push('投影自检：未运行（宿主缺少 sessionProjections 服务或尚未注入）')
+  } else if (selfCheck.ok) {
+    lines.push(`投影自检：通过（${selfCheck.wireBytes ?? 0}B；检查于 ${selfCheck.checkedAt}）`)
+  } else {
+    lines.push(`投影自检：失败，已跳过注册（${selfCheck.error ?? '未知错误'}）；会话创建不受影响`)
+  }
   lines.push(`预设：${FLOWGATE_PRESETS.engineering} / ${FLOWGATE_PRESETS.executor} / ${FLOWGATE_PRESETS.reviewer}（cordis.patch.yml 声明；若宿主未加载 preset 只影响工程模式推荐）`)
   lines.push('')
   lines.push('如需重建状态：/flow repair；如状态文件损坏仍无法恢复：把 .flowgate/state 与账本一起备份后运行 /flow doctor 反馈。')

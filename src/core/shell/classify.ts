@@ -750,6 +750,258 @@ export function extractWriteTargets(command: string): string[] {
   return [...new Set(targets)]
 }
 
+// ---------------------------------------------------------------------------
+// Repair lane shell policy (v0.5.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * 修复通道允许的 shell 面（v0.5.1）：测试/构建/lint/typecheck/run 类命令 +
+ * 只读/提交类 git。危险命令（rm -rf、git push、git reset --hard、npm publish、
+ * curl/wget、ssh、chmod/chown、mkfs…）一律拒绝。
+ *
+ * 说明：这是「修复通道的治理策略」，不是安全沙箱。运行类命令（node 脚本、
+ * pnpm run <script>）本身可以执行任意项目代码，这里按负责人确认的产品口径放行，
+ * 真正兜底的是 finishRepair 的「改动文件必须命中 scope」与账本审计。
+ */
+export interface RepairShellVerdict {
+  allowed: boolean
+  /** 面向 agent 的拒绝原因（allowed=false 时）。 */
+  reason?: string
+}
+
+/** 修复通道里直接拒绝的命令名（含网络、权限、破坏性文件操作与基础设施操作）。 */
+const REPAIR_BLOCKED_COMMANDS = new Set([
+  'rm',
+  'rmdir',
+  'shred',
+  'unlink',
+  'mv',
+  'cp',
+  'ln',
+  'install',
+  'truncate',
+  'tee',
+  'dd',
+  'patch',
+  'chmod',
+  'chown',
+  'chgrp',
+  'chattr',
+  'setfacl',
+  'sudo',
+  'doas',
+  'su',
+  'ssh',
+  'scp',
+  'sftp',
+  'rsync',
+  'curl',
+  'wget',
+  'nc',
+  'ncat',
+  'netcat',
+  'telnet',
+  'ftp',
+  'ping',
+  'kill',
+  'pkill',
+  'killall',
+  'reboot',
+  'shutdown',
+  'systemctl',
+  'service',
+  'launchctl',
+  'crontab',
+  'docker',
+  'podman',
+  'kubectl',
+  'helm',
+  'terraform',
+  'ansible',
+  'aws',
+  'gcloud',
+  'az',
+  'gh',
+  'glab',
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'fish',
+])
+
+/** 修复通道允许的 git 子命令：只读 + 提交类（add/commit 需自行承担 scope 责任）。 */
+const REPAIR_GIT_SUBCOMMANDS = new Set([
+  'status',
+  'diff',
+  'log',
+  'show',
+  'add',
+  'commit',
+  'rev-parse',
+  'stash',
+  'ls-files',
+  'blame',
+  'grep',
+  'merge-base',
+  'branch',
+])
+
+/** 只读命令（允许用来取证/跑失败命令）。 */
+const REPAIR_READONLY_COMMANDS = new Set([
+  'cat',
+  'ls',
+  'head',
+  'tail',
+  'grep',
+  'rg',
+  'find',
+  'wc',
+  'sort',
+  'uniq',
+  'cut',
+  'awk',
+  'sed',
+  'diff',
+  'cmp',
+  'pwd',
+  'which',
+  'type',
+  'echo',
+  'printf',
+  'true',
+  'false',
+  'test',
+  'date',
+  'stat',
+  'file',
+  'du',
+  'df',
+  'tree',
+  'basename',
+  'dirname',
+  'realpath',
+  'node',
+  'python',
+  'python3',
+  'deno',
+  'ruby',
+  'php',
+  'java',
+  'javac',
+])
+
+/** 运行类命令（run 类）允许的目标子命令。 */
+const REPAIR_RUN_TARGETS: Record<string, string[]> = {
+  go: ['run', 'test', 'build', 'vet', 'generate'],
+  cargo: ['run', 'test', 'build', 'check', 'clippy', 'nextest'],
+  make: ['test', 'check', 'build', 'all', 'lint', 'verify', 'ci', 'run'],
+  just: ['test', 'check', 'build', 'lint', 'ci'],
+  dotnet: ['run', 'test', 'build'],
+  swift: ['run', 'test', 'build'],
+  mvn: ['test', 'package', 'compile', 'verify', 'install', 'spotless:check', 'checkstyle:check'],
+  mvnw: ['test', 'package', 'compile', 'verify', 'install', 'spotless:check', 'checkstyle:check'],
+  gradle: ['test', 'build', 'check', 'assemble', 'lint'],
+  gradlew: ['test', 'build', 'check', 'assemble', 'lint'],
+  flutter: ['test', 'analyze', 'build'],
+}
+
+/** 包管理器里允许的子命令；`run`/`run:<script>` 视为 run 类命令放行。 */
+function isRepairPackageManagerCommand(name: string, args: string[]): RepairShellVerdict | null {
+  if (!PACKAGE_MANAGERS.has(name)) return null
+  const sub = packageManagerSubcommand(name, args)
+  if (sub === 'publish' || sub.startsWith('publish:')) {
+    return { allowed: false, reason: '修复通道不允许 npm publish / 发布类命令' }
+  }
+  if (sub === 'run' || sub.startsWith('run:')) {
+    // `pnpm run <script>` / `npm run-script <script>`：run 类命令放行（脚本由项目定义）。
+    return { allowed: true }
+  }
+  if (['test', 't', 'build', 'lint', 'typecheck', 'type-check', 'check', 'ci'].includes(sub)) {
+    return { allowed: true }
+  }
+  if (sub === 'exec' || sub === 'dlx' || sub === 'x') {
+    // `pnpm exec <cmd>`：把剩余参数当命令重新分类，避免 `pnpm exec rm -rf` 绕过。
+    const index = args.findIndex((arg) => arg === sub)
+    const rest = index >= 0 ? args.slice(index + 1) : []
+    if (rest.length === 0) return { allowed: false, reason: `修复通道不允许 ${name} ${sub}（缺少被执行的命令）` }
+    const verdict = classifyRepairShellCommand(rest.join(' '))
+    if (!verdict.allowed) return { allowed: false, reason: `修复通道不允许 ${name} ${sub}：${verdict.reason ?? ''}` }
+    return { allowed: true }
+  }
+  return { allowed: false, reason: `修复通道不允许 ${name} ${sub === '' ? '' : sub}（只允许 test/build/lint/typecheck/run 类脚本）` }
+}
+
+/** 单个命令段是否在修复通道允许的类别内。 */
+function repairSegmentAllowed(segment: CommandSegment): RepairShellVerdict | null {
+  const { name, args } = unwrap(segment)
+  if (name === '') return { allowed: true }
+  if (REPAIR_BLOCKED_COMMANDS.has(name) || name.startsWith('mkfs')) {
+    return { allowed: false, reason: `修复通道不允许命令 ${name}（网络/权限/破坏性/基础设施类命令）` }
+  }
+  const pmVerdict = isRepairPackageManagerCommand(name, args)
+  if (pmVerdict !== null) return pmVerdict
+  if (name === 'npx' || name === 'pnpx' || name === 'bunx') {
+    // `npx <tool>`：只允许解析到已知的测试/构建/lint 工具。
+    const target = baseName(args.find((arg) => !arg.startsWith('-')) ?? '')
+    if (target !== '' && (TEST_RUNNERS.has(target) || BUILD_TOOLS.has(target) || LINT_TOOLS.has(target) || REPAIR_RUN_TARGETS[target] !== undefined)) {
+      return { allowed: true }
+    }
+    return { allowed: false, reason: `修复通道不允许 npx 执行未知工具 ${target === '' ? '' : target}` }
+  }
+  if (name === 'git') {
+    const invocation = gitInvocation(args)
+    if (invocation === null) return { allowed: true }
+    if (!REPAIR_GIT_SUBCOMMANDS.has(invocation.subcommand)) {
+      return {
+        allowed: false,
+        reason: `修复通道只允许只读/提交类 git（status/diff/log/add/commit/rev-parse/stash），不允许 git ${invocation.subcommand}`,
+      }
+    }
+    return { allowed: true }
+  }
+  if (isTestSegment(name, args) || isBuildSegment(name, args) || isLintSegment(name, args)) {
+    return { allowed: true }
+  }
+  const runTargets = REPAIR_RUN_TARGETS[name]
+  if (runTargets !== undefined) {
+    const target = args.find((arg) => !arg.startsWith('-')) ?? ''
+    if (target === '' || runTargets.includes(target)) return { allowed: true }
+    return { allowed: false, reason: `修复通道不允许 ${name} ${target}（只允许 ${runTargets.join('/')}）` }
+  }
+  if (REPAIR_READONLY_COMMANDS.has(name)) {
+    if (name === 'sed' && args.some((arg) => arg === '-i' || arg.startsWith('-i') || arg.startsWith('--in-place'))) {
+      return { allowed: false, reason: '修复通道不允许 sed -i 直接改文件；请用编辑工具改动（便于范围审计）' }
+    }
+    return { allowed: true }
+  }
+  return {
+    allowed: false,
+    reason: `修复通道不允许命令 ${name}（只允许测试/构建/lint/typecheck/run 类命令与只读/提交类 git）`,
+  }
+}
+
+/**
+ * 修复通道的 shell 策略判定：一次判定整条命令（所有分段都必须通过）。
+ * 返回 `{ allowed: true }` 才允许执行。
+ */
+export function classifyRepairShellCommand(command: string): RepairShellVerdict {
+  const trimmed = command.trim()
+  if (trimmed === '') return { allowed: false, reason: '命令为空' }
+  const dangerous = dangerousCommandReasons(trimmed)
+  if (dangerous.length > 0) return { allowed: false, reason: dangerous.join('；') }
+  if (isPushCommand(trimmed)) return { allowed: false, reason: '修复通道不允许 git push / 发布类命令' }
+  if (isDependencyCommand(trimmed)) return { allowed: false, reason: '修复通道不允许改依赖清单/锁文件' }
+  const segments = parseCommandLine(trimmed)
+  if (segments.length === 0) return { allowed: false, reason: '无法解析命令' }
+  for (const segment of segments) {
+    const verdict = repairSegmentAllowed(segment)
+    if (verdict !== null && !verdict.allowed) return verdict
+  }
+  return { allowed: true }
+}
+
 /** Re-exported types used by callers. */
 export type { CommandSegment, ParsedCommand }
 export { parseCommands }

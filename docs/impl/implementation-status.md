@@ -21,7 +21,7 @@
 ```bash
 pnpm install
 pnpm lint        # 分层规则（core 不得依赖 DSH/host/client）+ tsc --noEmit
-pnpm test        # 112 个测试文件 / 1522 用例（2026-10-31 第六轮实测）
+pnpm test        # 129 个测试文件 / 1849 用例（2026-11-01 v0.6 最终实测）
 pnpm build       # lib/host.js（ESM）+ lib/client.js（loader 包装）
 pnpm coverage    # 覆盖率 + thresholds（core+host 口径）
 pnpm verify:client
@@ -31,7 +31,9 @@ DSH_HOME=/tmp/fg-home node scripts/verify-dsh-compat.mjs --profile flowgate --wr
 DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --dump-config
 ```
 
-最近一次结果（2026-10-31 第六轮，代码提交 `cea85dd` + 文档提交；全部为当前工作树实测）：lint + typecheck 通过（130 个源文件）；`test` **112 files / 1522 tests** 全绿（第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42 / 69.26 / 82.59 / 88.48，host 74.09 / 65.71 / 70.00 / 78.20；构建产物 `lib/host.js` **1,210,648 B（≈1.21MB）** / `lib/client.js` **223,830 B（≈219KB）**（build-client 打印的 211.4KB 是 JS 字符串长度，不是文件体积）；`verify:package` **39 文件 / 1032.9KB**（docs 修改后重跑实测，含 README）；`verify:client` 通过。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env` 的 profile + `link:` 安装，新构建；`--dump-config` 1314 行）、`measure:startup` 中位数增量 **+16.2ms**（基线 16.5ms / 加载 32.6ms，验收线 <200ms）、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。**第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success。**
+最近一次结果（2026-11-01 v0.6，工作树未提交；全部为当前工作树实测）：lint + typecheck 通过（**148 个源文件**，tsc 0 error）；`test` **129 files / 1849 tests** 全绿；`pnpm coverage` 通过 thresholds（86/76/86/89）：合计 **86.50 / 76.45 / 87.41 / 89.63**（语句/分支/函数/行）；构建产物 `lib/host.js` **1,339,774 B（≈1.34MB，sha256 `b979dc08…`）** / `lib/client.js` **389,499 B（build-client 打印 375.2KB，为 JS 字符串长度）**；`verify:package` **39 文件 / 1172.6KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过（含 `flow_fix_*` / `flow_self_pause` / `flow_incident_close` 的 toolview 插槽）；`verify:host`（真机隔离宿主）**3/3 会话创建成功、0.8s ready、约 0.02s/会话、无 not lossless JSON**；`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）；`measure:startup` 中位数增量 **约 +16ms**（多轮 15.3–17.3ms 波动，验收线 <200ms；具体口径见 docs/compat/startup.md）。`verify:compat` **13/13** 通过（隔离 `DSH_HOME=/tmp/fg-compat-final` + `link:` 安装，`--dump-config` 1316 行）。
+
+上一轮结果（2026-10-31 第六轮，代码提交 `cea85dd` + 文档提交，保留以便追溯）：lint + typecheck 通过（130 个源文件）；`test` **112 files / 1522 tests** 全绿（第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42 / 69.26 / 82.59 / 88.48，host 74.09 / 65.71 / 70.00 / 78.20；构建产物 `lib/host.js` **1,210,648 B（≈1.21MB）** / `lib/client.js` **223,830 B（≈219KB）**（build-client 打印的 211.4KB 是 JS 字符串长度，不是文件体积）；`verify:package` **39 文件 / 1032.9KB**（docs 修改后重跑实测，含 README）；`verify:client` 通过。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env` 的 profile + `link:` 安装，新构建；`--dump-config` 1314 行）、`measure:startup` 中位数增量 **+16.2ms**（基线 16.5ms / 加载 32.6ms，验收线 <200ms）、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。**第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success。**
 
 上一轮结果（2026-10-31 第五轮，代码提交 `6e3bd24` + 文档提交，保留以便追溯）：lint 通过（130 个源文件）；`test` **107 files / 1459 tests** 全绿；构建产物 host 约 1.20MB（1,196,501 B）/ client 约 202KB（202,243 B）；`verify:package` 通过（**39 文件 / 1015.9KB**）；`verify:client` 通过。`pnpm coverage` 通过 thresholds（80/80/80/70）；文本报告聚合：core 82.97 / 68.50 / 81.51 / 88.15、host 73.76 / 65.10 / 70.00 / 77.82、合计 86.19 / 75.84 / 86.60 / 89.29。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-final-home` 的 profile + link 安装；含 6 项离线结构检查）、`measure:startup` 中位数增量 **+15.8ms**、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。
 
@@ -404,6 +406,81 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 | 测试 | `test/host/projection.test.ts`：`toLosslessJson` 清洗规则 + latest 带 undefined 时 `wire.view` 无 undefined 且 JSON 往返严格相等 |
 | 真机证据 | 隔离宿主（多会话 bundle + link 本仓库）：旧构建 `POST /api/session/create`（新 sessionId）→ `gateway/internal ... not lossless JSON data`；修复构建同请求 → `{ ok: true, sessionId }`；0 模型请求 |
 | 验证 | lint 绿；119 files / 1689 tests；coverage 86.18/76.23/86.88/89.26；build host 009514a2… / client baf51e8c…；verify:package 39 文件/1080.6KB；verify:client 18 插槽 |
+
+> **2026-11-01 复验补充（回归门事实，权威口径）**：单次 `POST /api/session/create` **不足以**
+> 复现/回归本 bug。首个会话创建时 FlowGate engine 尚未初始化，投影 cell 由干净的 `init()` 快照物化；
+> 首个会话完成 engine 初始化后，**连续创建第二个及以后的会话**才会在会话摘要里带上含 `undefined`
+> 的投影值并失败。meta 验证：把当前构建的 `toLosslessJson$1` 中性化模拟修复前行为后，隔离宿主上
+> 第 1 次 create 成功、第 2/3 次 create 报 `gateway/internal ... not lossless JSON data`；
+> 修复构建连续 3/3 成功。因此新增真机回归门 **`pnpm verify:host`**（`scripts/smoke-host.mjs`，默认
+> 连续创建 3 个会话、最少 2 个，支持 `--plugin <dir> --expect-fail` 反向元验证）。证据见
+> [docs/compat/host-smoke.md](../compat/host-smoke.md)。旧表述"旧构建单次 POST 即失败"仅描述当时
+> 观察到的一次失败请求，不能作为回归判据。
+
+## 3.18 v0.6：修复通道 + 自愈/恢复 + 真机回归门（2026-11-01，进行中）
+
+> 负责人要求：v0.5.1 事故（投影非 lossless JSON → 连续新建会话失败、恢复反被插件挡住）要根本修复——
+> **修 bug 作为 vibe coding 核心环节成为一等公民（修复通道）**，同时补齐 P0/P1/P2：
+> P0-3 真机会话创建冒烟 `verify:host`；P1-6 双 profile + 恢复 CLI；P1-10 恢复 CLI/SOP；
+> P2-12 重启/热重载 SOP；P2-13 控制面外移决策；P2-11 投影瘦身 + 预算；P1-8/P1-9 修复通道/事故。
+
+### 3.18.1 修复通道（repair lane，P1-8/P1-9）
+
+| 项 | 内容 |
+|---|---|
+| 车道模型 | 变更车道（七阶段 + GR/G1/G3/G6）+ **修复车道**（FIX-id：声明 symptom/scope/verify → RED → 修 → GREEN → 全量回归 → 自动归档；无人工门、无 G1/G3 文档、不逐动作拦截） |
+| 工具 | `flow_fix_start` / `flow_fix_done` / `flow_fix_abort`（+ 原有 `flow_verify` 产生 RED/GREEN 回执） |
+| 命令 | `/flow fix`（状态）、`/flow fix done`、`/flow fix abort <理由>`；**旧 `/flow repair`（从账本重建状态）语义不变** |
+| 守卫 | 修复通道内只放行命中 `scope` 的写入（`R-FIX-SCOPE` 拒绝越界）；shell 白名单（`R-FIX-SHELL`，测试/构建/lint/run + 只读/提交类 git）；`R-FIX-TOOL` 拒绝 delegate/MCP；`.flowgate`/`.git` 仍 `R-PROTECTED` |
+| 关门校验 | RED 存在、GREEN 晚于 RED、`git status --untracked-files=all` 全部改动在 scope 内、`config.commands.test` 全量回归通过、重跑声明 verify 通过、回执输入哈希新鲜；失败保持修复通道开启 |
+| 产物/审计 | `.flowgate/state/repair.json`（进行中）+ `.flowgate/fixes/<FIX-id>.json` + `fixes/index.md`；账本 `repair.started/repair.evidence/repair.done/repair.aborted`；快照 `snapshot.repair` |
+| 文档 | [docs/impl/repair-lane.md](repair-lane.md) |
+
+### 3.18.2 自愈 / 恢复（P0-4 / P1-10 / P2-12）
+
+| 项 | 内容 |
+|---|---|
+| safe-mode | 启动期 sentinel `$DSH_HOME/flowgate/safe-mode`（默认 `~/.dsh`；host 侧改为 honor `DSH_HOME`）+ 项目级 `<root>/.flowgate/safe-mode` + `FLOWGATE_SAFE=1` + `config.safeMode`；生效后强制 `takeover=off` 并跳过 guard/delegation/gates/dispatch，其余模块保留 |
+| 模块开关 | `FLOWGATE_DISABLE=<names>`（E2E/二分）/ `config.modules.<name>=false`；`/flow doctor` 逐项显示 ok/failed/skipped 与原因 |
+| takeover 三态 | `enforce`（全部硬拦）/ `observe`（自举仓库默认：**仅对 `R-NO-CHANGE` 未立项写入放行**并记账 `takeover.observed`，其余规则仍拦截）/ `off`（safe-mode/配置：完全不拦不记）；`/flow doctor` 显示生效模式与原因 |
+| 恢复 CLI | `pnpm host:recover`：`--status` / `--safe-mode [--reason]` / `--clear` / `--profile <p> --remove [--yes]`（默认 dry-run）；审计 JSONL 写 `$DSH_HOME/flowgate/recovery.log`；不删项目数据 |
+| 文档 | [docs/impl/host-recovery.md](host-recovery.md)、[docs/impl/dev-loop.md](dev-loop.md)（双 profile：desktop 不 link、dev=link、dogfood=tgz；改完→verify:host→pack→装 dogfood→重启）、[docs/impl/control-plane-decision.md](control-plane-decision.md) |
+| 自暂停/事故 | `flow_self_pause`（项目级暂停 `flags.off` by=agent + `INC-id` 事故记录 + `autoRearm`，下次宿主启动自动恢复）/ `flow_incident_close`（补摘要/commit/tests/files 归档）；命令 `/flow incident`；`.flowgate/incidents/<INC-id>.json` |
+
+### 3.18.3 投影自愈与瘦身（P0-2 / P2-11）
+
+| 项 | 内容 |
+|---|---|
+| lossless 边界 | `src/host/boundary/json.ts`：镜像 DSH `isJsonValue`（拒绝 undefined/NaN/Infinity/负零/稀疏数组/类实例/symbol/bigint/循环引用），host 跨边界数据统一收口；工具结果 `toLosslessValue` |
+| wire 显式 DTO | `src/host/projection/wire.ts`：snapshot 白名单字段 + panel 逐块挑选 + 条数上限（changes 50/evidence 50/intercepts 50/reviews 20/…）+ 单帧 256KiB 预算 + 降级顺序；`stateVersion=2` |
+| 启动自检 | `projectionSelfCheck()`：脏 fixture 走 init/apply/wire，失败**不注册投影**（插件其余功能照常），`/flow doctor` 可见 |
+| 新投影字段 | `snapshot.takeover/offBy/incident/repair`（可选增量，契约 §1.5） |
+| 预算文档 | [docs/impl/projection-budget.md](projection-budget.md)：空状态实测 wire 12111B、满额估算 214.5KiB（<256KiB 目标）、按需拉取为后续 |
+
+### 3.18.4 真机回归门 `verify:host`（P0-3）
+
+- `scripts/smoke-host.mjs`（`pnpm verify:host`）：隔离 `DSH_HOME`/`HOME` + 官方 web 模板 profile + `link:` 本仓库
+  → 真实 Web 宿主（`--no-open --port 0`，解析 token）→ `GET /connect` 换鉴权 Cookie → **连续创建 ≥2（默认 3）个会话**
+  → 断言 `ok:true` + `sessionId` + 响应无 `not lossless JSON`/`gateway/internal`。
+- 证据（2026-11-01）：修复构建 **3/3 GREEN**；中性化修复的模拟旧构建 **第 2/3 次 RED**（`--expect-fail` 元验证通过）。
+  详见 [docs/compat/host-smoke.md](../compat/host-smoke.md)。
+- CI 不跑（GitHub runner 无 DSH 桌面端）；发布清单要求在有 DSH 的机器上执行并记录。
+
+### 3.18.5 验证数字（2026-11-01 集成验证，Lead 实测）
+
+| 项 | 结果 |
+|---|---|
+| lint / typecheck | `node scripts/lint-layers.mjs` 通过（148 个源文件）；`npx tsc --noEmit` 0 error |
+| 测试 | `npx vitest run` **129 files / 1849 tests** 全绿 |
+| 覆盖率 | `pnpm coverage` **86.50 / 76.45 / 87.41 / 89.63**（阈值 86/76/86/89 通过，exit 0） |
+| 构建 | `pnpm build`：host **1.34MB**（1,339,774 B，sha256 `b979dc08…`）/ client **375.2KB**（build-client 打印；文件 389,499 B） |
+| npm 包 | `pnpm verify:package` **39 文件 / 1172.4KB**（含 lib/host.js、lib/client.js、skills/） |
+| 浏览器 bundle | `pnpm verify:client` **18 插槽 + 1 右栏 tab** 通过（含 `flow_fix_*` / `flow_self_pause` / `flow_incident_close` 的 toolview 插槽） |
+| **真机回归门** | `pnpm verify:host` **3/3 会话创建成功**，隔离 web 宿主 **0.8s ready**、约 **0.02s/会话**，无 `not lossless JSON`（本次事故的回归门） |
+| 安装/卸载 | `pnpm verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告） |
+| 启动增量 | `pnpm measure:startup` **约 +17ms**（<200ms 通过；具体值见 docs/compat/startup.md 口径） |
+| 兼容复跑 | `verify:compat` **13/13** 通过（隔离 `DSH_HOME` + `link:` 安装，`--dump-config` 1316 行） |
+
 
 ## 4. 剩余项（第六轮复验后，四分）
 

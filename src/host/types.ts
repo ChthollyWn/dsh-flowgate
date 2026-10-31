@@ -23,10 +23,11 @@ import type {
   GateId,
   GitPort,
   RiskLevel,
+  TakeoverMode,
   TestSummary,
 } from '../core/types.js'
 
-export type { EngineOptions, FlowEngine }
+export type { EngineOptions, FlowEngine, TakeoverMode }
 
 /** host 层可用的引擎成员（等价于 FlowEngine 本身；测试用假引擎时做一次断言）。 */
 export type EngineLike = FlowEngine
@@ -41,6 +42,70 @@ export interface HostConfig {
   maxTurnContinue?: number
   /** 覆盖项目根解析：固定使用该目录（测试/单仓多项目时用）。 */
   projectRoot?: string
+  /**
+   * 接管模式（v0.5.1 / P1-7）：
+   * - `enforce`（默认）：完全接管，未立项的写操作被拒绝；
+   * - `observe`：只观察不拦截（自举开发本插件时默认）；
+   * - `off`：不拦截不记录（safe-mode 会强制 off）。
+   * 显式配置优先于自举检测；safe-mode 时强制 off。
+   */
+  takeover?: TakeoverMode
+  /** 覆盖自举检测（默认读项目根 package.json 的 name/dsh 字段）。 */
+  selfHost?: boolean
+  /**
+   * 安全模式（P0-4）：true 时强制 takeover='off' 并跳过
+   * guard/delegation/dispatch/gates 安装。也可由 sentinel 文件或
+   * `FLOWGATE_SAFE=1` 触发（见 src/host/mode.ts）。
+   */
+  safeMode?: boolean
+  /**
+   * 模块级开关（P0-4）：false 时不安装该模块；即使被其它开关强制打开，
+   * 安装状态与降级原因也会写进 /flow doctor。
+   */
+  modules?: Partial<Record<HostModuleName, boolean>>
+}
+
+/** 可单独开关的宿主功能模块（与 index.ts 的安装顺序一致）。 */
+export type HostModuleName =
+  | 'session'
+  | 'guard'
+  | 'delegation'
+  | 'coverage'
+  | 'postcheck'
+  | 'compression'
+  | 'context'
+  | 'projection'
+  | 'gates'
+  | 'commands'
+  | 'tools'
+  | 'dispatch'
+
+/** 单个模块的安装结果（doctor 可见）。 */
+export interface HostModuleInfo {
+  name: HostModuleName
+  /** 中文功能名（安装日志/doctor 用）。 */
+  stage: string
+  status: 'ok' | 'failed' | 'skipped'
+  /** skipped/failed 的原因。 */
+  reason?: string
+}
+
+/** safe-mode 解析结果（P0-4）。 */
+export interface SafeModeInfo {
+  active: boolean
+  reason?: string
+  source?: 'env' | 'config' | 'sentinel'
+  /** source='sentinel' 时的文件路径（doctor 展示/人工清除用）。 */
+  path?: string
+}
+
+/**
+ * 传给 core 的引擎选项：EngineOptions + v0.5.1 新增的
+ * takeover/hostEpoch（host 在构造引擎前确定接管模式）。
+ */
+export interface HostEngineOptions extends EngineOptions {
+  takeover?: TakeoverMode
+  hostEpoch?: string
 }
 
 /** 工具分类结果（对应 core/rules/toolclass.ts 的 ToolClassification）。 */
