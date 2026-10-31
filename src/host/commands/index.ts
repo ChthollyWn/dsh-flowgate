@@ -322,8 +322,18 @@ async function approveCommand(runtime: HostRuntime, agent: DshAgent | null, args
     const card = confirmCardText(runtime)
     if (card) lines.push(card, '')
   }
-  const reason = args.length > 1 ? args.slice(1).join(' ') : rest.includes(' ') ? rest.split(/\s+/).slice(1).join(' ') : undefined
-  const text = await approveHumanGate(runtime, agent, gateCandidate, reason)
+  const confirmRisks = args.includes('--confirm-risks') || rest.includes('--confirm-risks')
+  const reasonArgs = args.filter((arg) => arg !== '--confirm-risks')
+  const reasonFromArgs = reasonArgs.length > 1 ? reasonArgs.slice(1).join(' ') : undefined
+  const reasonFromRest = rest.includes(' ')
+    ? rest
+        .split(/\s+/)
+        .slice(1)
+        .filter((token) => token !== '--confirm-risks')
+        .join(' ')
+    : ''
+  const reason = reasonFromArgs ?? (reasonFromRest !== '' ? reasonFromRest : undefined)
+  const text = await approveHumanGate(runtime, agent, gateCandidate, reason, { confirmRisks })
   lines.push(text)
   void engine
   return lines.join('\n')

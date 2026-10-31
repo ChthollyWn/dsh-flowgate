@@ -924,6 +924,8 @@ export function buildGateModel(proj: FlowgateProjection | null, t: TFn): GateMod
               .filter(isRecord)
               .map((risk) => ({ title: str(risk.title), mitigation: str(risk.mitigation) }))
           : undefined,
+        rollback: str(raw.mergedConfirm.rollback),
+        requireConfirmation: raw.mergedConfirm.requireConfirmation === true,
       }
     : undefined
   return {

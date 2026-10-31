@@ -353,6 +353,23 @@ const NEGATIVE_CONTEXTS: Record<string, (ctx: GateCheckContext) => GateCheckCont
     change: change({ frozen: { proposal: { hash: 'sha256:deadbeef', at: NOW } } }),
   }),
   'g1.coreSkills': (ctx) => ({ ...ctx, gate: 'G1', change: change({ skillReceipts: [] }) }),
+  'g2.citationsFresh': (ctx) => ({
+    ...ctx,
+    change: change({
+      citationChecks: [
+        { citation: { file: 'src/does-not-exist.ts', startLine: 1, endLine: 1 }, ok: true, hash: 'sha256:old', verifiedAt: NOW },
+      ],
+    }),
+  }),
+  'g3.rollbackPlan': (ctx) => ({
+    ...ctx,
+    artifacts: bundle({ design: { ...DESIGN, rollback: '' }, risk: { ...RISK, entries: [] } }),
+  }),
+  'g1.clarifyRounds': (ctx) => ({ ...ctx, artifacts: bundle({ clarify: { ...CLARIFY, rounds: 99 } }) }),
+  'g1.qaChanged': (ctx) => ({
+    ...ctx,
+    artifacts: bundle({ clarify: { ...CLARIFY, qa: CLARIFY.qa.map((row, index) => (index === 0 ? { ...row, changed: '' } : row)) } }),
+  }),
   'g3.coreSkills': (ctx) => ({ ...ctx, gate: 'G3', change: change({ skillReceipts: [] }) }),
   'g3.cleanWorktree': (ctx) => ({ ...ctx, git: dirtyGit }),
   'g3.testNoneRisk': (ctx) => ({

@@ -48,6 +48,8 @@ export interface GatePanel {
     scope: string[]
     verify: string
     risks?: { title: string; mitigation: string }[]
+    rollback?: string
+    requireConfirmation?: boolean
   }
   awaitingOwner: boolean
 }

@@ -361,5 +361,7 @@
   "gates.externalUnknown": "origin unknown",
   "intercepts.exceptions": "Active rule exceptions",
   "intercepts.noExceptions": "No active exceptions.",
-  "intercepts.exceptionRule": "Rule {rule}"
+  "intercepts.exceptionRule": "Rule {rule}",
+  "gate.planConfirm.rollback": "Rollback plan",
+  "gate.planConfirm.confirmRisks": "Risks and rollback reviewed item by item"
 }

@@ -123,7 +123,7 @@ import {
 import { validateVerifyCommand } from './shell'
 import { loadArtifacts, loadProjectDoc, runGateChecks, artifactHashes, parseIncrementalSpec, parseRoadmap, parseTaskCardFragment } from './artifacts'
 import { renderExecutionPlanMarkdown, renderExecutionDiagram } from './plan'
-import { verifyCitations } from './citations'
+import { verifyCitations, citationsStale, documentCitations } from './citations'
 import { detectTechStack, renderProjectDocDraft } from './detect'
 import { createLedger, type Ledger } from './ledger'
 import * as store from './store'
@@ -854,7 +854,9 @@ export class FlowEngine {
     const suggestion = suggestLevels({
       title: input.title,
       summary: input.summary,
-      paths: [],
+      // FR-6.5：把需求里提到的路径/模块作为等级信号，而不是恒为 []。
+      paths: extractMentionedPaths(`${input.title} ${input.summary ?? ''}`),
+      modules: this.project?.modules?.map((module) => module.path) ?? [],
       config: this.config,
     })
     let complexity: Complexity = input.complexityHint ?? suggestion.complexity
@@ -1217,8 +1219,41 @@ export class FlowEngine {
       }
     }
 
+    // T2.10：G1/G2 通过时把源码引用的文件哈希冻结下来，之后文件改动会标待复核。
+    if (gate === 'G1' || gate === 'G2') {
+      try {
+        await this.recordGateCitationChecks(change)
+      } catch {
+        // 引用核验失败不阻塞门（由 g1/g2 的 citation 检查负责提示）。
+      }
+    }
+    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
+    // 低复杂度快车道：G1 检查通过后不等人，自动进入 S2（T2.8）。
+    if (gate === 'G1' && level.mergedGates) {
+      change.gates.G1 = {
+        ...(change.gates.G1 ?? { state: 'passed', attempts: 0 }),
+        state: 'passed',
+        items: result.items,
+        submittedAt: now,
+        passedAt: now,
+        attempts: (change.gates.G1?.attempts ?? 0) + 1,
+      }
+      Object.assign(change, enterStage(change, stageAfterGate('G1') ?? change.stage, now))
+      await this.appendLedger('gate.passed', { changeId: change.id, gate: 'G1', auto: true, merged: true })
+      await this.appendLedger('stage.entered', { changeId: change.id, stage: change.stage })
+      await this.saveChange(change)
+      this.pushNotice('G1 检查通过（低复杂度快车道）：自动进入 S2，G1 与 G3 将在方案确认卡一起获批。')
+      return {
+        gate,
+        passed: true,
+        items: result.items,
+        failures: [],
+        stage: change.stage,
+        message: 'G1 检查通过（低复杂度快车道，自动进入 S2）。',
+      }
+    }
     const human = isHumanGate(gate)
-    const merged = gate === 'G3' && levelProfile(change.complexity, change.risk, this.configFor(change).limits).mergedGates
+    const merged = gate === 'G3' && level.mergedGates
     if (human || merged) {
       Object.assign(change, applyGateAwaiting(change, gate, now))
       change.gates[gate] = {
@@ -1248,25 +1283,6 @@ export class FlowEngine {
       }
     }
 
-    // Merged G1: pass silently and keep moving (owner confirms G1+G3 together at G3).
-    const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
-    if (gate === 'G1' && level.mergedGates) {
-      Object.assign(change, applyGatePassed(change, 'G1', now))
-      change.gates.G1 = { ...(change.gates.G1 ?? { state: 'passed', attempts: 0 }), state: 'passed', items: result.items, submittedAt: now, passedAt: now, attempts: (change.gates.G1?.attempts ?? 0) + 1 }
-      Object.assign(change, enterStage(change, 'S2', now))
-      await this.appendLedger('gate.passed', { changeId: change.id, gate: 'G1', merged: true })
-      await this.appendLedger('stage.entered', { changeId: change.id, stage: 'S2' })
-      await this.saveChange(change)
-      return {
-        gate,
-        passed: true,
-        items: result.items,
-        failures: [],
-        stage: change.stage,
-        message: '低复杂度：G1 检查通过，已自动进入 S2；到 G3 时合并为一次方案确认。',
-      }
-    }
-
     // Auto gate: pass immediately and advance.
     Object.assign(change, applyGatePassed(change, gate, now))
     await this.appendLedger('gate.passed', { changeId: change.id, gate, items: itemsSummary(result.items) })
@@ -1281,7 +1297,7 @@ export class FlowEngine {
     return { gate, passed: true, items: result.items, failures: [], stage: change.stage, message: `已通过 ${gate}，进入 ${change.stage}。` }
   }
 
-  async approveGate(gate: GateId, options: { reason?: string } = {}): Promise<GateResult> {
+  async approveGate(gate: GateId, options: { reason?: string; confirmRisks?: boolean } = {}): Promise<GateResult> {
     const change = this.requireChange()
     if (this.state?.locked) throw new FlowGateError('FlowGate 处于锁定模式', '运行 /flow repair 恢复')
     const record = change.gates[gate]
@@ -1316,6 +1332,13 @@ export class FlowEngine {
     }
 
     const level = levelProfile(change.complexity, change.risk, this.configFor(change).limits)
+    // T2.8 验收 #3：低复杂度 · 高风险的方案确认卡要逐项确认风险与回滚方案。
+    if (gate === 'G3' && level.mergedGates && change.risk === 'high' && options.confirmRisks !== true) {
+      throw new FlowGateError(
+        '低复杂度 · 高风险的方案确认卡需要逐项确认风险和回滚方案',
+        '在面板点「确认并推进」或在输入框执行 /flow approve G3 --confirm-risks',
+      )
+    }
     const approveG1Too = gate === 'G3' && level.mergedGates && change.gates.G1?.state === 'passed'
     Object.assign(change, applyGateApproved(change, gate, now))
     change.gates[gate] = {
@@ -1536,9 +1559,45 @@ export class FlowEngine {
         summary: { parser: 'none', parsed: false, run: 0, passed: 0, failed: 0, skipped: 0 },
         recordedAt: isoNow(this.clock),
       }
+      // T2.3：没有自动化测试的项目自动登记「缺少自动化测试」风险（G3 会检查）。
+      const existing = change.pending.find((item) => item.status === 'open' && item.data?.trigger === 'test-none')
+      if (!existing) {
+        const item = this.createPending(change, {
+          kind: 'risk',
+          title: '缺少自动化测试（test: none）',
+          detail: '项目没有可执行的测试命令：基线改用构建/类型检查/lint；请在 risk.md 登记该风险并给出人工验证方式。',
+          data: { trigger: 'test-none' },
+        })
+        await this.appendLedger('risk.raised', { changeId: change.id, pendingId: item.id, trigger: 'test-none' })
+        this.pushNotice(`已自动登记风险 ${item.id}：项目没有自动化测试。G3 要求在 risk.md 里登记该风险。`)
+      }
       return
     }
     const commit = this.git ? await this.git.head(this.root).catch(() => null) : null
+    const layout = store.layout(this.root)
+    const cachePath = posixJoin(layout.stateDir, 'baseline.json')
+    // T2.3：同一提交号复用基线，避免每个变更都重跑全量测试。
+    if (commit !== null && (await this.fs.exists(cachePath))) {
+      try {
+        const cache = JSON.parse(await this.fs.readFile(cachePath)) as {
+          commit?: string
+          summary?: ChangeStatus['baseline'] extends { summary: infer S } ? S : never
+          recordedAt?: string
+        }
+        if (cache.commit === commit && cache.summary !== undefined) {
+          change.baseline = {
+            commit,
+            summary: cache.summary as NonNullable<ChangeStatus['baseline']>['summary'],
+            recordedAt: cache.recordedAt ?? isoNow(this.clock),
+          }
+          await this.appendLedger('verify.receipt', { changeId: change.id, baseline: true, reused: true, commit })
+          this.pushNotice(`基线复用：提交 ${commit.slice(0, 8)} 已有基线记录（通过 ${change.baseline.summary.passed}）。`)
+          return
+        }
+      } catch {
+        // 缓存损坏：重新跑基线。
+      }
+    }
     const receipt = await this.runProjectCommand(command, 'test', 'baseline', this.baselineInputs())
     change.baseline = {
       commit,
@@ -1546,11 +1605,57 @@ export class FlowEngine {
       recordedAt: isoNow(this.clock),
       receiptId: receipt.id,
     }
+    if (commit !== null) {
+      try {
+        await this.fs.mkdir(layout.stateDir)
+        await this.fs.writeFile(
+          cachePath,
+          `${JSON.stringify({ commit, summary: change.baseline.summary, recordedAt: change.baseline.recordedAt })}\n`,
+        )
+      } catch {
+        // 缓存写失败不影响本次基线。
+      }
+    }
     await this.appendLedger('verify.receipt', { changeId: change.id, baseline: true, evidenceId: receipt.id })
   }
 
   private baselineInputs(): string[] {
     return ['**/*', '!**/node_modules/**', '!**/target/**', '!**/build/**', '!**/dist/**', '!**/.git/**']
+  }
+
+  // ------------------------------------------------------------------
+  // Clarify interview capture (T2.2)
+  // ------------------------------------------------------------------
+
+  /**
+   * 记录一次 `ask_user_question` 问答（T2.2）：追加到 clarify.md 的「问答记录」
+   * 表格 + 写 `clarify.asked` / `clarify.answered` 账本，供 M-7 与 G1 检查使用。
+   *
+   * `changed` 留空时写入「（待补充）」——G1 会要求每一行都写清「这个回答改变了什么」。
+   */
+  async recordClarifyQA(input: {
+    question: string
+    options?: string[]
+    answer: string
+    changed?: string
+    round?: number
+  }): Promise<{ recorded: boolean; duplicate: boolean; round: number }> {
+    const change = this.requireChange()
+    const question = input.question.trim()
+    const answer = input.answer.trim()
+    if (question === '') return { recorded: false, duplicate: false, round: 0 }
+    const paths = store.changePaths(this.root, change.id)
+    const raw = (await this.fs.exists(paths.clarify)) ? await this.fs.readFile(paths.clarify) : `# 澄清记录：${change.title}\n\n## 问答记录\n\n`
+    const existingRows = raw.split('\n').filter((line) => line.trim().startsWith('|') && line.includes(question.slice(0, Math.min(20, question.length))))
+    if (existingRows.length > 0) return { recorded: false, duplicate: true, round: 0 }
+    const round = input.round ?? Math.max(1, raw.split('\n').filter((line) => /^\|\s*[^|]+\s*\|/.test(line)).length)
+    const cell = (value: string): string => value.replace(/\|/g, '\\|')
+    const row = `| ${cell(question)} | ${cell((input.options ?? []).join(' / '))} | ${cell(answer === '' ? '（未记录）' : answer)} | ${cell(input.changed ?? '（待补充）')} | ${round} |`
+    await this.fs.writeFile(paths.clarify, appendClarifyQaRow(raw, row))
+    await this.appendLedger('clarify.asked', { changeId: change.id, round, question })
+    await this.appendLedger('clarify.answered', { changeId: change.id, round, question, answered: answer !== '' })
+    await this.reloadArtifacts()
+    return { recorded: true, duplicate: false, round }
   }
 
   // ------------------------------------------------------------------
@@ -2106,6 +2211,45 @@ export class FlowEngine {
   }
 
   // ------------------------------------------------------------------
+  // Citation freshness (T2.10)
+  // ------------------------------------------------------------------
+
+  /** G1/G2 通过时核验产物里的源码引用并持久化文件哈希，供后续门检查待复核。 */
+  async recordGateCitationChecks(change: ChangeStatus): Promise<number> {
+    const refs = [
+      ...documentCitations(change && this.artifacts.clarify ? this.artifacts.clarify : { raw: '' }),
+      ...documentCitations(change && this.artifacts.context ? this.artifacts.context : { raw: '' }),
+    ]
+    if (refs.length === 0) return 0
+    const now = isoNow(this.clock)
+    const checks = await verifyCitations(this.fs, this.root, refs, now)
+    const existing = change.citationChecks ?? []
+    const byKey = new Map(existing.map((check) => [`${check.citation.file}:${check.citation.startLine}-${check.citation.endLine}`, check]))
+    for (const check of checks) {
+      byKey.set(`${check.citation.file}:${check.citation.startLine}-${check.citation.endLine}`, check)
+    }
+    change.citationChecks = [...byKey.values()]
+    const stale = await citationsStale(this.fs, this.root, change.citationChecks)
+    if (stale.length > 0) {
+      await this.appendLedger('citation.stale', { changeId: change.id, count: stale.length, files: stale.map((check) => check.citation.file) })
+    }
+    return checks.length
+  }
+
+  /** 当前已核验引用里哪些文件的哈希已变（待复核）。 */
+  async staleCitations(): Promise<Awaited<ReturnType<typeof citationsStale>>> {
+    const change = this.current
+    if (!change?.citationChecks || change.citationChecks.length === 0) return []
+    return citationsStale(this.fs, this.root, change.citationChecks)
+  }
+
+  /** 审查/宿主读取：任务卡声明删除/重命名的原内容快照。 */
+  originalSnapshots(taskId?: string): NonNullable<ChangeStatus['originalSnapshots']> {
+    const list = this.current?.originalSnapshots ?? []
+    return taskId === undefined ? list : list.filter((entry) => entry.taskId === taskId)
+  }
+
+  // ------------------------------------------------------------------
   // Risk-escalation & token budget (FR-6.6 / 03 §8.2)
   // ------------------------------------------------------------------
 
@@ -2193,6 +2337,52 @@ export class FlowEngine {
     }
   }
 
+  /**
+   * 删除/重命名声明：从 git HEAD 取原内容快照存进变更目录（T3.1 / 03 §5.6）。
+   * 取不到（git 端口缺失或命令失败）时阻塞任务开始，交负责人处理；未跟踪文件没有原文可保。
+   */
+  private async captureOriginalSnapshots(change: ChangeStatus, task: TaskCard): Promise<void> {
+    const declared = (task.changes ?? []).filter((entry) => entry.kind === 'delete' || entry.kind === 'rename')
+    if (declared.length === 0) return
+    if (!this.git) {
+      throw new FlowGateError(
+        `任务 ${task.id} 声明了删除/重命名，但宿主没有 git 端口，无法保存原内容快照`,
+        '删除/重命名需要 git 原内容交给审查；请让负责人手动处理，或去掉 changes 声明',
+      )
+    }
+    const now = isoNow(this.clock)
+    const snapshots = [...(change.originalSnapshots ?? [])]
+    for (const entry of declared) {
+      const path = normalizeRelPath(entry.path)
+      let original: string | null
+      try {
+        original = await this.git.showFile(this.root, 'HEAD', path)
+      } catch (error) {
+        throw new FlowGateError(
+          `无法从 git 取得 ${path} 的原内容：${(error as Error).message}`,
+          'git 原内容快照是删除/重命名的审查输入；修复仓库状态后重试，或让负责人手动备份',
+        )
+      }
+      if (original === null) continue
+      const safeName = path.replace(/[\\/]/g, '__')
+      const storedPath = posixJoin(
+        store.changePaths(this.root, change.id).dir,
+        'evidence',
+        'original',
+        task.id,
+        safeName,
+      )
+      const dir = storedPath.slice(0, storedPath.lastIndexOf('/'))
+      await this.fs.mkdir(dir)
+      await this.fs.writeFile(storedPath, original)
+      if (!snapshots.some((item) => item.taskId === task.id && item.path === path)) {
+        snapshots.push({ taskId: task.id, path, kind: entry.kind, storedPath, at: now })
+        await this.appendLedger('original.snapshot', { changeId: change.id, taskId: task.id, path, storedPath })
+      }
+    }
+    change.originalSnapshots = snapshots
+  }
+
   // ------------------------------------------------------------------
   // Tasks
   // ------------------------------------------------------------------
@@ -2243,6 +2433,8 @@ export class FlowEngine {
     const now = isoNow(this.clock)
     const state = change.tasks[taskId]
     if (!state) throw new FlowGateError(`任务 ${taskId} 不在执行计划里`, '先重新提交 G3 或在计划修订后重试')
+    // 删除/重命名声明：先把 git 原内容快照落盘，审查与 G6 用它核对"删掉的是什么"。
+    await this.captureOriginalSnapshots(change, task)
     state.status = 'running'
     state.startedAt = now
     this.ensureBatchRunning(change, state.batch)
@@ -3673,8 +3865,24 @@ export class FlowEngine {
     if (!parsed) throw new FlowGateError(`无效复杂度：${level}`, '可选：低、中、高、超高（low / medium / high / ultra）')
     const order: Complexity[] = ['low', 'medium', 'high', 'ultra']
     const lowering = order.indexOf(parsed) < order.indexOf(change.complexity)
+    const raising = order.indexOf(parsed) > order.indexOf(change.complexity)
     if (lowering && !reason?.trim()) throw new FlowGateError('降低复杂度必须写理由', '用法：/flow complexity 低 <理由>')
+    const previous = change.complexity
     change.complexity = parsed
+    // T2.8 验收 #2：低复杂度方案确认卡上点「提高复杂度」→ 回 S1 补齐中复杂度要求，
+    // 之后按正常的 G1/G2/G3 人工确认走。
+    if (raising && order.indexOf(previous) === 0 && (change.stage === 'S1' || change.stage === 'S2' || change.stage === 'S3')) {
+      const now = isoNow(this.clock)
+      Object.assign(change, enterStage(change, 'S1', now))
+      change.gates.G1 = { state: 'pending', attempts: 0 }
+      change.gates.G2 = { state: 'pending', attempts: 0 }
+      change.gates.G3 = { state: 'pending', attempts: 0 }
+      change.plan = undefined
+      change.tasks = {}
+      change.batches = []
+      await this.appendLedger('stage.entered', { changeId: change.id, stage: 'S1', reason: 'complexity-raised' })
+      this.pushNotice(`复杂度从「低」提高到「${complexityLabel(parsed)}」：已回到 S1 补齐六要素，之后按 G1/G2/G3 逐门确认。`)
+    }
     await this.appendLedger('level.changed', { changeId: change.id, dimension: 'complexity', level: parsed, reason })
     if (lowering) this.pushNotice(`复杂度已降低到 ${complexityLabel(parsed)}（已记录理由）。`)
     await this.saveChange(change)
@@ -4605,6 +4813,58 @@ function detectedAsProjectDoc(detected: Awaited<ReturnType<typeof detectTechStac
 }
 
 /** Build the one-line status bar text (<= 120 characters). */
+
+/** 在 clarify.md 的「问答记录」表格末尾追加一行；没有该节/表时补上。 */
+export function appendClarifyQaRow(raw: string, row: string): string {
+  const lines = raw.split('\n')
+  const headingIndex = lines.findIndex((line) => /^#{1,6}\s*.*(问答记录|questions?|qa)\b/i.test(line))
+  const insertRow = (endIndex: number): number => {
+    let target = endIndex
+    while (target > 0 && lines[target - 1]!.trim() === '') target -= 1
+    lines.splice(target, 0, row)
+    return target
+  }
+  if (headingIndex >= 0) {
+    let tableStart = -1
+    let sectionEnd = lines.length
+    for (let index = headingIndex + 1; index < lines.length; index += 1) {
+      if (/^#{1,6}\s/.test(lines[index]!)) {
+        sectionEnd = index
+        break
+      }
+      if (tableStart < 0 && lines[index]!.trim().startsWith('|')) tableStart = index
+    }
+    if (tableStart >= 0) {
+      let lastRow = tableStart
+      for (let index = tableStart; index < sectionEnd; index += 1) {
+        if (lines[index]!.trim().startsWith('|')) lastRow = index
+        else if (lines[index]!.trim() !== '') break
+      }
+      insertRow(lastRow + 1)
+      return lines.join('\n')
+    }
+    // 有节无表：插入表头。
+    const header = ['| 问题 | 选项 | 回答 | 这个回答改变了什么 | 轮次 |', '|---|---|---|---|---|', row]
+    lines.splice(headingIndex + 1, 0, '', ...header)
+    return lines.join('\n')
+  }
+  lines.push('', '## 问答记录', '', '| 问题 | 选项 | 回答 | 这个回答改变了什么 | 轮次 |', '|---|---|---|---|---|', row)
+  return lines.join('\n')
+}
+
+/**
+ * 从需求描述里提取可能的文件/目录路径（FR-6.5 等级建议用）。
+ * 只做保守识别：目录前缀（src/app/lib/...）或常见源码文件扩展名；不猜自然语言。
+ */
+export function extractMentionedPaths(text: string): string[] {
+  const found = new Set<string>()
+  const dirPattern = /(?:^|\s)((?:src|app|lib|packages?|services?|config|test|tests|docs|scripts|infra|migrations?)\/[\w./-]+)/g
+  const filePattern = /(?:^|\s)([\w.-]+\.(?:java|kt|ts|tsx|js|jsx|mjs|py|go|rs|rb|php|sql|yaml|yml|json|xml|html|css|scss|md|sh|gradle|toml))\b/g
+  for (const match of text.matchAll(dirPattern)) if (match[1]) found.add(match[1])
+  for (const match of text.matchAll(filePattern)) if (match[1]) found.add(match[1])
+  return [...found].sort().slice(0, 32)
+}
+
 export function buildStatusLine(snapshot: RuntimeSnapshot): string {
   if (!snapshot.initialized) return '◆ FlowGate 未启用 · /flow init 启用'
   if (snapshot.locked) return '◆ FlowGate 锁定 · /flow doctor 诊断'

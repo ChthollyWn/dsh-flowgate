@@ -361,5 +361,7 @@
   "gates.externalUnknown": "来源未归因",
   "intercepts.exceptions": "生效中的规则例外",
   "intercepts.noExceptions": "没有生效中的例外。",
-  "intercepts.exceptionRule": "规则 {rule}"
+  "intercepts.exceptionRule": "规则 {rule}",
+  "gate.planConfirm.rollback": "回滚方案",
+  "gate.planConfirm.confirmRisks": "已逐项确认风险与回滚方案"
 }

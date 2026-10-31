@@ -873,6 +873,10 @@ export interface ChangeStatus {
   tokenUsage?: number
   /** 已经被加载过的阶段技能回执（T2.4：核心技能必须在过门前加载）。 */
   skillReceipts?: { name: string; hash: string; at: string; sessionId?: string }[]
+  /** G1/G2 核验过的源码引用及其文件哈希；文件改动后标记待复核（T2.10）。 */
+  citationChecks?: CitationCheck[]
+  /** 任务卡声明的删除/重命名：git HEAD 原内容快照（路径在 .flowgate/changes/<id>/evidence/original/ 下）。 */
+  originalSnapshots?: { taskId: string; path: string; kind: 'delete' | 'rename'; storedPath: string; at: string }[]
   /** Highest artifact hashes frozen at gate approval. */
   frozen?: Record<string, { hash: string; at: string }>
   createdAt: string
@@ -1057,6 +1061,8 @@ export type LedgerEventType =
   | 'external.acknowledged'
   | 'budget.exceeded'
   | 'skill.loaded'
+  | 'citation.verified'
+  | 'original.snapshot'
   | 'tamper.cleared'
 
 export interface LedgerEvent {

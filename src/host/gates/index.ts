@@ -49,12 +49,16 @@ export async function approveHumanGate(
   agent: DshAgent | null,
   gate: string,
   reason?: string,
+  options: { confirmRisks?: boolean } = {},
 ): Promise<string> {
   if (!isHumanGate(gate)) {
     throw new HostError(`/flow approve 只处理人工门（GR/G1/G3/G6），收到 ${gate || '空'}`, '运行 /flow 查看当前等待批准的门')
   }
   const engine = runtime.requireEngine()
-  const result = await engine.approveGate(gate, reason ? { reason } : {})
+  const result = await engine.approveGate(gate, {
+    ...(reason ? { reason } : {}),
+    ...(options.confirmRisks === true ? { confirmRisks: true } : {}),
+  })
   runtime.emit()
   const text = result.message || `已批准 ${gate}。`
   await notifyAgent(runtime, `${text} 继续按注入的下一步执行。`, agent)

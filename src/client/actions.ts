@@ -18,7 +18,7 @@ import type { LearningMode } from './types'
 import type { TFn } from './i18n'
 
 export type ClientAction =
-  | { kind: 'approve'; gate: string }
+  | { kind: 'approve'; gate: string; confirmRisks?: boolean }
   | { kind: 'reject'; gate: string; reason: string }
   | { kind: 'approve-pending'; id: string; reason?: string }
   | { kind: 'reject-pending'; id: string; reason: string }
@@ -88,7 +88,7 @@ function withReason(command: string, reason: string | undefined): string {
 export function commandFor(action: ClientAction): string {
   switch (action.kind) {
     case 'approve':
-      return `/flow approve ${action.gate}`
+      return `/flow approve ${action.gate}${action.confirmRisks === true ? ' --confirm-risks' : ''}`
     case 'reject':
       return `/flow reject ${action.reason.trim()}`
     case 'approve-pending': {

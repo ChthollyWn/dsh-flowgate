@@ -75,6 +75,40 @@ export function skillNameFromTool(tool: string, args: unknown): string | null {
   return null
 }
 
+/**
+ * 从一次 `ask_user_question` 工具调用里取第一个问题与选项（T2.2）。
+ * rc.5 的参数形状未在结构化层面验证（H13），这里按常见写法容错：
+ * `{ questions: [{ question, options? }] }` 或 `{ question, options? }`；
+ * 选项可以是字符串、`{label}` 或 `{text}`。取不到时返回 null。
+ */
+export function clarifyQuestionFromTool(
+  tool: string,
+  args: unknown,
+): { question: string; options: string[] } | null {
+  if (!/^ask_user_questions?$/i.test(tool.trim())) return null
+  if (args === null || typeof args !== 'object') return null
+  const record = args as Record<string, unknown>
+  const list = Array.isArray(record.questions) ? record.questions : null
+  const candidate = list !== null ? (list[0] as unknown) : record
+  if (candidate === null || typeof candidate !== 'object') return null
+  const questionRecord = candidate as Record<string, unknown>
+  const question = typeof questionRecord.question === 'string' ? questionRecord.question : typeof questionRecord.text === 'string' ? questionRecord.text : ''
+  if (question.trim() === '') return null
+  const rawOptions = Array.isArray(questionRecord.options) ? questionRecord.options : []
+  const options = rawOptions
+    .map((option) => {
+      if (typeof option === 'string') return option
+      if (option !== null && typeof option === 'object') {
+        const value = option as Record<string, unknown>
+        if (typeof value.label === 'string') return value.label
+        if (typeof value.text === 'string') return value.text
+      }
+      return ''
+    })
+    .filter((option) => option !== '')
+  return { question: question.trim(), options }
+}
+
 /** 触发压缩的最小内容长度（字符）。 */
 const COMPRESS_THRESHOLD_CHARS = 1_200
 /** 替换后内容上限（防止超大摘要）。 */
@@ -174,6 +208,17 @@ export function installEvidenceCompression(runtime: HostRuntime): void {
             )
           } catch (error) {
             runtime.noteFeature('skills', `技能回执记录失败：${toAgentError(error).error}`)
+          }
+        }
+        // 澄清问答采集（T2.2）：ask_user_question 的问答写进 clarify.md 与账本。
+        const clarify = clarifyQuestionFromTool(exec.name, exec.arguments)
+        if (clarify !== null && engineForSkill) {
+          try {
+            const content = 'content' in decision && Array.isArray(decision.content) ? decision.content : result.content
+            const answer = textOf(content).trim().slice(0, 2_000)
+            await engineForSkill.recordClarifyQA({ question: clarify.question, options: clarify.options, answer })
+          } catch (error) {
+            runtime.noteFeature('clarify', `澄清问答落账失败：${toAgentError(error).error}`)
           }
         }
         const compressed = await compressPostExecute(runtime, exec, result, decision)

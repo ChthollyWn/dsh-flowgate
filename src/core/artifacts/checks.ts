@@ -44,6 +44,7 @@ import {
 import { artifactHashes, changePaths } from './load'
 import { verifyCitations } from '../citations/verify'
 import { checkExecutionPlan } from '../plan/check'
+import { citationsStale } from '../citations/verify'
 import { checkRoadmap } from '../roadmap/check'
 import { validateVerifyCommand } from '../shell'
 import { levelProfile } from '../state/levels'
@@ -488,6 +489,36 @@ const ELEMENT_LABELS: Record<SixElementKey, string> = {
   acceptance: '验收标准',
   constraints: '约束（非功能）',
   unknowns: '未知与假设',
+}
+
+/** G1: clarify rounds within `limits.clarify_max_rounds` (T2.2). */
+export function checkClarifyRounds(ctx: GateCheckContext): CheckOutcome {
+  const item = 'g1.clarifyRounds'
+  const label = '澄清轮数不超过上限'
+  const clarify = ctx.artifacts.clarify
+  const limit = ctx.limits.clarify_max_rounds
+  if (!clarify) return pass(item, label, 'P1', ['缺少 clarify.md，由 g1.sixElements 负责'])
+  if (limit > 0 && clarify.rounds > limit) {
+    return fail(item, label, `澄清超过 ${limit} 轮仍未闭合：把剩余问题列为未决问题/已接受假设，或请负责人补充信息后继续。`, 'P1', {
+      details: [`当前轮数：${clarify.rounds}，上限：${limit}`],
+    })
+  }
+  return pass(item, label, 'P1', [`澄清轮数 ${clarify.rounds} / 上限 ${limit}`])
+}
+
+/** G1: every captured Q&A row states what the answer changed (T2.2). */
+export function checkClarifyQaChanged(ctx: GateCheckContext): CheckOutcome {
+  const item = 'g1.qaChanged'
+  const label = '问答记录写清「这个回答改变了什么」'
+  const clarify = ctx.artifacts.clarify
+  if (!clarify || clarify.qa.length === 0) return pass(item, label, 'P1', ['没有问答记录（由六要素/假设覆盖）'])
+  const missing = clarify.qa.filter((row) => row.changed.trim() === '')
+  if (missing.length > 0) {
+    return fail(item, label, '问答表每一行都要写「这个回答改变了什么」：补上后重新提交 G1。', 'P1', {
+      details: missing.map((row) => `问题「${row.question}」缺少改变说明`),
+    })
+  }
+  return pass(item, label, 'P1', [`${clarify.qa.length} 条问答都有改变说明`])
 }
 
 /** G1: six elements each have a conclusion or were accepted as an assumption. */
@@ -1229,6 +1260,43 @@ export function checkPlan(ctx: GateCheckContext): CheckOutcome {
   return checkExecutionPlan(tasksDoc.tasks, plan, ctx.config)
 }
 
+/**
+ * G3: 低复杂度 · 高风险必须给出回滚方案（T2.8 验收 #3）。
+ * 回滚来源：design.md 的「回滚方案」，或 risk.md 每条高危风险的缓解措施。
+ */
+export function checkRollbackPlan(ctx: GateCheckContext): CheckOutcome {
+  const item = 'g3.rollbackPlan'
+  const label = '高风险低复杂度方案有回滚方案'
+  const rollback = (ctx.artifacts.design?.rollback ?? '').trim()
+  const mitigations = (ctx.artifacts.risk?.entries ?? [])
+    .filter((entry) => entry.grade === 'high' || entry.grade === 'medium')
+    .map((entry) => `${entry.category}：${entry.mitigation}`)
+    .filter((value) => value.trim() !== '')
+  if (rollback !== '' || mitigations.length > 0) {
+    return pass(item, label, 'P0', [rollback !== '' ? `回滚方案：${rollback}` : '已有逐项缓解措施'])
+  }
+  return fail(item, label, '低复杂度 · 高风险的方案确认卡要展示风险项和回滚方案：在 risk.md 写清逐项缓解措施，或在 design.md 写回滚方案。', 'P0')
+}
+
+/** G2/G3/G5: citations verified at gate time must still match the cited files (T2.10). */
+export async function checkCitationsFresh(ctx: GateCheckContext): Promise<CheckOutcome> {
+  const item = 'g2.citationsFresh'
+  const label = '已核验引用未被改动（否则待复核）'
+  const checks = ctx.change.citationChecks ?? []
+  if (checks.length === 0) return pass(item, label, 'P1', ['没有已核验引用'])
+  const stale = await citationsStale(ctx.fs, ctx.root, checks)
+  if (stale.length > 0) {
+    return fail(
+      item,
+      label,
+      '被引用的源码在核验后已改动：重新核验引用（flow_submit 会重新记录），或在澄清记录里把结论标为待确认。',
+      'P1',
+      { details: stale.slice(0, 20).map((check) => `${check.citation.file}:${check.citation.startLine}-${check.citation.endLine} 已改动`) },
+    )
+  }
+  return pass(item, label, 'P1', [`${checks.length} 条引用与核验时一致`])
+}
+
 /** G3: frozen artifacts (approved earlier) must not be modified. */
 export function checkFrozenArtifacts(ctx: GateCheckContext): CheckOutcome {
   const item = 'g3.frozenArtifacts'
@@ -1685,6 +1753,8 @@ export const GATE_CHECKS: GateCheckDefinition[] = [
   { id: 'g1.specFormat', label: '增量规格格式合法', gates: ['G1'], priority: 'P0', check: checkSpecFormat },
   { id: 'g1.factsCitations', label: '已知事实都带可核验引用', gates: ['G1'], priority: 'P1', check: checkAnalysisCitations },
   { id: 'g1.coreSkills', label: '阶段核心技能已加载', gates: ['G1'], priority: 'P0', check: checkCoreSkillReceipts },
+  { id: 'g1.clarifyRounds', label: '澄清轮数不超过上限', gates: ['G1'], priority: 'P1', check: checkClarifyRounds },
+  { id: 'g1.qaChanged', label: '问答记录写清「这个回答改变了什么」', gates: ['G1'], priority: 'P1', check: checkClarifyQaChanged },
 
   // ----- G2 ---------------------------------------------------------------
   {
@@ -1705,6 +1775,14 @@ export const GATE_CHECKS: GateCheckDefinition[] = [
   },
   { id: 'g2.projectCommands', label: 'project.md 命令可执行', gates: ['G2'], priority: 'P0', check: checkProjectCommands },
   { id: 'g2.baseline', label: '基线已记录', gates: ['G2'], priority: 'P0', check: checkBaseline },
+  {
+    id: 'g2.citationsFresh',
+    label: '已核验引用未被改动（否则待复核）',
+    gates: ['G2', 'G3', 'G5'],
+    priority: 'P1',
+    when: onlyWhen((ctx) => (ctx.change.citationChecks?.length ?? 0) > 0),
+    check: checkCitationsFresh,
+  },
 
   // ----- G3 ---------------------------------------------------------------
   {
@@ -1720,8 +1798,17 @@ export const GATE_CHECKS: GateCheckDefinition[] = [
     label: '风险登记五类齐全',
     gates: ['G3'],
     priority: 'P0',
-    when: onlyWhen((ctx) => ctx.change.complexity !== 'low'),
+    // 低复杂度仅在普通风险时免填；低复杂度 · 高风险仍要求风险逐项确认（T2.8）。
+    when: onlyWhen((ctx) => ctx.change.complexity !== 'low' || ctx.change.risk === 'high'),
     check: checkRiskCategories,
+  },
+  {
+    id: 'g3.rollbackPlan',
+    label: '高风险低复杂度方案有回滚方案',
+    gates: ['G3'],
+    priority: 'P0',
+    when: onlyWhen((ctx) => ctx.change.complexity === 'low' && ctx.change.risk === 'high'),
+    check: checkRollbackPlan,
   },
   { id: 'g3.taskCards', label: '任务卡检查通过（依赖无环、场景全覆盖、范围合理、规模受限）', gates: ['G3'], priority: 'P0', check: checkTaskCards },
   { id: 'g3.traceability', label: '追溯矩阵无未覆盖场景', gates: ['G3'], priority: 'P0', check: checkTraceability },

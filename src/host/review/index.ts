@@ -110,6 +110,8 @@ export function buildReviewPrompt(input: {
   criteria: string[]
   diff: string
   files: string[]
+  /** 任务卡声明删除/重命名的 git 原内容（T3.1）。 */
+  originals?: { path: string; content: string }[]
 }): DshContentBlock[] {
   const lines: string[] = [
     '你是 FlowGate 的独立审查者（只读取证模式）。你的任务：审查下面的改动是否满足要求，只输出结构化结论。',
@@ -133,6 +135,13 @@ export function buildReviewPrompt(input: {
     '```diff',
     input.diff.length > 60_000 ? `${input.diff.slice(0, 60_000)}\n…（diff 过长已截断，可用 flow_diff 或 read 查看完整内容）` : input.diff,
     '```',
+    ...(input.originals !== undefined && input.originals.length > 0
+      ? [
+          '',
+          '被删除/重命名文件的 git 原内容（审查"删掉的是什么"用；二进制或超大内容已由插件保存路径）：',
+          ...input.originals.map((file) => `--- ${file.path} ---\n${file.content.slice(0, 20_000)}`),
+        ]
+      : []),
   ].filter((line) => line !== '')
   return [{ type: 'text', text: lines.join('\n') }]
 }
@@ -172,6 +181,18 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
   const { diff, files } = await collectDiff(runtime, taskId)
   const diffFingerprint = sha256Hex(diff)
   const criteria = reviewCriteria()
+  // 删除/重命名的 git 原内容（T3.1）：作为审查输入，避免"删掉的东西没人看过"。
+  const originals: { path: string; content: string }[] = []
+  const fsPort = runtime.ports()?.fs
+  const snapshots = typeof engine.originalSnapshots === 'function' ? engine.originalSnapshots(taskId) : []
+  for (const snapshot of snapshots) {
+    try {
+      if (!fsPort) break
+      originals.push({ path: snapshot.path, content: await fsPort.readFile(snapshot.storedPath) })
+    } catch {
+      // 快照读失败不阻塞审查（文件缺失会在 diff/coverage 上体现）。
+    }
+  }
   // 篡改嫌疑（T3.5）：跳过测试/删断言/改测试基础设施的 TM 项必须作为审查输入。
   const tamperSignals = (change.pending ?? [])
     .filter((pending) => pending.kind === 'tamper' && pending.status === 'open')
@@ -192,6 +213,7 @@ export async function runTaskReview(runtime: HostRuntime, taskId: string): Promi
     criteria,
     diff,
     files,
+    ...(originals.length > 0 ? { originals } : {}),
   })
   const subagents = runtime.getService<DshSubagentRuntime>('subagents')
   if (!subagents) return { ok: false, verdict: 'changes-required', findings: [], coverageOk: false, message: '子 agent 服务消失' }
@@ -289,6 +311,8 @@ function buildFinalReviewPrompt(input: {
   criteria: string[]
   diff: string
   files: string[]
+  /** 任务卡声明删除/重命名的 git 原内容（T3.1）。 */
+  originals?: { path: string; content: string }[]
 }): DshContentBlock[] {
   const lines: string[] = [
     '你是 FlowGate 的独立终审者（只读取证模式）。这是 S5 交付前的整体终审，只输出结构化结论。',

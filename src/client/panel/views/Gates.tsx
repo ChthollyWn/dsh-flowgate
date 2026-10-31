@@ -133,13 +133,27 @@ export function GatesView({ model, t, onAction }: ViewProps): React.ReactElement
                 }
               />
             ) : null}
+            {confirm.rollback !== undefined ? (
+              <KeyValue label={t('gate.planConfirm.rollback')} value={confirm.rollback !== '' ? confirm.rollback : '—'} />
+            ) : null}
+            {confirm.requireConfirmation === true ? (
+              <div data-flowgate="confirm-risks-required" style={{ fontSize: 10.5, color: COLORS.warn }}>
+                {t('gate.planConfirm.confirmRisks')}
+              </div>
+            ) : null}
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
             <ActionButton
               label={t('gate.planConfirm.approve')}
               tone="primary"
               dataAction="confirm-card-approve"
-              onClick={() => onAction({ kind: 'approve', gate: gateName ?? 'G3' })}
+              onClick={() =>
+                onAction({
+                  kind: 'approve',
+                  gate: gateName ?? 'G3',
+                  ...(confirm.requireConfirmation === true ? { confirmRisks: true } : {}),
+                })
+              }
             />
             <ActionButton
               label={t('gate.planConfirm.reject')}

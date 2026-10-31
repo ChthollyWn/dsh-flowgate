@@ -62,6 +62,8 @@ export interface MergedConfirm {
   scope: string[]
   verify: string
   risks?: { title: string; mitigation: string }[]
+  rollback?: string
+  requireConfirmation?: boolean
 }
 
 export interface GatePanel {

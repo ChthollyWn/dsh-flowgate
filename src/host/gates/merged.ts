@@ -13,6 +13,10 @@ export interface MergedConfirmCard {
   scope: string[]
   verify: string
   risks?: { title: string; mitigation: string }[]
+  /** 回滚方案（低复杂度 · 高风险时必须在卡片上展示并逐项确认）。 */
+  rollback?: string
+  /** true 时批准必须显式确认风险项（/flow approve G3 --confirm-risks）。 */
+  requireConfirmation?: boolean
 }
 
 /** 从引擎缓存产物构建确认卡；数据不足时返回 undefined。 */
@@ -30,12 +34,21 @@ export function buildMergedConfirm(engine: EngineLike): MergedConfirmCard | unde
   const risks = (artifacts.risk?.entries ?? [])
     .filter((entry) => entry.grade !== 'none')
     .map((entry) => ({ title: `${entry.category}：${entry.reason}`, mitigation: entry.mitigation }))
+  const rollbackFromDesign = (artifacts.design?.rollback ?? '').trim()
+  const rollbackFromRisk = risks
+    .filter((risk) => risk.mitigation.trim() !== '')
+    .map((risk) => `${risk.title} → ${risk.mitigation}`)
+    .join('；')
+  const rollback = rollbackFromDesign !== '' ? rollbackFromDesign : rollbackFromRisk
+  const highRisk = change?.risk === 'high'
   return {
     goal,
     acceptance,
     scope,
     verify: verifyCommands.join('；'),
     risks: risks.length > 0 ? risks : undefined,
+    rollback: rollback !== '' || highRisk ? rollback || '（尚未填写回滚方案）' : undefined,
+    requireConfirmation: highRisk,
   }
 }
 
@@ -47,6 +60,8 @@ export function toGatePanelConfirm(card: MergedConfirmCard): NonNullable<GatePan
     scope: card.scope,
     verify: card.verify,
     risks: card.risks,
+    rollback: card.rollback,
+    requireConfirmation: card.requireConfirmation,
   }
 }
 
@@ -62,6 +77,11 @@ export function renderConfirmCardText(card: MergedConfirmCard): string {
   if (card.risks && card.risks.length > 0) {
     lines.push(`风险与缓解：\n${card.risks.map((risk) => `  - ${risk.title} → ${risk.mitigation}`).join('\n')}`)
   }
-  lines.push('处理：/flow approve G3 批准（同时通过 G1）；/flow reject <意见> 退回。')
+  if (card.rollback !== undefined) lines.push(`回滚方案：${card.rollback}`)
+  lines.push(
+    card.requireConfirmation === true
+      ? `处理：高风险需逐项确认：/flow approve G3 --confirm-risks；/flow reject <意见> 退回。`
+      : '处理：/flow approve G3 批准（同时通过 G1）；/flow reject <意见> 退回。',
+  )
   return lines.join('\n')
 }

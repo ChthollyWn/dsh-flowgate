@@ -143,7 +143,8 @@ function createHarness(): Harness {
 /** 用真实状态机走到 S4，并领取唯一任务 T1。 */
 async function reachS4WithRunningTask(h: Harness): Promise<ChangeStatus> {
   await h.engine.init()
-  const created = await h.engine.newChange({ title: '熔断恢复演练', summary: '验证连续失败熔断可恢复' })
+  // 显式 medium：低复杂度会走 G1 自动通过 + G3 合并确认的快车道，这里验证的是 S4 熔断。
+  const created = await h.engine.newChange({ title: '熔断恢复演练', summary: '验证连续失败熔断可恢复', complexityHint: 'medium' })
   await h.fs.writeFile(`.flowgate/changes/${created.changeId}/tasks.md`, TASKS_MD)
 
   await h.engine.submitGate('G1')
