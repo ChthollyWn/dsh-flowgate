@@ -104,4 +104,4 @@ demo 动图、干净机器 10 分钟快速开始验收。物料与 workflow 已�
 | `measure:startup` | 中位数 **+15.8ms**（验收线 <200ms） |
 | `verify:uninstall` | 安装/卸载干净度通过（rc.5 `plugin remove` 不 prune node_modules 属已知警告） |
 | 工具数 | 15 个 `flow_*` + `flow_dispatch_next`（派发模块单独注册）= 16 |
-| 仓库状态 | 工作树干净；本轮未推送（CI 需下次推送后刷新） |
+| 仓库状态 | 工作树干净；已推送 `60a82dc`，GitHub Actions CI run [41190320744](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41190320744) **success**（lint/test/coverage/build/verify） |

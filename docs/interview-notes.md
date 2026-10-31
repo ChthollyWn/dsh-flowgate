@@ -37,7 +37,7 @@ FlowGate 是给 DeepSeek Harness（DSH）加「硬约束开发流程」的插件
 - 加固：故障注入套件通过（含状态损坏/守卫抛错/服务缺失/配置损坏/浏览器包缺失）；启动增量 **+15.8ms**（验收线 <200ms；口径是模块加载成本，不含 Electron/UI 冷启动）；隔离 profile 安装/卸载干净度通过。
 - 包：**39 文件 / 1015.9KB**（`pnpm verify:package`），零 `@deepseek-ai/*` 运行时依赖（只作可选 peer），不联网、无遥测。
 - 评测：**18/18 run**（9 任务 × A/B，真实模型 + 隔离 headless）+ 4 项主观指标（隐藏需求遗漏 / 越界文件 / 虚假完成 / 验收覆盖）**人工评分 18/18**；从 0 开发演练 6 次与派发对照见 `docs/evaluation.md` §6.6/§6.7。
-- CI：GitHub Actions 覆盖 lint / test / coverage / build / verify:package / verify:client；HEAD `a48c2b9` 的 CI 已成功，第五轮修复后本地全量验证通过（待推送后重跑 CI）。
+- CI：GitHub Actions 覆盖 lint / test / coverage / build / verify:package / verify:client；第五轮 HEAD `60a82dc` 推送的 CI run 已成功，本地全量验证同批次通过。
 
 ## 坦诚的局限（面试时主动说）
 
