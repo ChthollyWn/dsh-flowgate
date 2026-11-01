@@ -19,6 +19,7 @@ import {
   writeIncidentRecord,
 } from '../../../src/core/store'
 import { layout } from '../../../src/core/store/layout'
+import { isoNow } from '../../../src/core/util/time'
 import { MemoryFileSystem } from '../../../src/core/util/memory-fs'
 import { FakeClock } from '../../helpers/fakes'
 
@@ -44,9 +45,15 @@ function makeRecord(overrides: Partial<RepairRecord> = {}): RepairRecord {
 describe('store/repair: id 生成', () => {
   it('stampedId 形如 FIX-YYYYMMDD-HHMMSS / INC-...', () => {
     const clock = new FakeClock()
-    expect(stampedId('FIX', clock)).toBe('FIX-20261101-090000')
-    expect(stampedId('INC', clock)).toBe('INC-20261101-090000')
-    expect(stampedId('FIX', clock, 2)).toBe('FIX-20261101-090000-2')
+    // 时间戳段与 isoNow 的本地时间一致；测试不能假设运行机器时区
+    // （CI runner 是 UTC，本地开发是 +08:00——写死 090000 会在 CI 挂掉）。
+    const iso = isoNow(clock)
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(iso)
+    expect(match, iso).not.toBeNull()
+    const stamp = `${match![1]}${match![2]}${match![3]}-${match![4]}${match![5]}${match![6]}`
+    expect(stampedId('FIX', clock)).toBe(`FIX-${stamp}`)
+    expect(stampedId('INC', clock)).toBe(`INC-${stamp}`)
+    expect(stampedId('FIX', clock, 2)).toBe(`FIX-${stamp}-2`)
   })
 
   it('同秒冲突追加序号，直到不重复', () => {
