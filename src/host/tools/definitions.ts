@@ -26,6 +26,7 @@ import {
   abortRepair,
   closeIncident,
   finishRepair,
+  previewRepair,
   repairView,
   safeGetProjectFlags,
   safeGetRepair,
@@ -683,58 +684,105 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
   )
 
   // 16) flow_fix_start --------------------------------------------------
+  /**
+   * v0.7 智能准入：scope/verify/title 都可以省略，由 engine 从信号推导
+   * （未提交改动、最近失败回执里的路径/命令、项目测试命令）；dryRun=true 只预演不开启。
+   * 确定性准入会硬拒：已有变更/修复、跨模块或敏感面 scope、过宽 scope、脏工作区不在范围内、
+   * 无法得到合法 verify 等，并返回 recommendedLane（repair/change/rework）与下一步。
+   */
   tools.push(
     defineHostTool({
       name: 'flow_fix_start',
       description:
-        '修复通道（bugfix 一等公民）：声明一次修复，拿到 FIX-id 后可在声明的 scope 内自由迭代——不需要立项、不需要七阶段文档、不需要人工门，但必须留下 RED→GREEN 证据。' +
+        '修复通道（bugfix 一等公民）入口，v0.7 起带智能准入：声明一次修复，拿到 FIX-id 后可在声明的 scope 内自由迭代——不需要立项、不需要七阶段文档、不需要人工门，但必须留下 RED→GREEN 证据。' +
         '适用：生产事故、回归缺陷、行为明确的 bug。需求变更/新功能仍走 flow_new_change。' +
-        '流程：flow_fix_start → 先 flow_verify 跑失败命令拿 RED（group 自定，如 repro）→ 在 scope 内修复 → flow_verify 拿 GREEN 并跑声明验证命令确认回归 → flow_fix_done。',
+        'scope/verify 可省略：engine 会从最近失败回执、未提交改动、项目测试命令推导，并做确定性准入（已有变更/敏感面/过宽范围/脏工作区会被拒并给出下一步）。' +
+        'dryRun=true 只返回准入裁定与建议参数，不开启修复。' +
+        '流程：flow_fix_start → 先 flow_verify 跑失败命令拿 RED（group 自定，如 repro）→ 在 scope 内修复 → flow_verify 拿 GREEN → flow_fix_done。',
       parameters: {
-        title: { type: 'string', required: true, description: '一句话标题，例如「续费回调重复扣款」' },
-        symptom: { type: 'string', required: true, description: '可观察的故障现象：报错/错误行为/影响范围' },
+        symptom: {
+          type: 'string',
+          required: true,
+          description: '可观察的故障现象：报错/错误行为/影响面（必填；智能准入据此推导标题与默认验收）',
+        },
+        title: { type: 'string', description: '一句话标题（可省略，默认从 symptom 推导）' },
         repro: { type: 'string', description: '复现步骤（建议同时用 flow_verify 跑出 RED 证据）' },
         scope: {
           type: 'array',
-          required: true,
           items: { type: 'string' },
-          description: '允许改动的仓库相对路径/glob（1–20 条；超出会被拒绝，修复动作只放行命中 scope 的写入）',
+          description: '允许改动的仓库相对路径/glob（1–20 条；可省略 → 从最近失败回执/未提交改动推导；过宽或敏感面会被准入拒绝）',
         },
-        verify: { type: 'string', required: true, description: '验证命令，如 `pnpm vitest run test/xx.test.ts`（修复完成后用于确认回归）' },
-        acceptance: { type: 'array', items: { type: 'string' }, description: '可测量的验收要点（可选，写入修复声明）' },
+        verify: {
+          type: 'string',
+          description: '验证命令（可省略 → 从最近失败回执或项目 commands.test 推导；非法形状会被准入拒绝）',
+        },
+        acceptance: { type: 'array', items: { type: 'string' }, description: '可测量的验收要点（可选；省略时自动生成两条通用验收）' },
         severity: { type: 'string', enum: ['P0', 'P1', 'P2'], description: '优先级：P0 生产不可用 / P1 主要功能受损 / P2 一般缺陷（默认 P2）' },
+        dryRun: { type: 'boolean', description: '只做智能准入预演（不开启修复）：返回裁定/建议 scope/verify/最近 RED 线索/检查项/下一步' },
       },
       execute: async (args) => {
         const engine = await requireEngine(runtime)
+        const title = typeof args.title === 'string' ? args.title : ''
+        const symptom = typeof args.symptom === 'string' ? args.symptom : ''
         const scope = toStringArray(args.scope)
-        if (scope.length === 0) {
-          return fail('scope 不能为空', '至少写一条允许改动的路径/glob，例如 scope: ["src/renewal/**"]')
-        }
-        const severity =
-          args.severity === 'P0' || args.severity === 'P1' || args.severity === 'P2' ? args.severity : undefined
+        const verify = typeof args.verify === 'string' ? args.verify : ''
+        const severity: 'P0' | 'P1' | 'P2' | undefined =
+          args.severity === 'P0' ? 'P0' : args.severity === 'P1' ? 'P1' : args.severity === 'P2' ? 'P2' : undefined
         const acceptance = toStringArray(args.acceptance)
-        const repair = await startRepair(engine, {
-          title: String(args.title),
-          symptom: String(args.symptom),
+        const base = {
+          ...(title !== '' ? { title } : {}),
+          symptom,
           ...(typeof args.repro === 'string' && args.repro !== '' ? { repro: args.repro } : {}),
           scope,
-          verify: String(args.verify),
+          verify,
           ...(acceptance.length > 0 ? { acceptance } : {}),
           ...(severity !== undefined ? { severity } : {}),
-          openedBy: 'agent',
-        })
+        }
+        if (args.dryRun === true) {
+          const review = await previewRepair(engine, base)
+          const source = (value: string): string =>
+            value === 'declared' ? '声明' : value === 'suggested' ? '信号推导' : value === 'failed-receipt' ? '最近失败回执' : value === 'project' ? '项目测试命令' : '无'
+          const lines = [
+            `修复准入预演（未开启修复）：${review.verdict === 'approved' ? '可开启' : review.verdict === 'adjusted' ? '可开启（已自动补全）' : '不能开启'}`,
+            `推荐车道：${review.recommendedLane === 'repair' ? '修复通道' : review.recommendedLane === 'change' ? '变更车道（flow_new_change）' : '变更内返工（flow_declare_rework）'}｜置信度：${review.confidence}`,
+            `最终 scope（${source(review.scopeSource)}）：${review.scope.length > 0 ? review.scope.join('、') : '（无）'}`,
+            `最终 verify（${source(review.verifySource)}）：${review.verify !== '' ? review.verify : '（无）'}`,
+            ...(review.redEvidence !== null
+              ? [`最近失败回执（RED 线索）：${review.redEvidence.id}（${review.redEvidence.command}，phase=${review.redEvidence.phase}）`]
+              : ['最近失败回执：无（开启后需先用 flow_verify 拿 RED）']),
+            '检查项：',
+            ...review.checks.map(
+              (check) => `  ${check.passed ? '✓' : check.weight === 'block' ? '✗' : '!'} ${check.label}${check.detail ? `（${check.detail}）` : ''}`,
+            ),
+            ...(review.reasons.length > 0 ? ['理由：', ...review.reasons.map((reason) => `  - ${reason}`)] : []),
+            ...(review.nextSteps.length > 0 ? ['下一步：', ...review.nextSteps.map((step, index) => `  ${index + 1}) ${step}`)] : []),
+            '（dryRun 未写任何状态；确认后去掉 dryRun 再调用即开启。）',
+          ]
+          return ok(lines.join('\n'), { started: false, review })
+        }
+        const repair = await startRepair(engine, base)
         runtime.emit()
+        const admission = repair.admission
         const lines = [
           `修复通道已开启：${repair.id}「${repair.title}」（${repair.severity}）。`,
+          ...(admission !== undefined
+            ? [
+                `智能准入：${admission.verdict === 'adjusted' ? '已补全/调整后通过' : '按声明通过'}（scope 来源：${
+                  admission.scopeSource === 'suggested' ? '信号推导' : '声明'
+                }；verify 来源：${
+                  admission.verifySource === 'declared' ? '声明' : admission.verifySource === 'project' ? '项目测试命令' : '最近失败回执'
+                }；置信度 ${admission.confidence}）`,
+              ]
+            : []),
           `范围（只放行命中这些路径的修复写入）：${repair.scope.join('、')}`,
           `验证命令：${repair.verify}`,
           ...(repair.acceptance.length > 0 ? [`验收要点：${repair.acceptance.join('；')}`] : []),
           '这是一条修复通道：范围内自由迭代，无需立项/人工门；但必须留 RED→GREEN 证据。',
           '下一步（按顺序）：',
           '1) 先写复现/跑失败命令拿 RED：flow_verify({ group: "repro", command: "<必失败的命令>" })；',
-          '2) 在 scope 内修复（范围外写入会被拒绝，需要时先说明理由扩 scope 或转 flow_new_change）；',
+          '2) 在 scope 内修复（范围外写入会被拒绝；跨模块/敏感面请改走 flow_new_change）；',
           '3) 再 flow_verify({ group: "repro" }) 拿 GREEN，并跑声明的验证命令确认回归；',
-          `4) flow_fix_done({ summary }) 关闭修复通道；放弃用 flow_fix_abort({ reason })。`,
+          '4) flow_fix_done({ summary }) 关闭修复通道；放弃用 flow_fix_abort({ reason })。',
         ]
         return ok(lines.join('\n'), {
           id: repair.id,
@@ -743,6 +791,7 @@ export function createFlowTools(runtime: HostRuntime): DshToolDefinition[] {
           scope: repair.scope,
           verify: repair.verify,
           acceptance: repair.acceptance,
+          ...(admission !== undefined ? { admission } : {}),
           opensAt: repair.openedAt,
           next: 'RED（flow_verify group=repro）→ 修复 → GREEN → flow_fix_done',
         })

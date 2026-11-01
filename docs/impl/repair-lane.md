@@ -37,8 +37,11 @@
 ## 2. 修复车道流程
 
 ```text
-flow_fix_start({ title, symptom, repro?, scope[1..20], verify, acceptance?, severity? })
-  → 得到 FIX-id；账本 repair.started；.flowgate/state/repair.json 写进行中声明
+flow_fix_start({ symptom, title?, repro?, scope?, verify?, acceptance?, severity? })
+  → 智能准入（v0.7）：信号推导 scope/verify/title + 确定性复核
+     approved=按声明 ｜ adjusted=自动补全后通过 ｜ downgraded=拒绝（返回推荐车道与下一步）
+  → 通过才得到 FIX-id；账本 repair.assessed + repair.started；.flowgate/state/repair.json 写进行中声明
+     （被拒写 repair.rejected，不产生 repair.json）
   ↓
 RED：flow_verify({ group: "repro", command: "<必失败的命令/复现测试>" })
   → 失败回执绑定为 redEvidenceId（账本 repair.evidence）
@@ -88,6 +91,63 @@ flow_fix_done({ summary?, commit? })
 > 口径：工具层 `flow_fix_start` 与 core `startRepair` 未显式传 `severity` 时**默认都为 `P2`**
 > （2026-11-01 对齐；`P0` 生产不可用 / `P1` 主要功能受损 / `P2` 一般缺陷）。
 
+### 2.3 智能准入（v0.7，`flow_fix_start` 内置）
+
+修复车道不再只依赖模型自述"这是 bug、scope/verify 是这些"：`flow_fix_start` 在开启前先跑一次
+**信号推导 + 确定性准入**（实现：`src/core/flow/repair-admission.ts`、`FlowEngine.previewRepair()`）。
+
+**1) 信号推导（建议层，只提出假设）**
+
+| 信号 | 用来推导 |
+|---|---|
+| 最近失败/非零退出回执（`flow_verify` 历史） | verify 候选（命令本身）、scope 候选（命令里的 `src/...`、`test/...` 路径 token）、RED 线索 |
+| `git status --porcelain --untracked-files=all` 未提交改动 | scope 候选；预存脏工作区检查 |
+| 项目 `commands.test` | verify 候选 |
+| 当前变更 / 修复 / 锁定状态 | 车道选择与是否允许开启 |
+| 缺省补全 | title（取 symptom 首句）、acceptance（两条通用验收）、severity 默认 P2 |
+
+**2) 确定性复核（准入层，宁严勿松）**
+
+| 检查 | 结论 |
+|---|---|
+| 已有进行中的变更 | **拒绝**，推荐 `flow_declare_rework`（在变更内返工，而不是另开修复车道） |
+| 已有进行中的修复 / 锁定模式 / 未启用 | 拒绝 |
+| scope 为空 / >20 条 / 整棵顶层目录（`src/**`、`**`、`*`） | 拒绝，推荐 `flow_new_change` |
+| scope 命中敏感面（auth/payment/migration/密钥/CI 等内置触发器） | 拒绝，推荐变更车道（auto-review 会强制全流程/人工） |
+| 预存未提交改动不在 scope 内 | 拒绝（否则 `flow_fix_done` 必判越界；先提交/暂存） |
+| verify 无法推导或形状非法 | 拒绝，提示补 verify 或先跑一次失败命令 |
+| `.flowgate/`、`.git/` 出现在 scope | 自动剔除并留理由（永不放开受保护路径） |
+
+**3) 裁定与审计**
+
+- `approved`：按声明开启；
+- `adjusted`：自动补全/规范化后开启（来源会写清楚是声明还是推导）；
+- `downgraded`：不能开；工具返回推荐车道（`repair` / `change` / `rework`）、blockers 与下一步，**不产生半开启修复**。
+
+通过时把裁定、scope/verify 来源（`declared` / `suggested` / `failed-receipt` / `project`）、置信度与检查项写进
+`RepairRecord.admission` 和账本 `repair.assessed`；拒绝写 `repair.rejected`（含推荐车道与理由）。
+最近失败回执只作为 **RED 线索展示**，不会自动绑定成某次修复的证据——RED 仍只能由真实 `flow_verify` 产生。
+
+**4) 预演（dryRun）**
+
+```text
+flow_fix_start({ symptom: "连续新建会话第二个起报 not lossless JSON", dryRun: true })
+→ 返回：裁定 / 推荐车道 / 最终 scope（来源）/ 最终 verify（来源）/ 最近 RED 线索 / 检查项 / 下一步
+→ 不写 repair.json、不写 repair.started
+```
+
+省略 scope/verify 直接调用（不带 dryRun）会走同一条准入链：能推导就补全后开启；推不出来就拒绝并说明缺什么信号。
+也可以先跑一次失败命令（产生回执）再开修复——这是最省事的"用证据开局"方式。
+
+**5) 关门兜底（准入之后的硬约束仍然存在）**
+
+准入只校验"声明/推导的 scope"；实际改动仍由 `flow_fix_done` 用 `git status` 全量核对，
+并新增 **改动文件 ≤ 20 个** 上限：超过即拒绝关门并提示改用变更车道——防止有人把 feature 伪装成小修复。
+
+> 界限：准入是**确定性规则 + 可解释信号**，不是语义分类器；它不判断"这是不是 bug"，只回答
+> "以当前信号与声明，能不能安全走修复车道"。拒绝成本低（多一次调用/改车道），错误放行成本高
+> （削弱门禁），所以规则宁严勿松。
+
 ## 3. 守卫规则（修复通道内）
 
 修复通道只在"**没有进行中的变更**、项目已初始化且未锁定"时可开启；开启后守卫按修复声明判定，
@@ -135,7 +195,9 @@ flow_fix_done({ summary?, commit? })
 
 | 事件 | 内容 |
 |---|---|
-| `repair.started` | FIX-id、title、severity、scope、verify、symptom、openedBy |
+| `repair.assessed` | 智能准入裁定（approved/adjusted）、scope/verify 来源、置信度、检查项、理由 |
+| `repair.rejected` | 准入拒绝：推荐车道（repair/change/rework）、blockers、建议 scope/verify（不产生修复记录） |
+| `repair.started` | FIX-id、title、severity、scope、verify、symptom、openedBy、准入裁定/来源 |
 | `repair.evidence` | RED/GREEN 回执 id、命令、退出码、阶段、输入哈希（回执本体在 `.flowgate/state/evidence/`） |
 | `repair.done` | RED/GREEN/回归回执、改动文件、commit、摘要、记录路径、notes |
 | `repair.aborted` | 原因、改动文件、记录路径 |
@@ -180,8 +242,9 @@ flow_fix_start({
 
 ## 8. 已知限制（如实）
 
-1. **scope 由发起人声明**（agent 或人），不是自动推导；声明过宽会削弱范围约束，过窄会被
-   `R-FIX-SCOPE` 拒绝后重开。缓解：`flow_fix_done` 会核对 git 改动文件是否全在 scope 内。
+1. **scope/verify 可由信号推导，但推导只是启发式**：v0.7 起可省略由失败回执/未提交改动/项目命令推导，
+   准入会做宽度/敏感面/脏工作区检查，但不会替 agent 判断"这是不是 bug"；运行中越界仍被
+   `R-FIX-SCOPE` 拒绝，关门仍按 git 全量核对（且 ≤20 个改动文件）。跨模块/高风险请走变更车道。
 2. **没有独立审查子 agent**：修复车道靠 RED/GREEN + 全量回归 + 声明 verify 把关；高风险/跨模块
    改动仍应走变更车道（有审查与终审）。这是有意的成本折中，不是"修复车道质量更低"的结论。
 3. **shell 政策是治理策略，不是沙箱**：`R-FIX-SHELL` 按命令形状白名单允许测试/构建/lint/run 类命令

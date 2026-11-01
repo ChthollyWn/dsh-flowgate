@@ -44,6 +44,7 @@ import type {
   TakeoverMode,
   TestSummary,
 } from '../../core/types.js'
+import type { RepairAdmissionReview } from '../../core/flow/repair-admission'
 import { MemoryFileSystem } from '../../core/util/memory-fs.js'
 import * as os from 'node:os'
 import * as nodePath from 'node:path'
@@ -489,6 +490,7 @@ export interface FakeEngineState {
     allowOnce: unknown[]
     decidePending: unknown[]
     turnContinued: unknown[]
+    previewRepair: unknown[]
     startRepair: unknown[]
     finishRepair: unknown[]
     abortRepair: string[]
@@ -534,6 +536,7 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
       allowOnce: [],
       decidePending: [],
       turnContinued: [],
+      previewRepair: [],
       startRepair: [],
       finishRepair: [],
       abortRepair: [],
@@ -700,12 +703,48 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
       }
     },
     getRepair: () => (state.repair ? { ...state.repair, scope: [...state.repair.scope] } : null),
-    async startRepair(input: {
-      title: string
+    async previewRepair(input: {
+      title?: string
       symptom: string
       repro?: string
-      scope: string[]
-      verify: string
+      scope?: string[]
+      verify?: string
+      acceptance?: string[]
+      severity?: 'P0' | 'P1' | 'P2'
+    }): Promise<RepairAdmissionReview> {
+      state.calls.previewRepair.push(input)
+      const scope = input.scope ?? []
+      const verify = input.verify ?? ''
+      return {
+        verdict: scope.length === 0 || verify === '' ? 'adjusted' : 'approved',
+        recommendedLane: 'repair',
+        title: input.title ?? input.symptom,
+        symptom: input.symptom,
+        scope: scope.length > 0 ? [...scope] : ['src/index.ts'],
+        verify: verify !== '' ? verify : 'pnpm test',
+        acceptance: input.acceptance ?? [],
+        severity: input.severity ?? 'P2',
+        scopeSource: scope.length > 0 ? 'declared' : 'suggested',
+        verifySource: verify !== '' ? 'declared' : 'project',
+        suggestedScope: [],
+        suggestedVerify: '',
+        confidence: 'high',
+        checks: [{ id: 'scope', label: '范围可确定', passed: true, weight: 'block' }],
+        reasons: [],
+        blockers: [],
+        redEvidence: null,
+        dirtyFiles: [],
+        requiresRed: true,
+        nextSteps: ['先 flow_verify 拿 RED'],
+        reviewedAt: '2026-01-01T00:00:00.000Z',
+      }
+    },
+    async startRepair(input: {
+      title?: string
+      symptom: string
+      repro?: string
+      scope?: string[]
+      verify?: string
       acceptance?: string[]
       severity?: 'P0' | 'P1' | 'P2'
       openedBy?: 'human' | 'agent'
@@ -713,11 +752,11 @@ export function createFakeEngine(overrides: Partial<FakeEngineState> = {}): Flow
       state.calls.startRepair.push(input)
       const record: RepairRecord = {
         id: 'FIX-20260101-000000',
-        title: input.title,
+        title: input.title ?? input.symptom,
         symptom: input.symptom,
         ...(input.repro !== undefined ? { repro: input.repro } : {}),
-        scope: [...input.scope],
-        verify: input.verify,
+        scope: [...(input.scope ?? [])],
+        verify: input.verify ?? '',
         acceptance: input.acceptance ?? [],
         severity: input.severity ?? 'P2',
         status: 'open',

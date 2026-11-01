@@ -54,9 +54,17 @@ export function safeGetTakeoverMode(engine: EngineLike | null | undefined): Take
   }
 }
 
-/** 声明一次修复（flow_fix_start）。 */
+/** 修复准入预演（flow_fix_start dryRun / 命令解释用）：不开启修复、不写状态。 */
+export type RepairPreview = Awaited<ReturnType<EngineLike['previewRepair']>>
+
+/** 声明一次修复（flow_fix_start）：engine 内部先做智能准入，被拒会抛带下一步的错误。 */
 export async function startRepair(engine: EngineLike, input: RepairStartInput): Promise<RepairRecord> {
   return await engine.startRepair(input)
+}
+
+/** 只跑智能准入复核，不开启修复。 */
+export async function previewRepair(engine: EngineLike, input: RepairStartInput): Promise<RepairPreview> {
+  return await engine.previewRepair(input)
 }
 
 /** 完成修复（flow_fix_done / `/flow fix done`）。 */

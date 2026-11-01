@@ -107,7 +107,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 - **点击即授权**：批准/退回/解除熔断/确认外部改动等动作都由授权卡按钮直接执行（`ctx.remote.commands.execute`），**不会把命令写进输入框**，你不需要按回车确认任何命令。
 - **提问卡片**：需要你回答的问题由 agent 调用原生 `ask_user_question`，渲染成 DSH 的提问卡片（选项 + 自定义文本），不会在普通文本里向你提问。
 - **会话内可视化**：每次 `flow_*` 工具调用在聊天里显示为迷你七阶段轨道，能直接看到这次调用处在流程的哪一段。
-- **修 bug 不用立项（v0.6 修复通道）**：对"已知坏行为"说一句「修一下这个 bug：<现象>」即可，agent 用 `flow_fix_start` 开修复通道（声明症状/范围/验证命令）→ 先复现拿 RED → 范围内自由改 → GREEN → 全量回归，自动归档到 `.flowgate/fixes/`。没有七阶段文档、没有人工门，但证据链不降级；新功能/需求变化仍走变更车道。详见 [docs/impl/repair-lane.md](docs/impl/repair-lane.md)。
+- **修 bug 不用立项（v0.6 修复通道 + v0.7 智能准入）**：对"已知坏行为"说一句「修一下这个 bug：<现象>」即可，agent 用 `flow_fix_start` 开修复通道 → 先复现拿 RED → 范围内自由改 → GREEN → 全量回归，自动归档到 `.flowgate/fixes/`。没有七阶段文档、没有人工门，但证据链不降级；新功能/需求变化仍走变更车道。v0.7 起 **scope/verify 可省略**：engine 从最近失败回执、未提交改动、项目命令自动推导，并做确定性准入（跨模块/敏感面/过宽范围/脏工作区会被拒绝并推荐正确车道）；`dryRun: true` 可先预演。详见 [docs/impl/repair-lane.md](docs/impl/repair-lane.md)。
 - **出问题先自救（v0.6）**：插件把宿主搞坏时不要卸载——`pnpm host:recover --safe-mode --reason "<现象>"` 写一个 sentinel，重启后插件进入**安全模式（takeover=off，完全不拦截，并跳过 guard 等模块）**；修好并 `pnpm verify:host` 通过后再 `--clear`。见 [docs/impl/host-recovery.md](docs/impl/host-recovery.md)。
 
 > 没执行过 `/flow init` 的项目**不会**被拦截，dock 用授权卡提示一键启用（FR-15.1）。
@@ -169,7 +169,7 @@ DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 | `flow_submit_analysis` | 分析任务 | 提交结论、建议、限制与源码引用；插件核验引用后归档 |
 | `flow_diff` | 审查子 agent 专用 | 只读取当前任务的 diff |
 | `flow_declare_rework` | S4–S6 发现缺陷/需求变化 | 返工声明：按类型失效受影响任务的回执与审查（缺陷沿 depends_on 扩散） |
-| `flow_fix_start` | 修 bug（无进行中变更） | **修复通道**：声明 title/symptom/scope/verify/acceptance/severity，得到 `FIX-id`；范围内自由迭代、无需立项/人工门，但必须留 RED→GREEN 证据 |
+| `flow_fix_start` | 修 bug（无进行中变更） | **修复通道 + 智能准入（v0.7）**：只需 symptom；scope/verify/title 可省略（从失败回执/未提交改动/项目命令推导）。开启前确定性准入：已有变更→建议 `flow_declare_rework`，敏感面/过宽范围→建议 `flow_new_change`，脏工作区/无法推导 verify→拒绝。得到 `FIX-id` 后范围内自由迭代、无需立项/人工门，但必须留 RED→GREEN 证据；`dryRun: true` 只预演 |
 | `flow_fix_done` | 修复完成 | 关门校验：RED 晚于/早于 GREEN 顺序、`git status` 全部改动在 scope 内、`config.commands.test` 全量回归、重跑 verify、回执新鲜；失败保持修复通道开启 |
 | `flow_fix_abort` | 放弃修复 | 必须写理由；写账本 `repair.aborted` 并清空进行中声明 |
 | `flow_self_pause` | 无法安全继续/需负责人决策 | agent 自暂停：项目级暂停写操作 + 创建 `INC-id` 事故记录（`autoRearm`，下次宿主启动自动恢复；agent 不能自行恢复） |
@@ -245,6 +245,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 | 卡片优先交互（点击即授权 + 原生提问卡片） | ✅ 2026-11-01 v0.2：人工门 / 待处理项（SC·RK·PC·RL·TM·CF·BL）/ 非 agent 改动确认 / 启用 / 修复全部为可点击授权卡；点击经 `ctx.remote.commands.execute` 直接执行等价命令（`sessions.binding().session.command` 兜底），**输入框不再被填入命令**；FlowGate preset 组合原生 `ask_user_question`，澄清与选择走提问卡片；host/core 中面向用户的 `/flow` 提示已清理为卡片导向（仅保留 help / 用法错误 / doctor 诊断）；真实宿主点击流程见 [docs/screenshots](docs/screenshots/README.md) |
 | FlowGate 全量接管 + 自动流程路由 + auto-review | ✅ 2026-11-01 v0.5：项目启用后无进行中变更时，写文件/mutating shell 一律被 `R-NO-CHANGE` 拒绝（只读与 `flow_*` 放行），所有改动必须先立项；模型在 `flow_new_change` 的 `assessment` 里自评规模/清晰度并建议 `route`：`full`（全流程人工门）/`standard`（合并 G1+G3 一次确认）/`fast`（低复杂度且清晰可验证，G1/G3/G6 检查通过后自动放行直到交付归档）。宿主确定性 auto-review 独立校验：高风险/复杂/敏感面强制 full；fast 要求 clear + ≥2 验收 + 合法 verify + 1–5 条 scope；负责人可用 `/flow route ...` 覆盖。审计事件 `flow.assessed` / `flow.route_override`；dock/面板显示自动流程徽标 |
 | **修复通道（bug 修复一等公民，v0.6）** | ✅ 2026-11-01：`flow_fix_start/done/abort` + `/flow fix`；FIX-id 声明 scope（1–20 条）+ verify + symptom → RED（`flow_verify` 失败回执）→ 范围内自由迭代 → GREEN → 全量回归 → 自动归档 `.flowgate/fixes/<FIX-id>.json` + `index.md` + 账本 `repair.*`；`R-FIX-SCOPE`/`R-FIX-SHELL`/`R-FIX-TOOL` 守卫；无人工门、不写七阶段文档；契约与限制见 [repair-lane.md](docs/impl/repair-lane.md) |
+| **修复通道智能准入（v0.7）** | ✅ 2026-11-01：`flow_fix_start` 内置信号推导 + 确定性准入（`src/core/flow/repair-admission.ts`、`FlowEngine.previewRepair()`）：从最近失败回执/未提交改动/项目命令推导 scope/verify/title；硬拒已有变更（推荐 `flow_declare_rework`）、敏感面/过宽 scope（推荐 `flow_new_change`）、脏工作区、无法推导或形状非法的 verify；通过写账本 `repair.assessed`（含来源/置信度/检查项），拒绝写 `repair.rejected` 且不产生半开启修复；`dryRun` 只预演；关门新增改动文件 ≤20 上限。见 [repair-lane.md §2.3](docs/impl/repair-lane.md) |
 | **自愈与恢复（v0.6）** | ✅ 2026-11-01：safe-mode sentinel（`$DSH_HOME/flowgate/safe-mode` + 项目级 + `FLOWGATE_SAFE`）→ 强制 takeover=off 并跳过 guard/delegation/gates/dispatch；模块开关 `FLOWGATE_DISABLE`/`config.modules`；自举仓库默认 observe（**仅对 `R-NO-CHANGE` 未立项写入放行并记账；阶段/范围/受保护路径/修复通道 scope 等规则仍拦截**）；`pnpm host:recover`（`--status/--safe-mode/--clear/--profile <p> --remove [--yes]`，审计 `recovery.log`，不删项目数据）；agent 自暂停/事故记录（`flow_self_pause`/`flow_incident_close`，`INC-id`）；见 [host-recovery.md](docs/impl/host-recovery.md) |
 | **真机回归门 `pnpm verify:host`（v0.6）** | ✅ 2026-11-01：隔离 `DSH_HOME` + 真实 DSH Web 宿主 + `link:` 本仓库，**连续创建 ≥2（默认 3）个会话**并断言无 `not lossless JSON`——v0.5.1 事故的唯一可靠回归门（单会话会漏测）；修复构建 3/3 GREEN，中性化修复的模拟旧构建第 2/3 次 RED（`--expect-fail` 元验证）。见 [docs/compat/host-smoke.md](docs/compat/host-smoke.md) |
 | **投影 wire 显式 DTO + 自检 + 预算（v0.6）** | ✅ 2026-11-01：`src/host/boundary/json.ts` 镜像 DSH lossless 规则（undefined/NaN/负零/稀疏数组/类实例…）；`wire.ts` 显式白名单 DTO + 条数上限 + 256KiB 单帧预算与降级顺序；注册前 `projectionSelfCheck()`（失败不注册投影）；`stateVersion=2`；预算与实测见 [projection-budget.md](docs/impl/projection-budget.md) |
@@ -265,13 +266,15 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 
 **v0.5（2026-11-01，自动流程接管 + auto-review）：** `R-NO-CHANGE` 接管未立项写入；`flow_new_change.assessment` 自评 + 宿主 auto-review 决定 full/standard/fast；fast 路由 G1/G3/G6 检查通过后自动通过并交付归档，standard 合并 G1+G3 一次人工确认；新增 `/flow route` 负责人覆盖。验证：`pnpm lint` 绿；`npx vitest run`（119 文件 / 1687 用例，含 auto-review 8 类规则 + fast/standard 状态机集成）；coverage 86.18 / 76.23 / 86.88 / 89.27（阈值通过）；build（host 1.23MB / client 369.4KB）；verify:package（39 文件 / 1079.2KB）/ verify:client 全绿；真机零模型 E2E：自动流程徽标 7/7（dock + 面板 `data-route=fast`）+ v0.4 回归 14/14，0 pageerror/console.error/模型请求（见 docs/impl/auto-flow.md）。
 
+**v0.7（2026-11-01，修复通道智能准入）集成验证：** lint/tsc 通过（149 个源文件，0 error）；`npx vitest run` **131 files / 1876 tests** 全绿（新增 repair-admission 规则矩阵 17 例 + engine 准入端到端 9 例）；`pnpm coverage` **86.61 / 76.61 / 87.44 / 89.71**（阈值通过）；`pnpm build` host **1.36MB**（1,358,014 B，sha256 `37ca9097…`）/ client **375.2KB**；`verify:package` **39 文件 / 1190.8KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过；`verify:uninstall` 通过；`measure:startup` **约 +16ms**（多轮 14.6–17.3ms，<200ms）；`verify:compat` **13/13** 通过（隔离 `DSH_HOME`，`--dump-config` 1316 行）；真机 `pnpm verify:host` **连续 3 个会话创建成功**（0.8s ready、无 lossless 错误）；中性化旧构建第 2/3 次复现（门有效），见 [docs/compat/host-smoke.md](docs/compat/host-smoke.md)。修复通道准入的确定性规则与限制见 [repair-lane.md §2.3](docs/impl/repair-lane.md)。
+
 **v0.6（2026-11-01，修复通道 + 自愈/恢复 + verify:host）集成验证：** lint/tsc 通过（148 个源文件，0 error）；`npx vitest run` **129 files / 1849 tests** 全绿；`pnpm coverage` **86.50 / 76.45 / 87.41 / 89.63**（阈值通过）；`pnpm build` host **1.34MB** / client **375.2KB**；`verify:package` **39 文件 / 1172.6KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过；`verify:uninstall` 通过；`measure:startup` **约 +16ms**（多轮 15.3–17.3ms，<200ms；口径见 [docs/compat/startup.md](docs/compat/startup.md)）；`verify:compat` **13/13** 通过（隔离 `DSH_HOME`，`--dump-config` 1316 行；发布前在有 DSH 的机器上仍建议按清单复跑）。真机证据：`pnpm verify:host` **连续 3 个会话创建成功**（隔离 web 宿主 0.8s ready、约 0.02s/会话、无 lossless 错误）；中性化修复的模拟旧构建第 2/3 次复现 `not lossless JSON`（门有效），详见 [docs/compat/host-smoke.md](docs/compat/host-smoke.md)。安全/恢复：`host:recover`、safe-mode、模块开关、observe 模式、修复通道/事故记录均已落地（见上表与 docs/impl）。
 
 **v0.5.1（2026-11-01，修复新建会话失败）：** `flowgate` 会话投影的 wire 值含 `undefined` 字段，DSH `api-session/added` 的 lossless JSON 校验拒绝，导致新建会话/子会话报 `forwarded host event "api-session/added" argument 0 is not lossless JSON data`。已在投影边界加 `toLosslessJson()` 清洗（`init()` + `wire.view()`），并补回归测试；隔离宿主旧构建**连续第 2 个会话起失败**、修复构建 `session/create` 返回 `ok:true`（0 模型；v0.6 起由 `pnpm verify:host` 连续建 ≥2 个会话作为回归门）。验证：lint 绿；119 files / 1689 tests；coverage 86.18/76.23/86.88/89.26；build host 1.23MB / client 383.4KB；verify:package 39 文件/1080.6KB；verify:client 18 插槽通过。
 
-## 已知限制（v0.6）
+## 已知限制（v0.7）
 
-- **修复通道的 scope 由发起人声明**（1–20 条路径/glob），不是自动推导；关门时会用 `git status --untracked-files=all` 全量核对，**开修复前已有的无关未提交改动会被判越界**，先提交/暂存再开。
+- **修复通道的 scope/verify 可自动推导，但只是启发式**：v0.7 准入从最近失败回执、未提交改动、项目命令推导，并做宽度/敏感面/脏工作区检查；它不判断"这是不是 bug"，不会替 agent 承担责任。运行中越界仍被 `R-FIX-SCOPE` 拒绝；关门仍按 `git status --untracked-files=all` 全量核对，且 **改动文件 ≤20 个**。**开修复前已有的无关未提交改动会被判越界**，先提交/暂存再开。跨模块/高风险请走变更车道。
 - **修复通道的 shell 政策是治理策略，不是沙箱**：按形状白名单放行测试/构建/lint/run 与只读/提交类 git，兜底是关门 scope 核对 + 全量回归；需要强隔离请用宿主沙箱/容器。
 - **observe 只放宽未立项写入**（`R-NO-CHANGE`）；有进行中变更时阶段/范围/受保护路径等规则仍拦截。**safe-mode 才是完全不拦截**，但它需要重启生效，且恢复期不要依赖门禁保护。
 - **`pnpm verify:host` 需要本机安装 DSH 桌面端**：GitHub Actions runner 没有 DSH，CI 不跑；发布清单要求在有 DSH 的机器上执行（见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)）。
@@ -310,7 +313,7 @@ docs/             需求、技术方案、执行方案、实现契约、方法�
 不会只有一条路：`/flow allow-once` 单次放行、面板"加入例外"、`/flow off` 临时关闭（记账并计入指标）、`/flow doctor` 自检、`/flow repair` 从账本和产物重建。**插件自身出问题时（v0.6）**：`pnpm host:recover --safe-mode` 写入 sentinel → 重启后插件自动降级为不拦截（不需要卸载），修好并 `pnpm verify:host` 通过后再 `--clear`；日常 `desktop` 用稳定版本、开发用隔离 `flowgate-dev`、dogfood 用打包 tgz，最坏情况回滚 tgz 或重建 dev profile（见 [host-recovery.md](docs/impl/host-recovery.md)、[dev-loop.md](docs/impl/dev-loop.md)）。
 
 **修 bug 也要先立项吗？**
-不用（v0.6 起）。已知 bug / 事故回归走**修复通道**：agent 用 `flow_fix_start` 声明症状、允许改动的范围（scope）与验证命令，先复现拿 RED 证据，范围内自由修，验证命令转 GREEN 并跑全量回归后自动归档。没有七阶段文档和人工门，但范围外写入会被 `R-FIX-SCOPE` 拒绝、危险命令会被 `R-FIX-SHELL` 拒绝，证据链不降级。新功能/需求变化仍走变更车道（可用 fast 路由加速）。
+不用（v0.6 起）。已知 bug / 事故回归走**修复通道**：agent 用 `flow_fix_start` 声明症状，先复现拿 RED 证据，范围内自由修，验证命令转 GREEN 并跑全量回归后自动归档。没有七阶段文档和人工门，但范围外写入会被 `R-FIX-SCOPE` 拒绝、危险命令会被 `R-FIX-SHELL` 拒绝，证据链不降级。**v0.7 起还可以更省事**：scope/verify/title 都可以省略，engine 从最近失败回执、未提交改动、项目命令自动推导，并用确定性准入挡住"把 feature 当 bug 修"的场景（已有变更/敏感面/过宽范围/脏工作区会被拒绝并推荐正确车道）；`dryRun: true` 可以先看准入裁定再决定。新功能/需求变化仍走变更车道（可用 fast 路由加速）。
 
 **误伤怎么办？**
 误判反馈闭环：在面板标"误判" → 放行本次 / 加入例外（写理由，可撤销）/ 导出证据。指标 M-5 误判率目标 ≤ 5%，超过 5% 的规则自动降为提示并进入复盘（累计拦截 ≥ 20 次才生效，避免新规则被一两次误判放倒；降级只放行本次并写账本 `rule.hinted`）。

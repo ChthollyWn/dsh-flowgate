@@ -246,6 +246,8 @@ describe('修复通道：finish 前置失败保持 open', () => {
 
   it('无法收集改动文件时记 unknown 并继续（不误杀）', async () => {
     const h = await harness({ git: false })
+    // 准入会先采集一次工作区信号：让 git status 失败（模拟无法收集），确认不误杀。
+    h.runner.enqueue({ match: 'git status', exitCode: 1, stdout: '' })
     await startRepair(h)
     await redGreen(h)
     // git status 失败 → collected = null。
@@ -281,11 +283,14 @@ describe('修复通道：abort 与准入校验', () => {
     expect(next.id).not.toBe(record.id)
   })
 
-  it('startRepair 校验活动变更 / 重复修复 / scope / verify', async () => {
-    // 有进行中的变更时拒绝（修 bug 与七阶段变更互斥）。
+  it('智能准入校验：活动变更 / 重复修复 / 省略字段 / 过宽 scope / 非法 verify', async () => {
+    // 有进行中的变更时拒绝（修 bug 与七阶段变更互斥），并推荐变更内返工。
     const busy = await harness()
     await busy.engine.init()
     await busy.engine.newChange({ title: '会员续费', summary: '给会员加续费功能' })
+    await expect(
+      busy.engine.startRepair({ title: 'x', symptom: 'y', scope: ['src/index.ts'], verify: 'pnpm test' }),
+    ).rejects.toThrow('修复准入未通过')
     await expect(
       busy.engine.startRepair({ title: 'x', symptom: 'y', scope: ['src/index.ts'], verify: 'pnpm test' }),
     ).rejects.toThrow('进行中的变更')
@@ -299,21 +304,40 @@ describe('修复通道：abort 与准入校验', () => {
       scope: ['src/index.ts'],
       verify: 'pnpm test',
     })
-    await expect(
-      h.engine.startRepair({ title: '修复 B', symptom: '症状', scope: ['src/index.ts'], verify: 'pnpm test' }),
-    ).rejects.toThrow('已有进行中的修复')
+    const rejected = h.engine.startRepair({ title: '修复 B', symptom: '症状', scope: ['src/index.ts'], verify: 'pnpm test' })
+    await expect(rejected).rejects.toThrow('修复准入未通过')
+    await expect(rejected).rejects.toThrow('已有进行中的修复')
 
-    // 参数校验。
     await h.engine.abortRepair('测试用')
+
+    // 标题可省略：准入从 symptom 推导标题。
+    const derived = await h.engine.startRepair({ symptom: '症状：重复扣款', scope: ['src/index.ts'], verify: 'pnpm test' })
+    expect(derived.title).toContain('重复扣款')
+    expect(derived.admission?.verdict).toBe('adjusted')
+    await h.engine.abortRepair('测试用')
+
+    // 省略 scope 且没有任何信号 → 准入拒绝（不产生半开启修复）。
+    const noScope = h.engine.startRepair({ title: 't', symptom: 's', verify: 'pnpm test' })
+    await expect(noScope).rejects.toThrow('修复准入未通过')
+    await expect(noScope).rejects.toThrow('scope')
+    expect(h.engine.getRepair()).toBeNull()
+
+    // scope 过宽 → 准入拒绝并推荐变更车道。
+    const tooBroad = h.engine.startRepair({ title: 't', symptom: 's', scope: ['src/**'], verify: 'pnpm test' })
+    await expect(tooBroad).rejects.toThrow('修复准入未通过')
+    await expect(tooBroad).rejects.toThrow('过宽')
+
+    // 条数上限。
     await expect(
-      h.engine.startRepair({ title: ' ', symptom: '症状', scope: ['src/index.ts'], verify: 'pnpm test' }),
-    ).rejects.toThrow('标题')
-    await expect(
-      h.engine.startRepair({ title: 't', symptom: 's', scope: [], verify: 'pnpm test' }),
-    ).rejects.toThrow('范围不能为空')
-    await expect(
-      h.engine.startRepair({ title: 't', symptom: 's', scope: Array.from({ length: 21 }, (_, i) => `src/${i}.ts`), verify: 'pnpm test' }),
-    ).rejects.toThrow('最多 20')
+      h.engine.startRepair({
+        title: 't',
+        symptom: 's',
+        scope: Array.from({ length: 21 }, (_, i) => `src/core/f${i}.ts`),
+        verify: 'pnpm test',
+      }),
+    ).rejects.toThrow('上限')
+
+    // 非法 verify。
     await expect(
       h.engine.startRepair({ title: 't', symptom: 's', scope: ['src/index.ts'], verify: 'pnpm test && rm -rf /' }),
     ).rejects.toThrow('验证命令不合法')

@@ -150,6 +150,24 @@ export interface RepairRecord {
   closedAt?: string
   abortReason?: string
   summary?: string
+  /** v0.7 智能准入留痕：声明/推导来源与确定性检查结果（旧记录可能没有）。 */
+  admission?: RepairAdmissionRecord
+}
+
+/**
+ * 修复通道智能准入记录（v0.7，docs/impl/repair-lane.md §3）。
+ *
+ * 只记录"通过/调整后通过"的裁定；被拒绝的准入写账本 `repair.rejected`，
+ * 不产生修复记录（避免把被拒声明伪装成进行中的修复）。
+ */
+export interface RepairAdmissionRecord {
+  verdict: 'approved' | 'adjusted'
+  reviewedAt: string
+  scopeSource: 'declared' | 'suggested'
+  verifySource: 'declared' | 'failed-receipt' | 'project'
+  confidence: 'high' | 'medium' | 'low'
+  checks: { id: string; label: string; passed: boolean; detail?: string }[]
+  reasons: string[]
 }
 
 /** 事故记录（v0.5.1）：agent 自暂停时创建，关闭时补摘要与证据并归档。 */
@@ -1213,6 +1231,9 @@ export type LedgerEventType =
   | 'repair.evidence'
   | 'repair.done'
   | 'repair.aborted'
+  // v0.7：修复通道智能准入（信号推导 + 确定性复核）。
+  | 'repair.assessed'
+  | 'repair.rejected'
 
 export interface LedgerEvent {
   seq: number

@@ -21,7 +21,7 @@
 ```bash
 pnpm install
 pnpm lint        # 分层规则（core 不得依赖 DSH/host/client）+ tsc --noEmit
-pnpm test        # 129 个测试文件 / 1849 用例（2026-11-01 v0.6 最终实测）
+pnpm test        # 131 个测试文件 / 1876 用例（2026-11-01 v0.7 最终实测）
 pnpm build       # lib/host.js（ESM）+ lib/client.js（loader 包装）
 pnpm coverage    # 覆盖率 + thresholds（core+host 口径）
 pnpm verify:client
@@ -31,7 +31,7 @@ DSH_HOME=/tmp/fg-home node scripts/verify-dsh-compat.mjs --profile flowgate --wr
 DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" --profile flowgate --dump-config
 ```
 
-最近一次结果（2026-11-01 v0.6，工作树未提交；全部为当前工作树实测）：lint + typecheck 通过（**148 个源文件**，tsc 0 error）；`test` **129 files / 1849 tests** 全绿；`pnpm coverage` 通过 thresholds（86/76/86/89）：合计 **86.50 / 76.45 / 87.41 / 89.63**（语句/分支/函数/行）；构建产物 `lib/host.js` **1,339,774 B（≈1.34MB，sha256 `b979dc08…`）** / `lib/client.js` **389,499 B（build-client 打印 375.2KB，为 JS 字符串长度）**；`verify:package` **39 文件 / 1172.6KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过（含 `flow_fix_*` / `flow_self_pause` / `flow_incident_close` 的 toolview 插槽）；`verify:host`（真机隔离宿主）**3/3 会话创建成功、0.8s ready、约 0.02s/会话、无 not lossless JSON**；`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）；`measure:startup` 中位数增量 **约 +16ms**（多轮 15.3–17.3ms 波动，验收线 <200ms；具体口径见 docs/compat/startup.md）。`verify:compat` **13/13** 通过（隔离 `DSH_HOME=/tmp/fg-compat-final` + `link:` 安装，`--dump-config` 1316 行）。
+最近一次结果（2026-11-01 v0.7，工作树未提交；全部为当前工作树实测）：lint + typecheck 通过（**149 个源文件**，tsc 0 error）；`test` **131 files / 1876 tests** 全绿（新增修复通道智能准入规则矩阵 17 例 + engine 端到端 9 例）；`pnpm coverage` 通过 thresholds（86/76/86/89）：合计 **86.61 / 76.61 / 87.44 / 89.71**（语句/分支/函数/行）；构建产物 `lib/host.js` **1,358,014 B（≈1.36MB，sha256 `37ca9097…`）** / `lib/client.js` **389,499 B（build-client 打印 375.2KB，为 JS 字符串长度）**；`verify:package` **39 文件 / 1190.8KB**；`verify:client` **18 插槽 + 1 右栏 tab** 通过；`verify:host`（真机隔离宿主）**3/3 会话创建成功、0.8s ready、约 0.02s/会话、无 not lossless JSON**；`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）；`measure:startup` 中位数增量 **约 +16ms**（多轮 14.6–17.3ms 波动，验收线 <200ms；具体口径见 docs/compat/startup.md）。`verify:compat` **13/13** 通过（隔离 `DSH_HOME=/tmp/fg-compat-final` + `link:` 安装，`--dump-config` 1316 行）。
 
 上一轮结果（2026-10-31 第六轮，代码提交 `cea85dd` + 文档提交，保留以便追溯）：lint + typecheck 通过（130 个源文件）；`test` **112 files / 1522 tests** 全绿（第五轮 107/1459，本轮 +5 文件 / +63 用例）；`pnpm coverage` 通过 thresholds（80/80/80/70）：合计 **86.40 / 76.25 / 86.92 / 89.46**（语句/分支/函数/行），core 83.42 / 69.26 / 82.59 / 88.48，host 74.09 / 65.71 / 70.00 / 78.20；构建产物 `lib/host.js` **1,210,648 B（≈1.21MB）** / `lib/client.js` **223,830 B（≈219KB）**（build-client 打印的 211.4KB 是 JS 字符串长度，不是文件体积）；`verify:package` **39 文件 / 1032.9KB**（docs 修改后重跑实测，含 README）；`verify:client` 通过。本 HEAD 复跑：`verify:compat` **13/13**（隔离 `DSH_HOME=/tmp/fg-audit-env` 的 profile + `link:` 安装，新构建；`--dump-config` 1314 行）、`measure:startup` 中位数增量 **+16.2ms**（基线 16.5ms / 加载 32.6ms，验收线 <200ms）、`verify:uninstall` 全部通过（已知 rc.5 `plugin remove` 不 prune node_modules 警告）。**第六轮提交已推送，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) success。**
 
@@ -481,6 +481,21 @@ DSH_HOME=/tmp/fg-home "/Applications/DeepSeek Harness.app/Contents/Resources/run
 | 启动增量 | `pnpm measure:startup` **约 +17ms**（<200ms 通过；具体值见 docs/compat/startup.md 口径） |
 | 兼容复跑 | `verify:compat` **13/13** 通过（隔离 `DSH_HOME` + `link:` 安装，`--dump-config` 1316 行） |
 
+
+## 3.19 v0.7：修复通道智能准入（2026-11-01）
+
+| 项 | 内容 |
+|---|---|
+| 触发 | 负责人：修复通道不能只靠显式声明，要"智能识别/自动推导"；但语义判断不能被静默替代 |
+| 设计 | **信号推导（建议层）+ 确定性复核（准入层）+ 可审计声明**：`src/core/flow/repair-admission.ts`（纯函数）、`FlowEngine.previewRepair()`；`flow_fix_start` 内置 |
+| 信号 | 最近失败回执（verify/路径 token）、`git status --untracked-files=all` 未提交改动（scope/脏工作区）、项目 `commands.test`、当前变更/修复/锁定；缺省补 title/acceptance |
+| 硬拒绝 | 已有变更（→`flow_declare_rework`）、已有修复/锁定/未启用、scope 空/>20/整棵顶层目录（→`flow_new_change`）、敏感面、预存脏改动不在 scope、verify 推导不出或形状非法；受保护路径自动剔除 |
+| 裁定/审计 | `approved/adjusted/downgraded`；通过写 `RepairRecord.admission` + 账本 `repair.assessed`；拒绝写 `repair.rejected`（推荐车道 + blockers），不产生半开启修复 |
+| 预演 | `flow_fix_start({ symptom, dryRun: true })` 只返回裁定/建议参数/RED 线索/检查项/下一步，不写状态 |
+| 关门上限 | `flow_fix_done` 对 >20 个改动文件拒绝（防 feature 伪装成修复）；scope 全量核对不变 |
+| 测试 | `test/core/flow/repair-admission.test.ts`（17）、`test/integration/engine-repair-admission.test.ts`（9）；更新 repair-lane/tools/real-engine 测试 |
+| 验证 | 131 files / 1876 tests；coverage 86.61/76.61/87.44/89.71；verify:host 3/3；verify:compat 13/13；详见 §2 最近一次结果 |
+| 文档 | [repair-lane.md §2.3](repair-lane.md)；README/README.en 工具/FAQ/限制；auto-flow §1 车道选择；CHANGELOG v0.7 |
 
 ## 4. 剩余项（第六轮复验后，四分）
 

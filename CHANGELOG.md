@@ -6,6 +6,41 @@ FlowGate（npm 包名 `dsh-flowgate`）的重要变更记录在这里。格式�
 > 第六轮（独立复验后的接线修复，代码提交 `cea85dd`、文档提交 `25fffac`）已推送 `main`，CI run [41197243594](https://github.com/ChthollyWn/dsh-flowgate/actions/runs/41197243594) **success**。
 > 发布物料与发布前检查清单见 [docs/release/v0.1.0.md](docs/release/v0.1.0.md)；本次发布信息已按实际日期（2026-10-31）回填。首版为本地 `npm publish`（无 provenance）；**GitHub Release 待补建**（命令见发布说明文末）。
 
+## [Unreleased]（v0.7：修复通道智能准入，2026-11-01）
+
+> 负责人追问："修复是走单独一条通道吗？为什么不是智能识别自动推导？"——修复车道保持为一等公民，
+> 但把"该不该走、scope/verify 填什么"升级为**信号推导 + 确定性复核**；语义判断仍由 agent 负责并留可审计声明。
+
+### Added
+
+- **修复通道智能准入（v0.7）**：新增 `src/core/flow/repair-admission.ts`（纯函数规则）与 `FlowEngine.previewRepair()`。
+  - 信号推导：最近失败/非零退出回执 → verify 候选与命令里的路径 token；`git status --untracked-files=all` 未提交改动 →
+    scope 候选与脏工作区检查；项目 `commands.test` → verify 候选；缺省补全 title（symptom 首句）与两条通用 acceptance。
+  - 确定性复核（硬拒）：已有进行中的变更（推荐 `flow_declare_rework`）、已有修复/锁定/未启用、scope 空/>20 条/整棵顶层目录
+    （推荐 `flow_new_change`）、scope 命中敏感面（auth/支付/迁移/密钥/CI 等内置触发器）、预存未提交改动不在 scope 内、
+    verify 无法推导或形状非法；scope 里的受保护路径（`.flowgate`/`.git`）自动剔除并留理由。
+  - 裁定 `approved | adjusted | downgraded`；通过把来源（declared/suggested/failed-receipt/project）、置信度与检查项写入
+    `RepairRecord.admission` 与账本 `repair.assessed`；拒绝写 `repair.rejected`（含推荐车道与 blockers），**不产生半开启修复**。
+  - `flow_fix_start({ symptom, dryRun: true })` 只做准入预演（裁定/建议 scope/verify/最近 RED 线索/检查项/下一步），不写状态。
+  - `flow_fix_start` 参数放宽：`symptom` 唯一必填，`title/scope/verify` 可选（省略时由准入推导），新增 `dryRun`。
+- **关门防滥用上限**：`flow_fix_done` 收集到 >20 个改动文件时拒绝（提示改用变更车道），避免把 feature 伪装成小修复。
+- **测试**：新增 `test/core/flow/repair-admission.test.ts`（17 例规则矩阵）与 `test/integration/engine-repair-admission.test.ts`
+  （9 例端到端：预演、自动推导、脏工作区/敏感面拒绝、账本、改动文件上限、RED 线索）；更新修复通道/工具/真机引擎测试。
+
+### Changed
+
+- `flow_fix_start` 的 host 工具不再本地校验空 scope（交给准入）；拒绝文案按"推荐车道"区分 change / rework / repair。
+- 文档：repair-lane.md 新增 §2.3 智能准入；README/README.en 的快速开始、工具表、功能表、FAQ、已知限制同步；
+  auto-flow.md 补车道选择说明；implementation-status §3.19。
+
+### Verification
+
+- `npx vitest run` **131 files / 1876 tests** 全绿；`pnpm coverage` **86.61 / 76.61 / 87.44 / 89.71**（阈值通过）；
+  lint/tsc 通过（149 源文件，0 error）；`pnpm build` host **1.36MB**（1,358,014 B，sha256 `37ca9097…`）/ client **375.2KB**；
+  `verify:package` **39 文件 / 1190.8KB**；`verify:client` 18 插槽 + 1 右栏 tab；`verify:uninstall` 通过；
+  `measure:startup` 约 +16ms（14.6–17.3ms 多轮，<200ms）；`verify:compat` **13/13**（隔离 DSH_HOME，dump-config 1316 行）；
+  真机 `pnpm verify:host` **3/3 会话创建成功**（0.8s ready、无 lossless 错误；中性化旧构建第 2/3 次复现，门有效）。
+
 ## [Unreleased]（v0.6：修复通道 + 自愈/恢复 + 真机回归门 verify:host，2026-11-01）
 
 > 未发版。负责人要求：v0.5.1 事故（投影非 lossless JSON → **连续新建会话从第二个起失败**）要根本修复——

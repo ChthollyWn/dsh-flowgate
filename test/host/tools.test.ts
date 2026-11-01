@@ -201,12 +201,23 @@ describe('修复通道工具（P1-8/P1-9）', () => {
     expect(engineState(harness.engine).calls.startRepair.length).toBe(1)
   })
 
-  it('flow_fix_start 空 scope 返回 {error,hint}（参数语义错误）', async () => {
+  it('flow_fix_start 省略 scope 时交给 engine 智能准入（host 不再本地拒绝）', async () => {
     harness = await setupPlugin()
-    const { value } = await runTool(harness, 'flow_fix_start', { title: 'x', symptom: 'y', scope: [], verify: 'pnpm test' })
-    expect(value.ok).toBe(false)
-    expect(String(value.data?.error)).toContain('scope 不能为空')
+    const { value } = await runTool(harness, 'flow_fix_start', { symptom: 'y', verify: 'pnpm test' })
+    expect(value.ok).toBe(true)
+    expect(engineState(harness.engine).calls.startRepair.length).toBe(1)
+    expect(engineState(harness.engine).calls.startRepair[0]).toMatchObject({ symptom: 'y', verify: 'pnpm test' })
+  })
+
+  it('flow_fix_start dryRun 只做智能准入预演，不开启修复', async () => {
+    harness = await setupPlugin()
+    const { value } = await runTool(harness, 'flow_fix_start', { symptom: '重复扣款', dryRun: true })
+    expect(value.ok).toBe(true)
+    expect(value.summary).toContain('修复准入预演')
+    expect(value.summary).toContain('推荐车道')
+    expect(value.data?.started).toBe(false)
     expect(engineState(harness.engine).calls.startRepair.length).toBe(0)
+    expect(engineState(harness.engine).calls.previewRepair.length).toBe(1)
   })
 
   it('flow_fix_done 关闭修复并返回中文修复报告（证据/改动/是否成功）', async () => {
@@ -294,7 +305,10 @@ describe('修复通道工具（P1-8/P1-9）', () => {
       properties?: Record<string, { type?: string; enum?: string[] }>
       required?: string[]
     }
-    expect(schema.required).toEqual(expect.arrayContaining(['title', 'symptom', 'scope', 'verify']))
+    // v0.7 智能准入：只有 symptom 必填；title/scope/verify 可省略由 engine 推导。
+    expect(schema.required).toEqual(expect.arrayContaining(['symptom']))
+    expect(schema.required).not.toContain('scope')
+    expect(schema.required).not.toContain('verify')
     expect(schema.properties?.scope?.type).toBe('array')
     expect(schema.properties?.verify?.type).toBe('string')
     expect(schema.properties?.severity?.enum).toEqual(['P0', 'P1', 'P2'])

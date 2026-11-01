@@ -12,7 +12,7 @@
 
 | 项 | 结果 |
 |---|---|
-| 当前构建（2026-11-01 v0.6 最终集成构建，`lib/host.js` 1,339,774 B / sha256 `b979dc08…`） | ✅ **GREEN**：`pnpm verify:host` 隔离宿主连续创建 3/3 会话成功，`ok:true` + `sessionId`，无 lossless 错误；隔离 web 宿主 0.8s ready、约 0.02s/会话 |
+| 当前构建（2026-11-01 v0.7 最终集成构建，`lib/host.js` 1,358,014 B / sha256 `37ca9097…`） | ✅ **GREEN**：`pnpm verify:host` 隔离宿主连续创建 3/3 会话成功，`ok:true` + `sessionId`，无 lossless 错误；隔离 web 宿主 0.8s ready、约 0.02s/会话 |
 | 门本身的有效性（反向元验证） | ✅ **能抓住旧 bug**：把 `toLosslessJson$1` 中性化模拟修复前构建后，同样流程 **第 1 次 create 成功、第 2/3 次 create 报** `gateway/internal ... not lossless JSON data`（2/3 命中）；`--expect-fail` 判定通过 |
 | 覆盖 | 真实 DSH Web 宿主（`dsh --profile <p> --no-open --port 0`）+ `link:` 安装本仓库构建 + 已初始化工作区（`.flowgate/`）+ `POST /api/session/create` |
 | 未覆盖 | Desktop（Electron 窗口）宿主人工走查、子 agent 会话创建、真实模型轮次（脚本发 0 次模型请求） |
@@ -34,7 +34,7 @@
 | 机器 | macOS（arm64），Node v23.11.0（脚本要求 Node 22+） |
 | DSH | `0.2.1-rc.5`，CLI `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` |
 | 仓库 HEAD | `1ab6ec9`（v0.5.1 修复提交；本轮 v0.6 改动为工作树未提交） |
-| 被测构建 | 首次实测为 v0.5.1 修复构建（host 1,231,783 B / sha256 `009514a2…`）；**2026-11-01 最终集成后复跑为 v0.6 最终构建**：`lib/host.js` 1,339,774 B / sha256 `b979dc088265293957d79bee0bc521a314918c97b1a4f46dd5777b36ad51baf9`、`lib/client.js` 389,499 B / sha256 `7429fea340d7fa909989ee542d96fe1a4ae6f63c0cfccced2ad46e0b2c02d8c7` |
+| 被测构建 | 首次实测为 v0.5.1 修复构建（host 1,231,783 B / sha256 `009514a2…`）；**2026-11-01 v0.6/v0.7 集成后复跑为 v0.7 最终构建**：`lib/host.js` 1,358,014 B / sha256 `37ca909716f77d5188f78aa06dec2a654143e5a6f9de09db07378e9eb92febe7`、`lib/client.js` 389,499 B / sha256 `7429fea340d7fa909989ee542d96fe1a4ae6f63c0cfccced2ad46e0b2c02d8c7` |
 | 隔离 `DSH_HOME` / `HOME` | 脚本在 `os.tmpdir()` 下自建（本次为 `/private/var/folders/.../fg-host-smoke-*`），**不碰 `~/.dsh`**；`HOME` 也隔离，保证插件 `~/.dsh/flowgate/ledger.key` 落在临时目录 |
 | profile | `flowgate-smoke` = `--from-default-profile web` 新建；组合树含 `dsh-flowgate` |
 | 工作区 | 临时目录，复制仓库 `.flowgate/`（该 bug 只在 FlowGate 已初始化项目触发）；路径用 realpath |
@@ -48,7 +48,7 @@ pnpm build            # 前置：脚本只验证构建产物，不代构建；�
 pnpm verify:host      # 或 node scripts/smoke-host.mjs
 ```
 
-实测输出（2026-11-01 首次实测：v0.5.1 修复构建；集成后最终 v0.6 构建复跑结果相同）：
+实测输出（2026-11-01 首次实测：v0.5.1 修复构建；集成后 v0.6/v0.7 构建复跑结果相同）：
 
 ```text
 隔离根目录：/private/var/folders/gd/.../T/fg-host-smoke-Ea6Qg6
@@ -73,7 +73,7 @@ verify:host 通过：隔离宿主可正常创建新会话（无 not lossless JSO
 ```
 
 退出码 0；全程约 2–4s（profile/安装/宿主启动均为本地操作），单次建会话约 0.01–0.02s。2026-11-01 最终集成后复跑
-（v0.6 最终构建：host 1,339,774 B / sha256 `b979dc08…`、client 389,499 B）同样 **3/3 通过、0.8s ready、约 0.02s/会话**；
+（v0.7 最终构建：host 1,358,014 B / sha256 `37ca9097…`、client 389,499 B）同样 **3/3 通过、0.8s ready、约 0.02s/会话**；
 这也是本轮 Lead 集成验证口径中的 `verify:host` 结果。
 
 > 历史触发条件：该 bug 存在于修复提交 `1ab6ec9` 之前的 v0.5 构建（旧构建已不可重建，只能通过中性化

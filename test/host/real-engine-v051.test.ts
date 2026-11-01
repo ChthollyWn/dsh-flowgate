@@ -248,6 +248,7 @@ describe('修复通道（真实引擎 + host 工具/命令）', () => {
     })
     expect(started.ok).toBe(false)
     expect(String(started.data?.error)).toContain('已有进行中的变更')
-    expect(String(started.data?.hint)).toContain('flow_fix_start')
+    // v0.7 智能准入：已有变更时推荐变更内返工，而不是再开修复车道。
+    expect(String(started.data?.hint)).toContain('flow_declare_rework')
   })
 })

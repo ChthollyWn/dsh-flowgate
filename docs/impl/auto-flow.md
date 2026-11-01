@@ -39,6 +39,10 @@
 解析优先级：safe-mode 强制 `off` > 显式 `config.takeover` > 自举检测（`observe`）> 默认 `enforce`；
 `/flow doctor` 显示生效模式与原因。
 
+**v0.7 车道选择带智能准入**：启用后无变更时的写入仍由 `R-NO-CHANGE` 拦截，但 `flow_fix_start` 会先做
+智能准入（从最近失败回执/未提交改动/项目命令推导 scope/verify，确定性复核已有变更、敏感面、过宽范围、脏工作区），
+通过才开修复通道；有进行中变更时发现 bug 应走 `flow_declare_rework`。详见 [repair-lane.md §2.3](repair-lane.md)。
+
 ## 2. 模型自评：assessment 字段
 
 `flow_new_change({ title, summary, complexityHint, riskHint, assessment })`：
